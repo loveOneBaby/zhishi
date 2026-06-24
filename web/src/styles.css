@@ -1,0 +1,11 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+#root { min-height: 100vh; }
+::selection { background: var(--sel); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--bd); border-radius: 6px; }
+@keyframes ik-pop { from { opacity: 0; transform: translateY(6px) scale(.99); } to { opacity: 1; transform: none; } }
+@keyframes ik-fade { from { opacity: 0; } to { opacity: 1; } }
+input::placeholder { color: var(--mut); opacity: .7; }
+textarea::placeholder { color: var(--mut); opacity: .7; }
+button { font-family: inherit; }
