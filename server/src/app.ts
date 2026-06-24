@@ -10,6 +10,9 @@ import {
   deleteEntry,
   reorderEntries,
   importEntries,
+  renameCategory,
+  deleteCategory,
+  buildImportPreview,
 } from './db.js';
 import { convertEntry } from './blocks-import.js';
 import { searchEntries } from './search.js';
@@ -74,6 +77,18 @@ export function createApp() {
     res.json({ ok: true, imported, entries: listEntries() });
   });
 
+  // 导入预览：解析载荷（与 /import 同样的 convertEntry）但不写库，
+  // 返回归一化后的条目与统计（新增 / 更新 / 跳过 / 按知识库），供前端确认。
+  api.post('/import/preview', (req, res) => {
+    const raw = req.body?.entries;
+    if (!Array.isArray(raw)) return res.status(400).json({ error: 'entries 必须是数组' });
+    if (raw.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
+    const assets = Array.isArray(req.body?.assets) ? req.body.assets : [];
+    const list = raw.map((e) => convertEntry(e, assets));
+    const preview = buildImportPreview(list);
+    res.json({ preview });
+  });
+
   // 排序（管理模块拖拽）：body = { ids: string[] }
   api.post('/entries/reorder', (req, res) => {
     const ids = req.body?.ids;
@@ -82,6 +97,23 @@ export function createApp() {
     }
     reorderEntries(ids);
     res.json({ ok: true, entries: listEntries() });
+  });
+
+  // 重命名知识库：body = { from: string, to: string }
+  api.post('/categories/rename', (req, res) => {
+    const from = String(req.body?.from ?? '').trim();
+    const to = String(req.body?.to ?? '').trim();
+    if (!from || !to) return res.status(400).json({ error: 'from/to 不能为空' });
+    const changed = renameCategory(from, to);
+    res.json({ ok: true, changed, entries: listEntries() });
+  });
+
+  // 删除知识库（及其下全部知识点）
+  api.delete('/categories/:name', (req, res) => {
+    const name = decodeURIComponent(req.params.name || '');
+    if (!name) return res.status(400).json({ error: 'name 不能为空' });
+    const changed = deleteCategory(name);
+    res.json({ ok: true, changed, entries: listEntries() });
   });
 
   // 更新

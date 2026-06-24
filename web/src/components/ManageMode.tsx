@@ -1,269 +1,565 @@
 import { useMemo, useRef, useState } from 'react';
-import type { CSSProperties, DragEvent } from 'react';
-import type { Entry, IndexNode } from '../types';
-import { exportAll, type EntryInput, type ImportPayload } from '../api';
-import { filterEntries } from '../search';
-import { chip } from '../ui';
+import type { CSSProperties, ReactNode } from 'react';
+import type { Entry, EntryInput } from '../types';
+import EntryEditor from './EntryEditor';
+import ImportPreviewModal from './ImportPreviewModal';
+import { exportAll, importAll, previewImport, type ImportPayload, type ImportPreview } from '../api';
 import { toast } from '../toast';
-import EntryEditorModal from './EntryEditorModal';
-import IndexTreeEditor from './IndexTreeEditor';
 
 interface Props {
   entries: Entry[];
-  onCreate: (input: EntryInput) => Promise<void>;
-  onUpdate: (id: string, input: EntryInput) => Promise<void>;
+  knownCats: string[];
+  onCreate: (input: EntryInput) => Promise<Entry>;
+  onUpdate: (id: string, input: EntryInput) => Promise<Entry>;
   onDelete: (id: string) => Promise<void>;
   onReorder: (ids: string[]) => Promise<void>;
-  onImport: (payload: ImportPayload, replace: boolean) => Promise<void>;
+  onRenameCat: (from: string, to: string) => Promise<void>;
+  onDeleteCat: (name: string) => Promise<void>;
+  onImported: (entries: Entry[]) => void;
 }
 
-function fmtDate(ms?: number): string {
-  if (!ms) return '—';
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-const cellBtn: CSSProperties = {
-  padding: '5px 11px', fontSize: 12, fontFamily: 'inherit', cursor: 'pointer',
-  background: 'transparent', border: '1px solid var(--bd)', borderRadius: 7, color: 'var(--fg)',
+const cardStyle: CSSProperties = {
+  border: '1px solid var(--bd)',
+  borderRadius: 14,
+  background: 'var(--panel)',
 };
 
-export default function ManageMode({ entries, onCreate, onUpdate, onDelete, onReorder, onImport }: Props) {
-  const fileRef = useRef<HTMLInputElement | null>(null);
+const iconBtn: CSSProperties = {
+  padding: '3px 8px',
+  border: '1px solid var(--bd)',
+  borderRadius: 8,
+  background: 'var(--bg)',
+  color: 'var(--mut)',
+  cursor: 'pointer',
+  fontSize: 12,
+};
+
+function matches(e: Entry, q: string): boolean {
+  if (!q) return true;
+  const s = q.toLowerCase();
+  return (
+    e.title.toLowerCase().includes(s) ||
+    (e.summary ?? '').toLowerCase().includes(s) ||
+    (e.py ?? '').toLowerCase().includes(s) ||
+    e.tags.some((t) => t.toLowerCase().includes(s)) ||
+    e.cat.toLowerCase().includes(s)
+  );
+}
+
+export default function ManageMode(props: Props): ReactNode {
+  const { entries, knownCats, onCreate, onUpdate, onDelete, onReorder, onRenameCat, onDeleteCat, onImported } = props;
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newCat, setNewCat] = useState('');
   const [query, setQuery] = useState('');
-  const [activeCat, setActiveCat] = useState('全部');
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [editing, setEditing] = useState<Entry | null>(null);
-  const [confirmId, setConfirmId] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const [collapsedCats, setCollapsedCats] = useState<Set<string>>(() => new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const [menuCat, setMenuCat] = useState<string | null>(null);
+  const [importPreview, setImportPreview] = useState<{ payload: ImportPayload; preview: ImportPreview } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const dirtyRef = useRef(false);
 
-  const cats = useMemo(() => {
-    const seen: string[] = [];
-    for (const e of entries) if (!seen.includes(e.cat)) seen.push(e.cat);
-    return seen;
-  }, [entries]);
-
+  const filtered = useMemo(() => entries.filter((e) => matches(e, query.trim())), [entries, query]);
   const searching = query.trim().length > 0;
-  const matchedIds = useMemo(
-    () => (searching ? new Set(filterEntries(entries, query).map((e) => e.id)) : null),
-    [entries, query, searching]
-  );
 
-  // 按知识库分组（保持服务端的 sort 顺序）
   const groups = useMemo(() => {
+    const order: string[] = [];
     const map = new Map<string, Entry[]>();
-    for (const e of entries) {
-      if (activeCat !== '全部' && e.cat !== activeCat) continue;
-      if (matchedIds && !matchedIds.has(e.id)) continue;
-      if (!map.has(e.cat)) map.set(e.cat, []);
+    for (const e of filtered) {
+      if (!map.has(e.cat)) {
+        map.set(e.cat, []);
+        order.push(e.cat);
+      }
       map.get(e.cat)!.push(e);
     }
-    return cats.filter((c) => map.has(c)).map((c) => ({ cat: c, items: map.get(c)! }));
-  }, [entries, cats, activeCat, matchedIds]);
+    return order.map((cat) => ({ cat, items: map.get(cat)! }));
+  }, [filtered]);
 
-  const shownCount = groups.reduce((n, g) => n + g.items.length, 0);
+  const selectedEntry = useMemo(
+    () => (selectedId ? entries.find((e) => e.id === selectedId) ?? null : null),
+    [entries, selectedId]
+  );
 
-  function openCreate() { setEditing(null); setEditorOpen(true); }
-  function openEdit(e: Entry) { setEditing(e); setEditorOpen(true); }
-  function toggleExpand(id: string) {
-    setExpanded((cur) => { const n = new Set(cur); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  }
-  function toggleCat(cat: string) {
-    setCollapsedCats((cur) => { const n = new Set(cur); n.has(cat) ? n.delete(cat) : n.add(cat); return n; });
-  }
+  const onDirtyChange = (d: boolean): void => {
+    dirtyRef.current = d;
+  };
 
-  async function handleSubmit(input: EntryInput) {
-    if (editing) await onUpdate(editing.id, input);
-    else await onCreate(input);
-    setEditorOpen(false);
-    setEditing(null);
-    toast(editing ? '知识点已更新' : '知识点已创建', 'success');
+  function guard(then: () => void): void {
+    if (dirtyRef.current) {
+      if (!window.confirm('当前知识点有未保存的修改，放弃修改？')) return;
+      dirtyRef.current = false;
+    }
+    then();
   }
 
-  // 保存某知识点的多级索引（仅改 intro / nodes，其余字段保持）
-  async function handleSaveIndex(e: Entry, intro: string, nodes: IndexNode[]) {
-    await onUpdate(e.id, { title: e.title, cat: e.cat, tags: e.tags, summary: e.summary, intro, nodes });
-    toast('索引已保存', 'success');
+  function selectEntry(id: string): void {
+    guard(() => {
+      setSelectedId(id);
+      setCreating(false);
+    });
   }
 
-  async function handleDelete(id: string) {
-    setBusyId(id);
-    try { await onDelete(id); setConfirmId(null); toast('已删除', 'success'); }
-    catch (e) { toast('删除失败：' + (e instanceof Error ? e.message : String(e)), 'error'); }
-    finally { setBusyId(null); }
+  function startCreate(cat?: string): void {
+    guard(() => {
+      setNewCat(cat ?? '');
+      setCreating(true);
+      setSelectedId(null);
+    });
   }
 
-  async function handleExport() {
+  function closeEditor(): void {
+    guard(() => {
+      setCreating(false);
+      setSelectedId(null);
+    });
+  }
+
+  function toggleCat(cat: string): void {
+    setCollapsed((s) => {
+      const copy = new Set(s);
+      if (copy.has(cat)) copy.delete(cat);
+      else copy.add(cat);
+      return copy;
+    });
+  }
+
+  function catOf(id: string): string | undefined {
+    return entries.find((e) => e.id === id)?.cat;
+  }
+
+  function dropEntry(overEId: string): void {
+    if (!dragId || dragId === overEId) {
+      setDragId(null);
+      setOverId(null);
+      return;
+    }
+    if (catOf(dragId) !== catOf(overEId)) {
+      toast('只能在同一知识库内拖拽排序', 'info');
+      setDragId(null);
+      setOverId(null);
+      return;
+    }
+    const ids = entries.map((e) => e.id);
+    const from = ids.indexOf(dragId);
+    const to = ids.indexOf(overEId);
+    if (from < 0 || to < 0) {
+      setDragId(null);
+      setOverId(null);
+      return;
+    }
+    const [moved] = ids.splice(from, 1);
+    ids.splice(to, 0, moved);
+    onReorder(ids).finally(() => {
+      setDragId(null);
+      setOverId(null);
+    });
+  }
+
+  async function handleExport(): Promise<void> {
     try {
-      const data = await exportAll();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const all = await exportAll();
+      const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      const stamp = new Date().toISOString().slice(0, 10);
       a.href = url;
-      a.download = `知识库备份-${stamp}.json`;
+      a.download = `knowledge-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      toast(`已导出 ${data.entries.length} 条`, 'success');
+      toast('已导出全量知识点', 'success');
     } catch (e) {
       toast('导出失败：' + (e instanceof Error ? e.message : String(e)), 'error');
     }
   }
 
-  async function handleImportFile(file: File) {
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
+  function handleImport(e: React.ChangeEvent<HTMLInputElement>): void {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(String(reader.result));
+      } catch (err) {
+        toast('文件解析失败：' + (err instanceof Error ? err.message : String(err)), 'error');
+        return;
+      }
       // 兼容：纯数组、{ entries }、kb-import-2 的 { version, assets, entries }
-      const entries: unknown[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.entries) ? parsed.entries : [];
+      const obj = parsed as { version?: string; assets?: unknown[]; entries?: unknown[] };
+      const entries: unknown[] = Array.isArray(parsed)
+        ? (parsed as unknown[])
+        : Array.isArray(obj?.entries)
+        ? obj.entries
+        : [];
       if (!entries.length) { toast('文件中没有可导入的知识点', 'error'); return; }
-      const replace = window.confirm(`将导入 ${entries.length} 条。\n\n确定 = 覆盖替换（先清空现有，再整体导入）\n取消 = 合并（按 id 更新已有、新增其余）`);
-      await onImport({ version: parsed?.version, assets: parsed?.assets, entries }, replace);
-      toast(`已${replace ? '替换' : '合并'}导入 ${entries.length} 条`, 'success');
-    } catch (e) {
-      toast('导入失败：' + (e instanceof Error ? e.message : String(e)), 'error');
+      const payload: ImportPayload = { version: obj?.version, assets: obj?.assets, entries };
+      previewImport(payload)
+        .then((preview) => setImportPreview({ payload, preview }))
+        .catch((err) => toast('解析失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }
+
+  // 确认导入：replace=false 合并（按 id 更新已有、新增其余）；true 先清空再整体导入
+  async function handleConfirmImport(replace: boolean): Promise<void> {
+    if (!importPreview) return;
+    const { payload, preview } = importPreview;
+    setImporting(true);
+    try {
+      const next = await importAll(payload, replace);
+      onImported(next);
+      toast(`已${replace ? '替换' : '合并'}导入 ${preview.valid} 条知识点`, 'success');
+      setImportPreview(null);
+    } catch (err) {
+      toast('导入失败：' + (err instanceof Error ? err.message : String(err)), 'error');
+    } finally {
+      setImporting(false);
     }
   }
 
-  // 组内拖拽排序
-  function handleDrop(cat: string, toId: string) {
-    if (!dragId || dragId === toId) return;
-    const groupIds = entries.filter((e) => e.cat === cat).map((e) => e.id);
-    const from = groupIds.indexOf(dragId);
-    const to = groupIds.indexOf(toId);
-    setDragId(null);
-    setOverId(null);
-    if (from < 0 || to < 0 || from === to) return;
-    const next = [...groupIds];
-    next.splice(from, 1);
-    next.splice(to, 0, dragId);
-    void onReorder(next);
+  function renameCat(cat: string): void {
+    const next = window.prompt(`重命名知识库「${cat}」为：`, cat);
+    if (!next || next.trim() === cat || !next.trim()) return;
+    onRenameCat(cat, next.trim()).catch((err) =>
+      toast('重命名失败：' + (err instanceof Error ? err.message : String(err)), 'error')
+    );
+    setMenuCat(null);
   }
 
-  const dragEnabled = !searching; // 搜索态禁用拖拽（避免在过滤结果上误排序）
+  function removeCat(cat: string): void {
+    const count = entries.filter((e) => e.cat === cat).length;
+    if (!window.confirm(`确定删除知识库「${cat}」及其下 ${count} 条知识点？此操作不可撤销。`)) return;
+    onDeleteCat(cat).catch((err) =>
+      toast('删除失败：' + (err instanceof Error ? err.message : String(err)), 'error')
+    );
+    setMenuCat(null);
+    if (selectedEntry && selectedEntry.cat === cat) closeEditor();
+  }
+
+  const editorKey = creating ? '__new__' : selectedId ?? '__none__';
 
   return (
-    <div style={{ padding: '28px 0 60px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>知识点管理</div>
-          <div style={{ fontSize: 12.5, color: 'var(--mut)', marginTop: 3 }}>共 {entries.length} 条 · {cats.length} 个知识库 · 当前显示 {shownCount} 条</div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/json,.json"
-            style={{ display: 'none' }}
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportFile(f); e.target.value = ''; }}
-          />
-          <button onClick={handleExport} style={{ padding: '10px 14px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'transparent', color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 9 }}>导出</button>
-          <button onClick={() => fileRef.current?.click()} style={{ padding: '10px 14px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'transparent', color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 9 }}>导入</button>
-          <button onClick={openCreate} style={{ padding: '10px 18px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'var(--fg)', color: 'var(--bg)', border: 'none', borderRadius: 9, fontWeight: 600 }}>＋ 新建知识点</button>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)' }}>
+      {/* 顶部工具栏 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 0',
+          flex: '0 0 auto',
+        }}
+      >
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="搜索知识点（标题 / 摘要 / 标签 / 知识库）…"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: '9px 13px',
+            border: '1px solid var(--bd)',
+            borderRadius: 10,
+            background: 'var(--panel)',
+            color: 'var(--fg)',
+            fontSize: 14,
+            outline: 'none',
+          }}
+        />
+        <button type="button" style={{ ...iconBtn, padding: '8px 12px' }} onClick={() => startCreate()}>
+          ＋ 新建知识点
+        </button>
+        <button
+          type="button"
+          style={iconBtn}
+          onClick={() => {
+            const name = window.prompt('新知识库名称：');
+            if (name && name.trim()) startCreate(name.trim());
+          }}
+          title="新建一个知识库（并在此库下新建第一条知识点）"
+        >
+          ＋ 新知识库
+        </button>
+        <button type="button" style={iconBtn} onClick={handleExport}>
+          导出
+        </button>
+        <label style={{ ...iconBtn, cursor: 'pointer' }}>
+          导入
+          <input type="file" accept="application/json" onChange={handleImport} style={{ display: 'none' }} />
+        </label>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 200 }}>
-          <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--mut)', fontSize: 15 }}>⌕</span>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索标题、拼音、标签、内容…" spellCheck={false}
-            style={{ width: '100%', padding: '10px 14px 10px 40px', fontSize: 14, fontFamily: 'inherit', color: 'var(--fg)', background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 10, outline: 'none' }} />
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {['全部', ...cats].map((c) => (
-            <button key={c} style={chip(activeCat === c)} onClick={() => setActiveCat(c)}>{c}</button>
-          ))}
-        </div>
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--mut)', marginBottom: 14 }}>
-        {searching ? '搜索态下暂停拖拽排序，清空搜索后可拖动 ⠿ 调整顺序。' : '拖动每行左侧 ⠿ 可在同一知识库内调整顺序 · 点击 ▸ 展开查看二级标题与正文预览。'}
-      </div>
-
-      {groups.length === 0 && (
-        <div style={{ padding: 40, textAlign: 'center', color: 'var(--mut)', fontSize: 13, border: '1px solid var(--bd)', borderRadius: 12 }}>没有匹配的知识点</div>
-      )}
-
-      {groups.map((g) => {
-        const catCollapsed = collapsedCats.has(g.cat);
-        return (
-          <div key={g.cat} style={{ marginBottom: 16, border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden' }}>
-            <div onClick={() => toggleCat(g.cat)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', background: 'var(--sel)', cursor: 'pointer' }}>
-              <span style={{ fontSize: 11, color: 'var(--mut)', width: 12 }}>{catCollapsed ? '▸' : '▾'}</span>
-              <span style={{ fontSize: 14, fontWeight: 700 }}>{g.cat}</span>
-              <span style={{ fontSize: 12, color: 'var(--mut)' }}>{g.items.length} 条</span>
+      {/* 主从布局 */}
+      <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
+        {/* 左栏 */}
+        <aside
+          style={{
+            width: 320,
+            flex: '0 0 320px',
+            ...cardStyle,
+            overflow: 'auto',
+            padding: '8px 8px 12px',
+          }}
+        >
+          {entries.length === 0 ? (
+            <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--mut)', fontSize: 13 }}>
+              还没有知识点。
+              <br />
+              <button
+                type="button"
+                style={{ ...iconBtn, marginTop: 10, padding: '7px 12px' }}
+                onClick={() => startCreate()}
+              >
+                ＋ 新建第一条
+              </button>
             </div>
-
-            {!catCollapsed && g.items.map((e) => {
-              const isOpen = expanded.has(e.id);
-              const idxCount = e.nodes.length;
-              const canDrag = dragEnabled;
+          ) : groups.length === 0 ? (
+            <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--mut)', fontSize: 13 }}>
+              未匹配到「{query}」
+            </div>
+          ) : (
+            groups.map((g) => {
+              const isCol = collapsed.has(g.cat) && !searching;
+              const count = g.items.length;
               return (
-                <div
-                  key={e.id}
-                  onDragOver={(ev: DragEvent) => { if (dragId) { ev.preventDefault(); if (overId !== e.id) setOverId(e.id); } }}
-                  onDrop={(ev: DragEvent) => { ev.preventDefault(); handleDrop(g.cat, e.id); }}
-                  style={{ borderTop: '1px solid var(--bd)', background: overId === e.id && dragId ? 'var(--sel)' : 'transparent', opacity: dragId === e.id ? 0.45 : 1 }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px' }}>
+                <div key={g.cat} style={{ marginBottom: 4 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 6px',
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                    onClick={() => toggleCat(g.cat)}
+                  >
+                    <span style={{ color: 'var(--mut)', fontSize: 12, width: 12 }}>{isCol ? '▸' : '▾'}</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--mut)' }}>{g.cat}</span>
                     <span
-                      draggable={canDrag}
-                      onDragStart={() => canDrag && setDragId(e.id)}
-                      onDragEnd={() => { setDragId(null); setOverId(null); }}
-                      title={canDrag ? '拖动排序' : '清空搜索后可拖动'}
-                      style={{ cursor: canDrag ? 'grab' : 'not-allowed', color: 'var(--mut)', fontSize: 15, userSelect: 'none', width: 16, textAlign: 'center', opacity: canDrag ? 1 : 0.4 }}
-                    >⠿</span>
-                    <button onClick={() => toggleExpand(e.id)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--mut)', fontSize: 11, width: 14, padding: 0 }}>{isOpen ? '▾' : '▸'}</button>
-                    <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => toggleExpand(e.id)}>
-                      <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {e.title}
-                        {idxCount > 0 && <span style={{ fontSize: 11, color: 'var(--mut)', fontWeight: 400, marginLeft: 8 }}>· {idxCount} 个二级索引</span>}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--mut)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>{e.summary}</div>
-                    </div>
-                    <span style={{ fontSize: 11.5, color: 'var(--mut)', flexShrink: 0, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.tags.join('、')}</span>
-                    <span style={{ fontSize: 11.5, color: 'var(--mut)', flexShrink: 0, width: 116 }}>{fmtDate(e.updatedAt)}</span>
-                    <span style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                      {confirmId === e.id ? (
-                        <>
-                          <button onClick={() => handleDelete(e.id)} disabled={busyId === e.id} style={{ ...cellBtn, color: 'var(--bg)', background: 'var(--danger)', border: 'none' }}>{busyId === e.id ? '…' : '确认删除'}</button>
-                          <button onClick={() => setConfirmId(null)} style={cellBtn}>取消</button>
-                        </>
-                      ) : (
-                        <>
-                          <button onClick={() => openEdit(e)} style={cellBtn}>编辑</button>
-                          <button onClick={() => setConfirmId(e.id)} style={{ ...cellBtn, color: 'var(--danger)' }}>删除</button>
-                        </>
-                      )}
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--mut)',
+                        background: 'var(--bg)',
+                        border: '1px solid var(--bd)',
+                        borderRadius: 20,
+                        padding: '0 7px',
+                      }}
+                    >
+                      {count}
                     </span>
+                    <div style={{ flex: 1 }} />
+                    <button
+                      type="button"
+                      style={{ ...iconBtn, padding: '2px 6px' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuCat(menuCat === g.cat ? null : g.cat);
+                      }}
+                      title="知识库操作"
+                    >
+                      ⋯
+                    </button>
                   </div>
-
-                  {isOpen && (
-                    <div style={{ padding: '10px 18px 18px 56px', borderTop: '1px dashed var(--bd)' }}>
-                      <IndexTreeEditor
-                        intro={e.intro}
-                        nodes={e.nodes}
-                        onSave={(intro, nodes) => handleSaveIndex(e, intro, nodes)}
-                      />
+                  {menuCat === g.cat && (
+                    <div
+                      style={{
+                        margin: '2px 22px 6px',
+                        border: '1px solid var(--bd)',
+                        borderRadius: 8,
+                        background: 'var(--bg)',
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', border: 'none', background: 'transparent', color: 'var(--fg)', cursor: 'pointer', fontSize: 13 }}
+                        onClick={() => renameCat(g.cat)}
+                      >
+                        ✎ 重命名知识库
+                      </button>
+                      <button
+                        type="button"
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', border: 'none', background: 'transparent', color: 'var(--danger)', cursor: 'pointer', fontSize: 13 }}
+                        onClick={() => removeCat(g.cat)}
+                      >
+                        🗑 删除知识库
+                      </button>
+                    </div>
+                  )}
+                  {!isCol && (
+                    <div style={{ margin: '2px 0 6px' }}>
+                      {g.items.map((e) => {
+                        const active = !creating && selectedId === e.id;
+                        const over = overId === e.id;
+                        return (
+                          <div
+                            key={e.id}
+                            draggable
+                            onDragStart={() => setDragId(e.id)}
+                            onDragEnd={() => {
+                              setDragId(null);
+                              setOverId(null);
+                            }}
+                            onDragOver={(ev) => {
+                              if (dragId && dragId !== e.id) {
+                                ev.preventDefault();
+                                setOverId(e.id);
+                              }
+                            }}
+                            onDrop={(ev) => {
+                              ev.preventDefault();
+                              ev.stopPropagation();
+                              dropEntry(e.id);
+                            }}
+                            onClick={() => selectEntry(e.id)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              padding: '7px 10px',
+                              margin: '2px 4px',
+                              borderRadius: 9,
+                              cursor: 'pointer',
+                              border: '1px solid transparent',
+                              background: active
+                                ? 'var(--sel)'
+                                : over
+                                ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
+                                : 'transparent',
+                              opacity: dragId === e.id ? 0.5 : 1,
+                              borderTop: over ? '2px solid var(--accent)' : '2px solid transparent',
+                            }}
+                          >
+                            <span style={{ color: 'var(--mut)', cursor: 'grab', fontSize: 12 }}>⠿</span>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: active ? 700 : 600,
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  color: 'var(--fg)',
+                                }}
+                              >
+                                {e.title}
+                              </div>
+                              {e.summary ? (
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    color: 'var(--mut)',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    marginTop: 1,
+                                  }}
+                                >
+                                  {e.summary}
+                                </div>
+                              ) : null}
+                            </div>
+                            <span
+                              role="button"
+                              style={{ color: 'var(--mut)', fontSize: 12, padding: '2px 4px', cursor: 'pointer' }}
+                              title="删除"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                if (window.confirm(`删除知识点「${e.title}」？`)) {
+                                  onDelete(e.id).then(() => {
+                                    if (selectedId === e.id) setSelectedId(null);
+                                    toast('已删除', 'success');
+                                  });
+                                }
+                              }}
+                            >
+                              ✕
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
               );
-            })}
-          </div>
-        );
-      })}
+            })
+          )}
+        </aside>
 
-      {editorOpen && (
-        <EntryEditorModal
-          initial={editing}
-          knownCats={cats}
-          onClose={() => { setEditorOpen(false); setEditing(null); }}
-          onSubmit={handleSubmit}
+        {/* 右栏：统一编辑器 */}
+        <main
+          style={{
+            flex: '1 1 auto',
+            minWidth: 0,
+            ...cardStyle,
+            overflow: 'auto',
+            padding: '12px 16px 24px',
+          }}
+        >
+          {creating ? (
+            <EntryEditor
+              key={editorKey}
+              initial={null}
+              knownCats={knownCats}
+              defaultCat={newCat}
+              onDirtyChange={onDirtyChange}
+              onCancel={closeEditor}
+              onSave={(input) =>
+                onCreate(input).then((entry) => {
+                  setCreating(false);
+                  setSelectedId(entry.id);
+                  return entry;
+                })
+              }
+            />
+          ) : selectedEntry ? (
+            <EntryEditor
+              key={editorKey}
+              initial={selectedEntry}
+              knownCats={knownCats}
+              onDirtyChange={onDirtyChange}
+              onCancel={closeEditor}
+              onSave={(input) => onUpdate(selectedEntry.id, input)}
+            />
+          ) : (
+            <div
+              style={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--mut)',
+                gap: 10,
+              }}
+            >
+              <div style={{ fontSize: 40 }}>📚</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--fg)' }}>选择左侧知识点进行编辑</div>
+              <div style={{ fontSize: 13 }}>或点击「＋ 新建知识点」开始构建</div>
+              <button
+                type="button"
+                style={{ ...iconBtn, marginTop: 6, padding: '8px 14px', background: 'var(--accent)', color: '#fff', border: 'none' }}
+                onClick={() => startCreate()}
+              >
+                ＋ 新建知识点
+              </button>
+            </div>
+          )}
+        </main>
+      </div>
+
+      {importPreview && (
+        <ImportPreviewModal
+          payload={importPreview.payload}
+          preview={importPreview.preview}
+          busy={importing}
+          onClose={() => { if (!importing) setImportPreview(null); }}
+          onConfirm={handleConfirmImport}
         />
       )}
     </div>

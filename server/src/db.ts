@@ -238,6 +238,22 @@ export function deleteEntry(id: string): boolean {
   return Number(info.changes) > 0;
 }
 
+// 重命名知识库：把该分类下所有知识点的 cat 改为新名（用于管理模块的「重命名知识库」）
+export function renameCategory(from: string, to: string): number {
+  const target = to.trim();
+  if (!from || !target || from === target) return 0;
+  const now = Date.now();
+  const info = db.prepare('UPDATE entries SET cat = ?, updatedAt = ? WHERE cat = ?').run(target, now, from);
+  return Number(info.changes);
+}
+
+// 删除知识库：删除该分类下的全部知识点（用于管理模块的「删除知识库」）
+export function deleteCategory(name: string): number {
+  if (!name) return 0;
+  const info = db.prepare('DELETE FROM entries WHERE cat = ?').run(name);
+  return Number(info.changes);
+}
+
 // 批量导入（备份恢复 / 迁移）。replace=true 先清空；按 id upsert，兼容旧 body 字段。
 export interface ImportEntry {
   id?: string;
@@ -249,6 +265,82 @@ export interface ImportEntry {
   intro?: string;
   nodes?: IndexNode[];
   body?: string;
+}
+
+// 查询给定 id 中已存在于库内的（用于导入预览判定「新增 / 更新」）
+export function existingIds(ids: string[]): Set<string> {
+  const result = new Set<string>();
+  const unique = [...new Set(ids.filter((x): x is string => typeof x === 'string' && x.length > 0))];
+  if (!unique.length) return result;
+  // 分批 IN 查询，避免单条往返与变量数上限
+  const CHUNK = 500;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const slice = unique.slice(i, i + CHUNK);
+    const placeholders = slice.map(() => '?').join(',');
+    const rows = db.prepare(`SELECT id FROM entries WHERE id IN (${placeholders})`).all(...slice) as { id: string }[];
+    for (const r of rows) result.add(r.id);
+  }
+  return result;
+}
+
+// 导入预览：对已 convertEntry 过的列表做归一化展示与统计，但不写库。
+// 解析逻辑与 importEntries 一致（normalizeIndex / parseBodyToIndex / deriveSummary）。
+export interface PreviewEntry {
+  id?: string;
+  cat: string;
+  title: string;
+  tags: string[];
+  summary: string;
+  intro: string;
+  nodes: IndexNode[];
+  exists: boolean;   // id 命中已有 → 将更新；否则新增
+  valid: boolean;    // 标题非空 → 有效；否则导入时会被跳过
+}
+
+export interface ImportPreview {
+  total: number;       // 解析到的条目总数
+  valid: number;       // 将导入的有效条目数
+  skipped: number;     // 将被跳过的无效条目数
+  newCount: number;    // 新增
+  updateCount: number; // 更新
+  byCat: { cat: string; count: number }[];
+  entries: PreviewEntry[];
+}
+
+export function buildImportPreview(list: ImportEntry[]): ImportPreview {
+  const ids = list.map((e) => e.id).filter((x): x is string => typeof x === 'string' && x.length > 0);
+  const existing = existingIds(ids);
+  const entries: PreviewEntry[] = [];
+  let valid = 0, skipped = 0, newCount = 0, updateCount = 0;
+  const catMap = new Map<string, number>();
+  for (const raw of list) {
+    const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+    const isValid = Boolean(title);
+    const tree = (raw.nodes !== undefined || raw.intro !== undefined)
+      ? normalizeIndex({ intro: raw.intro ?? '', nodes: raw.nodes ?? [] })
+      : parseBodyToIndex(raw.body ?? '');
+    const cat = (raw.cat && String(raw.cat).trim()) || '自定义';
+    const exists = typeof raw.id === 'string' && raw.id.length > 0 && existing.has(raw.id);
+    entries.push({
+      id: typeof raw.id === 'string' && raw.id ? raw.id : undefined,
+      cat,
+      title: title || '（无标题）',
+      tags: Array.isArray(raw.tags) ? raw.tags : [],
+      summary: (raw.summary && raw.summary.trim()) ? raw.summary.trim() : deriveSummary({}, tree),
+      intro: tree.intro,
+      nodes: tree.nodes,
+      exists,
+      valid: isValid,
+    });
+    if (!isValid) { skipped += 1; continue; }
+    valid += 1;
+    if (exists) updateCount += 1; else newCount += 1;
+    catMap.set(cat, (catMap.get(cat) ?? 0) + 1);
+  }
+  const byCat = [...catMap.entries()]
+    .map(([cat, count]) => ({ cat, count }))
+    .sort((a, b) => b.count - a.count);
+  return { total: list.length, valid, skipped, newCount, updateCount, byCat, entries };
 }
 
 export function importEntries(list: ImportEntry[], replace: boolean): { imported: number } {

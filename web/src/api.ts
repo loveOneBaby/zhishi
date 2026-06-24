@@ -1,4 +1,4 @@
-import type { Entry, IndexNode } from './types';
+import type { Entry, EntryInput, IndexNode } from './types';
 
 const BASE = '/api';
 
@@ -16,18 +16,8 @@ export async function fetchEntries(): Promise<Entry[]> {
   return data.entries;
 }
 
-// 知识点录入 / 编辑的输入。summary、py 可留空，服务端会自动推导。
-export interface EntryInput {
-  title: string;
-  cat: string;
-  tags: string[];
-  summary?: string;
-  py?: string;
-  intro?: string;
-  nodes?: IndexNode[];
-}
-
 // 兼容旧引用
+export type { EntryInput };
 export type NewEntryInput = EntryInput;
 
 export async function createEntry(input: EntryInput): Promise<Entry> {
@@ -66,6 +56,24 @@ export async function reorderEntries(ids: string[]): Promise<Entry[]> {
   return data.entries;
 }
 
+// 重命名知识库，返回更新后的全量列表
+export async function renameCategory(from: string, to: string): Promise<Entry[]> {
+  const res = await fetch(`${BASE}/categories/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, to }),
+  });
+  const data = await j<{ entries: Entry[] }>(res);
+  return data.entries;
+}
+
+// 删除知识库（及其下全部知识点），返回更新后的全量列表
+export async function deleteCategory(name: string): Promise<Entry[]> {
+  const res = await fetch(`${BASE}/categories/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  const data = await j<{ entries: Entry[] }>(res);
+  return data.entries;
+}
+
 export interface ExportPayload {
   version: string;
   exportedAt: number;
@@ -91,6 +99,39 @@ export async function importAll(payload: ImportPayload, replace: boolean): Promi
   });
   const data = await j<{ entries: Entry[] }>(res);
   return data.entries;
+}
+
+// 导入预览：解析载荷但不写库，返回将导入的条目与统计。与 importAll 同构输入。
+export interface PreviewEntry {
+  id?: string;
+  cat: string;
+  title: string;
+  tags: string[];
+  summary: string;
+  intro: string;
+  nodes: IndexNode[];
+  exists: boolean;   // id 命中已有 → 将更新；否则新增
+  valid: boolean;    // 标题非空 → 有效；否则导入时会被跳过
+}
+
+export interface ImportPreview {
+  total: number;
+  valid: number;
+  skipped: number;
+  newCount: number;
+  updateCount: number;
+  byCat: { cat: string; count: number }[];
+  entries: PreviewEntry[];
+}
+
+export async function previewImport(payload: ImportPayload): Promise<ImportPreview> {
+  const res = await fetch(`${BASE}/import/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await j<{ preview: ImportPreview }>(res);
+  return data.preview;
 }
 
 export interface AskResponse {

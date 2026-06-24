@@ -20,6 +20,17 @@ export interface Entry {
   updatedAt?: number;
 }
 
+// 知识点录入 / 编辑的输入。summary、py 可留空，服务端会自动推导。
+export interface EntryInput {
+  title: string;
+  cat: string;
+  tags: string[];
+  summary?: string;
+  py?: string;
+  intro?: string;
+  nodes?: IndexNode[];
+}
+
 export type ThemeKey = 'mono' | 'ink' | 'paper';
 
 export interface Theme {

@@ -1,17 +1,25 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { Entry, ThemeKey } from './types';
 import { THEMES, themeVars } from './themes';
-import { filterEntries, suggestQueries } from './search';
-import { fetchEntries, createEntry, updateEntry, deleteEntry, reorderEntries, importAll, type NewEntryInput, type EntryInput, type ImportPayload } from './api';
+import { filterEntries, suggestQueries, type SearchSuggestion } from './search';
+import {
+  fetchEntries,
+  createEntry,
+  updateEntry,
+  deleteEntry,
+  reorderEntries,
+  renameCategory,
+  deleteCategory,
+  type EntryInput,
+} from './api';
 import TopBar, { type AppMode } from './components/TopBar';
 import SearchMode from './components/SearchMode';
 import FreeMode from './components/FreeMode';
 import ManageMode from './components/ManageMode';
 import DetailModal from './components/DetailModal';
 import AskModal from './components/AskModal';
-import NewEntryModal from './components/NewEntryModal';
+import EntryEditor from './components/EntryEditor';
 import Toaster from './components/Toaster';
-import { toast } from './toast';
 
 export default function App() {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -21,6 +29,7 @@ export default function App() {
   const [viewType, setViewType] = useState<'list' | 'canvas'>('canvas');
   const [query, setQuery] = useState('');
   const [sel, setSel] = useState(0);
+  const [sugSel, setSugSel] = useState(-1);   // 联想下拉的键盘选中项（-1 = 无）
   const [theme, setThemeState] = useState<ThemeKey>('mono');
   const [freeCat, setFreeCat] = useState('全部');
 
@@ -61,59 +70,95 @@ export default function App() {
   const clearSearch = useCallback(() => {
     setQuery('');
     setSel(0);
+    setSugSel(-1);
     setOpenId(null);
     setAiOpen(false);
     setTimeout(() => inputRef.current?.focus(), 20);
   }, []);
   const isSearchList = mode === 'search' && viewType === 'list';
 
-  // 键盘交互：方向键选择、回车展开 / 触发 AI、esc 清空
+  // ⌘K / Ctrl+K 呼出搜索：切到检索模式 + 清空 + 聚焦输入框（任意页面可用）
+  const summonSearch = useCallback(() => {
+    setMode('search');
+    setQuery('');
+    setSel(0);
+    setSugSel(-1);
+    setOpenId(null);
+    setAiOpen(false);
+    setFormOpen(false);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  // 应用一条联想：有 entryId 直接打开详情，否则作为查询填入
+  const applySuggestion = useCallback((s: SearchSuggestion) => {
+    setQuery(s.value);
+    setSugSel(-1);
+    if (s.entryId) setOpenId(s.entryId);
+    else { setOpenId(null); setSel(0); }
+  }, []);
+
+  // 键盘交互：⌘K 呼出搜索、联想下拉的 ↑↓ 选择 / ↵ 应用、esc 关闭
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      // 全局：⌘K / Ctrl+K 呼出搜索（任意模式、任意焦点）
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        summonSearch();
+        return;
+      }
       const modalOpen = Boolean(openId && !isSearchList);
       if (modalOpen || aiOpen || formOpen) { if (e.key === 'Escape') closeAll(); return; }
       if (mode !== 'search') return;
       if (viewType === 'canvas') { if (e.key === 'Escape' && query) { setQuery(''); setSel(0); } return; }
+
+      // 有联想时：↑↓ 走联想下拉；否则保持原有的「结果列表」选择
+      const hasSug = suggestions.length > 0;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        if (hasSug) { setSugSel((s) => (s + 1) % suggestions.length); setOpenId(null); return; }
+        setSugSel(-1);
         setOpenId(null);
         setSel((s) => Math.min(s + 1, results.length - 1));
       }
       else if (e.key === 'ArrowUp') {
         e.preventDefault();
+        if (hasSug) { setSugSel((s) => (s - 1 + suggestions.length) % suggestions.length); setOpenId(null); return; }
+        setSugSel(-1);
         setOpenId(null);
         setSel((s) => Math.max(0, s - 1));
       }
       else if (e.key === 'Enter') {
         e.preventDefault();
+        if (sugSel >= 0 && suggestions[sugSel]) { applySuggestion(suggestions[sugSel]); return; }
         const clamped = Math.min(sel, Math.max(0, results.length - 1));
         if (results[clamped]) setOpenId(results[clamped].id);
         else if (query.trim()) setAiOpen(true);
-      } else if (e.key === 'Escape') { if (query) { setQuery(''); setSel(0); } }
+      } else if (e.key === 'Escape') {
+        if (sugSel >= 0) { setSugSel(-1); return; }   // 先关联想下拉
+        if (query) { setQuery(''); setSel(0); setSugSel(-1); }
+      }
     }
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [openId, aiOpen, formOpen, isSearchList, mode, viewType, query, sel, results, closeAll]);
-
-  async function handleSave(input: NewEntryInput) {
-    try {
-      const entry = await createEntry(input);
-      setEntries((prev) => [...prev, entry]);
-      setFormOpen(false);
-    } catch (e) {
-      toast('保存失败：' + (e instanceof Error ? e.message : String(e)), 'error');
-    }
-  }
+  }, [openId, aiOpen, formOpen, isSearchList, mode, viewType, query, sel, results, suggestions, sugSel, closeAll, summonSearch, applySuggestion]);
 
   // 管理模块的增删改：直接同步到共享 entries，检索/画布即时反映
-  const handleCreate = useCallback(async (input: EntryInput) => {
+  const knownCats = useMemo(() => {
+    const seen: string[] = [];
+    for (const e of entries) if (!seen.includes(e.cat)) seen.push(e.cat);
+    return seen;
+  }, [entries]);
+
+  const handleCreate = useCallback(async (input: EntryInput): Promise<Entry> => {
     const entry = await createEntry(input);
     setEntries((prev) => [...prev, entry]);
+    return entry;
   }, []);
-  const handleUpdate = useCallback(async (id: string, input: EntryInput) => {
+  const handleUpdate = useCallback(async (id: string, input: EntryInput): Promise<Entry> => {
     const entry = await updateEntry(id, input);
     setEntries((prev) => prev.map((e) => (e.id === id ? entry : e)));
     setOpenId((cur) => (cur === id ? null : cur));
+    return entry;
   }, []);
   const handleDelete = useCallback(async (id: string) => {
     await deleteEntry(id);
@@ -124,9 +169,17 @@ export default function App() {
     const next = await reorderEntries(ids);
     setEntries(next);
   }, []);
-  const handleImport = useCallback(async (payload: ImportPayload, replace: boolean) => {
-    const next = await importAll(payload, replace);
+  const handleImported = useCallback((next: Entry[]) => {
     setEntries(next);
+  }, []);
+  const handleRenameCat = useCallback(async (from: string, to: string) => {
+    const next = await renameCategory(from, to);
+    setEntries(next);
+  }, []);
+  const handleDeleteCat = useCallback(async (name: string) => {
+    const next = await deleteCategory(name);
+    setEntries(next);
+    setOpenId(null);
   }, []);
 
   const openEntry = openId ? entries.find((e) => e.id === openId) ?? null : null;
@@ -145,9 +198,13 @@ export default function App() {
           <SearchMode
             ref={inputRef}
             query={query}
-            onInput={(v) => { setQuery(v); setSel(0); setOpenId(null); }}
+            onInput={(v) => { setQuery(v); setSel(0); setOpenId(null); setSugSel(-1); }}
             results={results}
             suggestions={suggestions}
+            sugSel={sugSel}
+            onSugHover={(i) => setSugSel(i)}
+            onSugActivate={(i) => { if (suggestions[i]) applySuggestion(suggestions[i]); }}
+            onSummon={summonSearch}
             sel={sel}
             total={entries.length}
             viewType={viewType}
@@ -180,11 +237,14 @@ export default function App() {
         {mode === 'manage' && (
           <ManageMode
             entries={entries}
+            knownCats={knownCats}
             onCreate={handleCreate}
             onUpdate={handleUpdate}
             onDelete={handleDelete}
             onReorder={handleReorder}
-            onImport={handleImport}
+            onRenameCat={handleRenameCat}
+            onDeleteCat={handleDeleteCat}
+            onImported={handleImported}
           />
         )}
 
@@ -197,7 +257,44 @@ export default function App() {
 
       {modalEntry && <DetailModal entry={modalEntry} onClose={closeAll} />}
       {aiOpen && <AskModal query={query} onClose={closeAll} />}
-      {formOpen && <NewEntryModal onClose={closeAll} onSave={handleSave} />}
+      {formOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            zIndex: 50,
+            overflow: 'auto',
+            padding: '32px 16px',
+          }}
+          onClick={closeAll}
+        >
+          <div
+            style={{
+              maxWidth: 1000,
+              margin: '0 auto',
+              background: 'var(--bg)',
+              border: '1px solid var(--bd)',
+              borderRadius: 16,
+              padding: '16px 20px 24px',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <EntryEditor
+              initial={null}
+              knownCats={knownCats}
+              onCancel={closeAll}
+              onSave={(input) =>
+                handleCreate(input).then((entry) => {
+                  setFormOpen(false);
+                  return entry;
+                })
+              }
+            />
+          </div>
+        </div>
+      )}
       <Toaster />
     </div>
   );

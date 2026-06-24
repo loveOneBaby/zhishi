@@ -12,6 +12,10 @@ interface Props {
   onInput: (v: string) => void;
   results: Entry[];
   suggestions: SearchSuggestion[];
+  sugSel: number;
+  onSugHover: (i: number) => void;
+  onSugActivate: (i: number) => void;
+  onSummon: () => void;
   sel: number;
   total: number;
   viewType: 'list' | 'canvas';
@@ -101,7 +105,7 @@ function FolderIcon({ open, active }: { open: boolean; active: boolean }) {
 }
 
 const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
-  { query, onInput, results, suggestions, sel, total, viewType, setViewType, theme, selectedEntry, selectedId, onClear, onSuggest, onOpen, onOpenAI },
+  { query, onInput, results, suggestions, sugSel, onSugHover, onSugActivate, onSummon, sel, total, viewType, setViewType, theme, selectedEntry, selectedId, onClear, onSuggest, onOpen, onOpenAI },
   inputRef
 ) {
   const isList = viewType === 'list';
@@ -147,9 +151,9 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
           placeholder="输入关键词、拼音或缩写…（如 bibao、scws、gc）"
           spellCheck={false}
           autoComplete="off"
-          style={{ width: '100%', padding: hasQuery ? '18px 88px 18px 46px' : '18px 18px 18px 46px', fontSize: 19, fontFamily: 'inherit', color: 'var(--fg)', background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 14, outline: 'none' }}
+          style={{ width: '100%', padding: hasQuery ? '18px 88px 18px 46px' : '18px 64px 18px 46px', fontSize: 19, fontFamily: 'inherit', color: 'var(--fg)', background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 14, outline: 'none' }}
         />
-        {hasQuery && (
+        {hasQuery ? (
           <button
             type="button"
             onClick={onClear}
@@ -158,8 +162,45 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
           >
             清空
           </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onSummon}
+            title="按 ⌘K / Ctrl+K 呼出搜索"
+            style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', padding: '4px 9px', borderRadius: 7, border: '1px solid var(--bd)', background: 'var(--sel)', color: 'var(--mut)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer', lineHeight: 1.4 }}
+          >
+            ⌘K
+          </button>
         )}
       </div>
+
+      {hasQuery && suggestions.length > 0 && (
+        <div style={{ marginTop: 6, border: '1px solid var(--bd)', borderRadius: 12, background: 'var(--panel)', overflow: 'hidden', animation: 'ik-fade .14s' }}>
+          {suggestions.map((suggestion, i) => {
+            const active = i === sugSel;
+            const last = i === suggestions.length - 1;
+            return (
+              <div
+                key={`${suggestion.kind}-${suggestion.label}-${i}`}
+                onMouseEnter={() => onSugHover(i)}
+                onClick={() => onSugActivate(i)}
+                title={`${suggestion.kind} · ${suggestion.hint}`}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', cursor: 'pointer',
+                  borderBottom: last ? 'none' : '1px solid var(--bd)',
+                  background: active ? 'var(--sel)' : 'transparent',
+                }}
+              >
+                <span style={{ fontSize: 10.5, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '1px 7px', flexShrink: 0 }}>{suggestion.kind}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: active ? 650 : 500 }}>{highlightText(suggestion.label, query)}</span>
+                <span style={{ fontSize: 11.5, color: 'var(--mut)', flexShrink: 0, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{suggestion.hint}</span>
+                {suggestion.entryId && <span style={{ fontSize: 11, color: 'var(--mut)', flexShrink: 0 }}>{active ? '↵ 打开' : '↵'}</span>}
+              </div>
+            );
+          })}
+          <div style={{ fontSize: 11, color: 'var(--mut)', padding: '6px 14px', borderTop: '1px solid var(--bd)', background: 'var(--sel)' }}>↑↓ 选择 · ↵ 打开 / 填入 · esc 关闭</div>
+        </div>
+      )}
 
       {hasQuery && suggestions.length > 0 && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '10px 2px 12px', animation: 'ik-fade .15s' }}>
@@ -183,12 +224,12 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {isList && (
             <span style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--mut)' }}>
-              <span>点击文件夹收起/展开</span><span>↑ ↓ 选择</span><span>↵ 查看</span><span>esc 清空</span>
+              <span>点击文件夹收起/展开</span><span>↑ ↓ 选择</span><span>↵ 查看</span><span>esc 清空</span><span>⌘K 搜索</span>
             </span>
           )}
           {isCanvas && (
             <span style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--mut)' }}>
-              <span>三指移动画布</span><span>点击知识点查看详情</span><span>⤢ 沉浸模式</span>
+              <span>三指移动画布</span><span>点击知识点查看详情</span><span>⤢ 沉浸模式</span><span>⌘K 搜索</span>
             </span>
           )}
           <div style={{ display: 'flex', gap: 2, background: 'var(--sel)', padding: 3, borderRadius: 8 }}>
