@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import {
-  seedIfEmpty,
+  seedBuiltins,
   listEntries,
   getEntry,
   createEntry,
@@ -13,7 +13,7 @@ import { searchEntries } from './search.js';
 import { askAI } from './ask.js';
 
 export function createApp() {
-  seedIfEmpty();
+  seedBuiltins();
 
   const app = express();
   app.use(express.json({ limit: '1mb' }));

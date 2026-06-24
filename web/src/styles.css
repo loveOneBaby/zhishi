@@ -9,3 +9,17 @@ html, body { margin: 0; padding: 0; }
 input::placeholder { color: var(--mut); opacity: .7; }
 textarea::placeholder { color: var(--mut); opacity: .7; }
 button { font-family: inherit; }
+.ik-mind-card {
+  appearance: none;
+  transition: transform 160ms ease, border-color 160ms ease, filter 160ms ease;
+}
+.ik-mind-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--mut) !important;
+  filter: brightness(1.015);
+}
+.ik-mind-card:active { transform: translateY(-1px) scale(.995); }
+.ik-mind-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+@media (prefers-reduced-motion: reduce) {
+  .ik-mind-card { transition: none; }
+}

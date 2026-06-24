@@ -7,7 +7,7 @@ interface Props {
   onSave: (input: NewEntryInput) => Promise<void> | void;
 }
 
-const CATS = ['前端', 'Java', '基础', '算法', '自定义'];
+const CATS = ['前端', 'Java', 'AI', '基础', '算法', '自定义'];
 
 export default function NewEntryModal({ onClose, onSave }: Props) {
   const [title, setTitle] = useState('');

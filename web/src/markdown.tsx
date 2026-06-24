@@ -1,25 +1,29 @@
 import React from 'react';
 import type { Entry } from './types';
 
-// 轻量 markdown 渲染，移植自原 demo：支持 **加粗** / `代码` / ## 小标题 / - 列表 / ```代码块```
+// 轻量 markdown 渲染：支持链接 / 加粗 / 代码 / 多级标题 / 列表 / 代码块
 function inline(t: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   let last = 0;
   let k = 0;
-  const re = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+  const re = /\[([^\]]+)]\((https?:\/\/[^)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(t))) {
     if (m.index > last) parts.push(t.slice(last, m.index));
     if (m[1] != null) {
       parts.push(
-        <strong key={k++} style={{ fontWeight: 700 }}>{m[1]}</strong>
+        <a key={k++} href={m[2]} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3 }}>{m[1]}</a>
+      );
+    } else if (m[3] != null) {
+      parts.push(
+        <strong key={k++} style={{ fontWeight: 700 }}>{m[3]}</strong>
       );
     } else {
       parts.push(
         <code
           key={k++}
           style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '.9em', background: 'var(--sel)', padding: '1px 6px', borderRadius: '5px' }}
-        >{m[2]}</code>
+        >{m[4]}</code>
       );
     }
     last = re.lastIndex;
@@ -45,9 +49,11 @@ export function renderMd(md: string): React.ReactNode {
       );
       continue;
     }
-    if (ln.startsWith('## ')) {
+    const heading = /^(#{2,4})\s+(.+)$/.exec(ln);
+    if (heading) {
+      const level = heading[1].length;
       out.push(
-        <div key={k++} style={{ fontWeight: 700, fontSize: 14, margin: '20px 0 8px' }}>{ln.slice(3)}</div>
+        <div key={k++} style={{ fontWeight: 700, fontSize: level === 2 ? 14 : level === 3 ? 13.5 : 13, margin: level === 2 ? '20px 0 8px' : '14px 0 6px' }}>{inline(heading[2])}</div>
       );
       i++;
       continue;
@@ -75,7 +81,7 @@ export function renderMd(md: string): React.ReactNode {
 
 export interface MindNode {
   key: number;
-  title: string;
+  title: React.ReactNode;
   content: React.ReactNode;
 }
 
@@ -101,7 +107,7 @@ export function parseSections(e: Entry): Sections {
   const introMd = intro.join('\n').trim();
   let nodes: MindNode[];
   if (secs.length) {
-    nodes = secs.map((sc, i) => ({ key: i, title: sc.title, content: renderMd(sc.lines.join('\n')) }));
+    nodes = secs.map((sc, i) => ({ key: i, title: inline(sc.title), content: renderMd(sc.lines.join('\n')) }));
   } else {
     nodes = [{ key: 0, title: '详解', content: renderMd(introMd) }];
   }

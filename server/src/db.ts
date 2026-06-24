@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
-import { SEED_ENTRIES } from './seed-data.js';
+import { SEED_LIBRARIES } from './seed-data/index.js';
 import type { Entry, EntryRow } from './types.js';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -26,6 +26,10 @@ db.exec(`
     updatedAt INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_entries_cat ON entries(cat);
+  CREATE TABLE IF NOT EXISTS seed_migrations (
+    version   TEXT PRIMARY KEY,
+    appliedAt INTEGER NOT NULL
+  );
 `);
 
 function rowToEntry(r: EntryRow): Entry {
@@ -38,30 +42,70 @@ function rowToEntry(r: EntryRow): Entry {
   };
 }
 
-// 首次启动：若表为空则导入内置种子数据
-export function seedIfEmpty(): void {
-  const row = db.prepare('SELECT COUNT(*) AS n FROM entries').get() as { n: number };
-  if (row.n > 0) return;
-  const now = Date.now();
+// 按版本导入知识库。兼容旧数据库，并避免被用户删除的内置条目在重启后自动恢复。
+export function seedBuiltins(): void {
+  const applied = new Set(
+    (db.prepare('SELECT version FROM seed_migrations').all() as { version: string }[])
+      .map((row) => row.version)
+  );
+  const count = db.prepare('SELECT COUNT(*) AS n FROM entries').get() as { n: number };
   const insert = db.prepare(
-    `INSERT INTO entries (id, cat, title, py, tags, summary, body, createdAt, updatedAt)
+    `INSERT OR IGNORE INTO entries (id, cat, title, py, tags, summary, body, createdAt, updatedAt)
      VALUES (:id, :cat, :title, :py, :tags, :summary, :body, :createdAt, :updatedAt)`
   );
+  const updateBuiltin = db.prepare(
+    `UPDATE entries SET cat=:cat, title=:title, py=:py, tags=:tags,
+       summary=:summary, body=:body, updatedAt=:updatedAt WHERE id=:id`
+  );
+  const deleteBuiltin = db.prepare('DELETE FROM entries WHERE id = ?');
+  const markApplied = db.prepare(
+    'INSERT INTO seed_migrations (version, appliedAt) VALUES (?, ?)'
+  );
+  let added = 0;
+  let updated = 0;
+  let removed = 0;
+
   db.exec('BEGIN');
   try {
-    for (const e of SEED_ENTRIES) {
-      insert.run({
-        id: e.id, cat: e.cat, title: e.title, py: e.py,
-        tags: JSON.stringify(e.tags), summary: e.summary, body: e.body,
-        createdAt: now, updatedAt: now,
-      });
+    for (const library of SEED_LIBRARIES) {
+      if (applied.has(library.version)) continue;
+
+      // 升级自旧版本时，原有基础库已经存在，只补记迁移版本。
+      const skipLegacyBase = library.version === 'base-v1' && count.n > 0;
+      if (!skipLegacyBase) {
+        const now = Date.now();
+        for (const e of library.entries) {
+          const values = {
+            id: e.id, cat: e.cat, title: e.title, py: e.py,
+            tags: JSON.stringify(e.tags), summary: e.summary, body: e.body,
+            createdAt: now, updatedAt: now,
+          };
+          if (library.overwrite) {
+            const info = updateBuiltin.run({
+              id: e.id, cat: e.cat, title: e.title, py: e.py,
+              tags: JSON.stringify(e.tags), summary: e.summary, body: e.body,
+              updatedAt: now,
+            });
+            if (Number(info.changes) > 0) updated += Number(info.changes);
+            else added += Number(insert.run(values).changes);
+          } else {
+            added += Number(insert.run(values).changes);
+          }
+        }
+        for (const id of library.removeIds ?? []) {
+          removed += Number(deleteBuiltin.run(id).changes);
+        }
+      }
+      markApplied.run(library.version, Date.now());
     }
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
   }
-  console.log(`[db] 已导入 ${SEED_ENTRIES.length} 条内置知识点`);
+  if (added || updated || removed) {
+    console.log(`[db] 内置知识点：新增 ${added}，更新 ${updated}，移除 ${removed}`);
+  }
 }
 
 export function listEntries(): Entry[] {

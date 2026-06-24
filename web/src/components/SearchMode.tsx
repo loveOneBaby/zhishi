@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import type { Entry, Theme } from '../types';
 import { seg2 } from '../ui';
 import CanvasView from './CanvasView';
+import DetailSidePanel from './DetailSidePanel';
 
 interface Props {
   query: string;
@@ -13,7 +14,9 @@ interface Props {
   viewType: 'list' | 'canvas';
   setViewType: (v: 'list' | 'canvas') => void;
   theme: Theme;
-  onOpen: (id: string) => void;
+  selectedEntry: Entry | null;
+  selectedId: string | null;
+  onOpen: (id: string, index?: number) => void;
   onOpenAI: () => void;
 }
 
@@ -23,7 +26,7 @@ const rowBase: CSSProperties = {
 };
 
 const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
-  { query, onInput, results, sel, total, viewType, setViewType, theme, onOpen, onOpenAI },
+  { query, onInput, results, sel, total, viewType, setViewType, theme, selectedEntry, selectedId, onOpen, onOpenAI },
   inputRef
 ) {
   const isList = viewType === 'list';
@@ -58,7 +61,7 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
           )}
           {isCanvas && (
             <span style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--mut)' }}>
-              <span>切换知识库</span><span>点击知识点查看详情</span><span>⤢ 沉浸模式</span>
+              <span>三指移动画布</span><span>点击知识点查看详情</span><span>⤢ 沉浸模式</span>
             </span>
           )}
           <div style={{ display: 'flex', gap: 2, background: 'var(--sel)', padding: 3, borderRadius: 8 }}>
@@ -69,32 +72,38 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
       </div>
 
       {isList && (
-        <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {results.map((item, idx) => (
-              <div
-                key={item.id}
-                onClick={() => onOpen(item.id)}
-                style={{ ...rowBase, background: idx === selClamped ? 'var(--sel)' : 'transparent', borderColor: idx === selClamped ? 'var(--bd)' : 'transparent' }}
-                onMouseEnter={(e) => { if (idx !== selClamped) e.currentTarget.style.background = 'var(--sel)'; }}
-                onMouseLeave={(e) => { if (idx !== selClamped) e.currentTarget.style.background = 'transparent'; }}
-              >
-                <span style={{ fontSize: 11, color: 'var(--mut)', width: 40, flexShrink: 0 }}>{item.cat}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>{item.title}</div>
-                  <div style={{ fontSize: 13, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.summary}</div>
-                </div>
-                <span style={{ fontSize: 11, color: 'var(--mut)', flexShrink: 0 }}>{item.tags[0] || ''}</span>
-              </div>
-            ))}
-          </div>
-          {noMatch && (
-            <div onClick={onOpenAI} style={{ marginTop: 8, padding: 22, border: '1px dashed var(--bd)', borderRadius: 14, cursor: 'pointer', textAlign: 'center', animation: 'ik-fade .2s' }}>
-              <div style={{ fontSize: 14, marginBottom: 6 }}>没有匹配「<span style={{ fontWeight: 600 }}>{query}</span>」的知识点</div>
-              <div style={{ fontSize: 13, color: 'var(--mut)' }}>按 <span style={{ fontWeight: 600, color: 'var(--fg)' }}>↵</span> 让 AI 回答</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(360px, 430px)', gap: 24, alignItems: 'start' }}>
+          <div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {results.map((item, idx) => {
+                const active = item.id === selectedId || (!selectedId && idx === selClamped);
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => onOpen(item.id, idx)}
+                    style={{ ...rowBase, background: active ? 'var(--sel)' : 'transparent', borderColor: active ? 'var(--bd)' : 'transparent' }}
+                    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--sel)'; }}
+                    onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ fontSize: 11, color: 'var(--mut)', width: 40, flexShrink: 0 }}>{item.cat}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>{item.title}</div>
+                      <div style={{ fontSize: 13, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.summary}</div>
+                    </div>
+                    <span style={{ fontSize: 11, color: 'var(--mut)', flexShrink: 0 }}>{item.tags[0] || ''}</span>
+                  </div>
+                );
+              })}
             </div>
-          )}
-        </>
+            {noMatch && (
+              <div onClick={onOpenAI} style={{ marginTop: 8, padding: 22, border: '1px dashed var(--bd)', borderRadius: 14, cursor: 'pointer', textAlign: 'center', animation: 'ik-fade .2s' }}>
+                <div style={{ fontSize: 14, marginBottom: 6 }}>没有匹配「<span style={{ fontWeight: 600 }}>{query}</span>」的知识点</div>
+                <div style={{ fontSize: 13, color: 'var(--mut)' }}>按 <span style={{ fontWeight: 600, color: 'var(--fg)' }}>↵</span> 让 AI 回答</div>
+              </div>
+            )}
+          </div>
+          <DetailSidePanel entry={selectedEntry} />
+        </div>
       )}
 
       {isCanvas && <CanvasView entries={results} theme={theme} onOpen={onOpen} hasQuery={hasQuery} />}

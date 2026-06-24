@@ -15,7 +15,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
 
   const [mode, setMode] = useState<'search' | 'free'>('search');
-  const [viewType, setViewType] = useState<'list' | 'canvas'>('list');
+  const [viewType, setViewType] = useState<'list' | 'canvas'>('canvas');
   const [query, setQuery] = useState('');
   const [sel, setSel] = useState(0);
   const [theme, setThemeState] = useState<ThemeKey>('mono');
@@ -49,15 +49,25 @@ export default function App() {
   );
 
   const closeAll = useCallback(() => { setOpenId(null); setAiOpen(false); setFormOpen(false); }, []);
+  const isSearchList = mode === 'search' && viewType === 'list';
 
   // 键盘交互：方向键选择、回车展开 / 触发 AI、esc 清空
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (openId || aiOpen || formOpen) { if (e.key === 'Escape') closeAll(); return; }
+      const modalOpen = Boolean(openId && !isSearchList);
+      if (modalOpen || aiOpen || formOpen) { if (e.key === 'Escape') closeAll(); return; }
       if (mode !== 'search') return;
       if (viewType === 'canvas') { if (e.key === 'Escape' && query) { setQuery(''); setSel(0); } return; }
-      if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(s + 1, results.length - 1)); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(0, s - 1)); }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setOpenId(null);
+        setSel((s) => Math.min(s + 1, results.length - 1));
+      }
+      else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setOpenId(null);
+        setSel((s) => Math.max(0, s - 1));
+      }
       else if (e.key === 'Enter') {
         e.preventDefault();
         const clamped = Math.min(sel, Math.max(0, results.length - 1));
@@ -67,7 +77,7 @@ export default function App() {
     }
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [openId, aiOpen, formOpen, mode, viewType, query, sel, results, closeAll]);
+  }, [openId, aiOpen, formOpen, isSearchList, mode, viewType, query, sel, results, closeAll]);
 
   async function handleSave(input: NewEntryInput) {
     try {
@@ -80,24 +90,31 @@ export default function App() {
   }
 
   const openEntry = openId ? entries.find((e) => e.id === openId) ?? null : null;
+  const selectedListEntry = isSearchList
+    ? (results.find((e) => e.id === openId) ?? results[Math.min(sel, Math.max(0, results.length - 1))] ?? null)
+    : null;
+  const selectedListId = selectedListEntry?.id ?? null;
+  const modalEntry = isSearchList ? null : openEntry;
 
   return (
     <div style={{ ...themeVars(t), minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--font)', WebkitFontSmoothing: 'antialiased' }}>
-      <div style={{ maxWidth: 860, margin: '0 auto', padding: '0 24px' }}>
-        <TopBar mode={mode} setMode={(m) => { setMode(m); if (m === 'search') setTimeout(() => inputRef.current?.focus(), 40); }} theme={theme} setTheme={setTheme} />
+      <div style={{ maxWidth: isSearchList ? 1320 : 860, margin: '0 auto', padding: '0 24px' }}>
+        <TopBar mode={mode} setMode={(m) => { setMode(m); setOpenId(null); if (m === 'search') setTimeout(() => inputRef.current?.focus(), 40); }} theme={theme} setTheme={setTheme} />
 
         {mode === 'search' ? (
           <SearchMode
             ref={inputRef}
             query={query}
-            onInput={(v) => { setQuery(v); setSel(0); }}
+            onInput={(v) => { setQuery(v); setSel(0); setOpenId(null); }}
             results={results}
             sel={sel}
             total={entries.length}
             viewType={viewType}
-            setViewType={setViewType}
+            setViewType={(v) => { setViewType(v); setOpenId(null); }}
             theme={t}
-            onOpen={(id) => setOpenId(id)}
+            selectedEntry={selectedListEntry}
+            selectedId={selectedListId}
+            onOpen={(id, index) => { if (typeof index === 'number') setSel(index); setOpenId(id); }}
             onOpenAI={() => setAiOpen(true)}
           />
         ) : (
@@ -117,7 +134,7 @@ export default function App() {
         )}
       </div>
 
-      {openEntry && <DetailModal entry={openEntry} onClose={closeAll} />}
+      {modalEntry && <DetailModal entry={modalEntry} onClose={closeAll} />}
       {aiOpen && <AskModal query={query} onClose={closeAll} />}
       {formOpen && <NewEntryModal onClose={closeAll} onSave={handleSave} />}
     </div>

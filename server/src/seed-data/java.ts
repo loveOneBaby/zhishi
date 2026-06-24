@@ -1,0 +1,14 @@
+import type { SeedEntry } from './types.js';
+
+export const JAVA_ENTRIES: SeedEntry[] = [
+  { id: 'jv1', cat: 'Java', title: 'JVM 内存模型', py: 'jvm neicun ncmx neicunmoxing', tags: ['JVM'], summary: '堆、栈、方法区、程序计数器等运行时数据区。', body: '## 运行时数据区\n- **堆**：对象实例，GC 主要区域，线程共享\n- **虚拟机栈**：方法的栈帧（局部变量、操作数栈），线程私有\n- **方法区/元空间**：类信息、常量、静态变量\n- **程序计数器**：当前执行字节码行号\n- **本地方法栈**：native 方法\n\n## 堆分代\n新生代（Eden + 2 Survivor）+ 老年代。' },
+  { id: 'jv2', cat: 'Java', title: 'GC 垃圾回收', py: 'lajihuishou ljhs gc garbage', tags: ['JVM'], summary: '可达性分析判定垃圾，分代收集 + 各类收集器。', body: '## 判定垃圾\n**可达性分析**：从 GC Roots 不可达的对象可回收（不用引用计数，避免循环引用）。\n\n## 回收算法\n- 标记-清除（碎片）\n- 标记-复制（新生代）\n- 标记-整理（老年代）\n\n## 收集器\nG1、CMS、ZGC（低延迟）。' },
+  { id: 'jv3', cat: 'Java', title: 'synchronized', py: 'synchronized tongbu suo lock', tags: ['并发'], summary: '基于对象监视器的同步，含锁升级机制。', body: '`synchronized` 保证同一时刻只有一个线程进入临界区。\n\n## 锁升级\n无锁 → **偏向锁** → **轻量级锁**（CAS 自旋）→ **重量级锁**（操作系统互斥量）。\n\n## 特性\n- 可重入\n- 保证可见性与原子性\n- 释放锁会刷新工作内存' },
+  { id: 'jv4', cat: 'Java', title: '线程池', py: 'xianchengchi xcc threadpool', tags: ['并发'], summary: 'ThreadPoolExecutor 七参数与任务处理流程。', body: '## 核心参数\n核心线程数、最大线程数、空闲存活时间、时间单位、阻塞队列、线程工厂、拒绝策略。\n\n## 执行流程\n- 核心线程未满 → 创建核心线程\n- 已满 → 入队列\n- 队列满且未达最大 → 创建非核心线程\n- 再满 → 触发**拒绝策略**\n\n避免用 Executors 快捷方法（队列/线程无界风险），手动 new。' },
+  { id: 'jv5', cat: 'Java', title: 'HashMap 原理', py: 'hashmap', tags: ['集合'], summary: '数组 + 链表 + 红黑树，扰动函数与扩容。', body: '## 结构\n数组 + 链表，链表长度 ≥ 8 且容量 ≥ 64 时转**红黑树**。\n\n## 关键点\n- 扰动函数：高位参与运算减少碰撞\n- 默认容量 16，负载因子 0.75\n- 扩容翻倍，重新分布（JDK8 用高低位拆分）\n- 非线程安全，并发用 ConcurrentHashMap' },
+  { id: 'jv6', cat: 'Java', title: 'Spring IOC', py: 'spring ioc kongzhifanzhuan di', tags: ['Spring'], summary: '控制反转与依赖注入，由容器管理 Bean。', body: '**IOC（控制反转）**：对象的创建和依赖关系交给容器管理。\n\n## DI 注入方式\n- 构造器注入（推荐）\n- Setter 注入\n- 字段注入（@Autowired）\n\n## Bean 生命周期\n实例化 → 属性填充 → 初始化（Aware、BeanPostProcessor、init）→ 使用 → 销毁。' },
+  { id: 'jv7', cat: 'Java', title: '事务隔离级别', py: 'shiwugeli swgl isolation transaction', tags: ['数据库', '事务'], summary: '四种隔离级别与脏读、不可重复读、幻读。', body: '## 隔离级别（由低到高）\n- 读未提交：脏读\n- 读已提交：解决脏读\n- 可重复读：解决不可重复读（MySQL 默认，MVCC + 间隙锁基本解决幻读）\n- 串行化：完全隔离\n\n## 三类问题\n脏读、不可重复读、幻读。' },
+  { id: 'jv8', cat: 'Java', title: '数据库索引', py: 'suoyin sy index btree', tags: ['数据库'], summary: 'B+ 树索引、聚簇/非聚簇、最左前缀。', body: '## B+ 树\n叶子节点存数据/主键且双向链表相连，适合范围查询，树矮查询稳定。\n\n## 类型\n- **聚簇索引**：主键，叶子存整行\n- **非聚簇/二级索引**：叶子存主键，需回表\n\n## 最左前缀\n联合索引从最左列开始匹配，遇范围查询中断。' },
+  { id: 'jv9', cat: 'Java', title: 'Redis 持久化', py: 'redis chijiuhua cjh rdb aof', tags: ['缓存'], summary: 'RDB 快照与 AOF 日志两种机制。', body: '## RDB\n定时生成内存快照，体积小、恢复快，但可能丢最后一次快照后的数据。\n\n## AOF\n记录写命令，可配置同步策略（always/everysec/no），数据更安全、文件大。\n\n## 混合持久化\nRDB 全量 + AOF 增量，兼顾速度与安全（Redis 4.0+）。' },
+  { id: 'jv10', cat: 'Java', title: '消息队列', py: 'xiaoxiduilie xxdl mq kafka', tags: ['中间件'], summary: '解耦、异步、削峰，及重复/丢失/顺序问题。', body: '## 核心作用\n- 解耦：生产消费分离\n- 异步：提升响应速度\n- 削峰：缓冲突发流量\n\n## 常见问题\n- 重复消费 → 消费幂等\n- 消息丢失 → 持久化 + ACK + 重试\n- 顺序消费 → 单分区/单队列' },
+];

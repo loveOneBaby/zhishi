@@ -1,24 +1,27 @@
 import type { Entry } from './types';
+import { toSearchText } from './pinyin-search';
 
-// 客户端检索逻辑，与服务端保持一致：保证逐字输入时的即时响应。
-function subseq(q: string, h: string): boolean {
-  let i = 0;
-  for (let j = 0; j < h.length && i < q.length; j++) {
-    if (h[j] === q[i]) i++;
-  }
-  return i === q.length;
+function headingTitles(body: string): string {
+  return (body || '')
+    .split('\n')
+    .map((line) => /^(#{2,4})\s+(.+)$/.exec(line)?.[2] ?? '')
+    .filter(Boolean)
+    .join(' ');
 }
 
 export function score(e: Entry, q: string): number {
-  const t = (e.title || '').toLowerCase();
-  const py = (e.py || '').toLowerCase();
-  const h = (t + ' ' + py + ' ' + (e.tags || []).join(' ') + ' ' + e.cat + ' ' + (e.summary || '')).toLowerCase();
+  const t = toSearchText(e.title);
+  const py = toSearchText(e.py);
+  const h = [
+    toSearchText(e.title, e.py, (e.tags || []).join(' '), e.cat, headingTitles(e.body)),
+    (e.summary || '').toLowerCase(),
+    (e.body || '').toLowerCase(),
+  ].join(' ');
   if (t.startsWith(q)) return 100;
   if (py.split(' ').some((w) => w.startsWith(q))) return 90;
   if (t.includes(q)) return 80;
   if (py.includes(q)) return 70;
   if (h.includes(q)) return 50;
-  if (subseq(q, h)) return 20;
   return -1;
 }
 

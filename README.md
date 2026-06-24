@@ -21,10 +21,10 @@
 │  └─ src/
 │     ├─ index.ts       入口
 │     ├─ app.ts         路由 / 静态托管
-│     ├─ db.ts          SQLite 初始化、CRUD、首次导入种子
+│     ├─ db.ts          SQLite 初始化、CRUD、种子版本迁移
 │     ├─ search.ts      检索打分
 │     ├─ ask.ts         AI 问答（预留接口）
-│     └─ seed-data.ts   内置知识库
+│     └─ seed-data/     按分类拆分的内置知识库
 ├─ web/           # 前端：React + Vite + TS
 │  └─ src/
 │     ├─ App.tsx        总装与交互
@@ -73,7 +73,7 @@ npm start            # 启动后端，同时托管前端，访问 http://localho
 
 ## 数据存储
 
-- 使用 **Node 内置 SQLite**（`node:sqlite`），无需安装 / 编译任何原生依赖；数据库文件默认在 `server/data/knowledge.db`，首次启动自动导入内置知识点。
+- 使用 **Node 内置 SQLite**（`node:sqlite`），无需安装 / 编译任何原生依赖；数据库文件默认在 `server/data/knowledge.db`，启动时按版本补充新增的内置知识库。
 - 新建的知识点会写入数据库，永久保留。
 - 可通过环境变量 `DB_PATH` 自定义数据库位置。
 - 启动时若看到 `ExperimentalWarning: SQLite is an experimental feature` 属正常提示，不影响使用。

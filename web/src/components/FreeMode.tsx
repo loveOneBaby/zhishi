@@ -9,7 +9,7 @@ interface Props {
   onNew: () => void;
 }
 
-const ORDER = ['前端', 'Java', '基础', '算法', '自定义'];
+const ORDER = ['前端', 'Java', 'AI', '基础', '算法', '自定义'];
 
 export default function FreeMode({ entries, activeCat, setCat, onOpen, onNew }: Props) {
   // 分类顺序：预设在前，其余按出现顺序补充
