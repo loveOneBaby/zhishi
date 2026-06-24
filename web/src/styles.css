@@ -20,6 +20,178 @@ button { font-family: inherit; }
 }
 .ik-mind-card:active { transform: translateY(-1px) scale(.995); }
 .ik-mind-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.ik-free-layout {
+  display: grid;
+  grid-template-columns: clamp(380px, 24vw, 520px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.ik-floating-toolbar {
+  position: fixed;
+  top: 132px;
+  right: clamp(16px, 2.4vw, 44px);
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: 0 20px 54px rgba(0,0,0,.12);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.ik-floating-toolbar > button,
+.ik-floating-toolbar > label {
+  min-width: 128px;
+  justify-content: center;
+  box-shadow: none !important;
+}
+.ik-floating-toolbar > button:first-child {
+  min-width: 0;
+}
+.ik-tree-row {
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.ik-tree-meta {
+  display: block;
+  max-height: 0;
+  margin-top: 0;
+  overflow: hidden;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.35;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: max-height 140ms ease, margin-top 140ms ease, opacity 140ms ease, transform 140ms ease;
+}
+.ik-tree-row:hover .ik-tree-meta,
+.ik-tree-row:focus-within .ik-tree-meta {
+  max-height: 18px;
+  margin-top: 2px;
+  opacity: 1;
+  transform: translateY(0);
+}
+.ik-row-actions {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.ik-tree-row:hover .ik-row-actions,
+.ik-tree-row:focus-within .ik-row-actions,
+.ik-kb-card:hover .ik-row-actions,
+.ik-kb-card:focus-within .ik-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+.ik-row-action-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--bd);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--mut);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  box-shadow: 0 8px 20px rgba(0,0,0,.08);
+}
+.ik-row-action-btn:hover {
+  color: var(--fg);
+  border-color: var(--mut);
+}
+.ik-row-action-danger {
+  color: var(--danger);
+}
+.ik-detail-shell {
+  position: relative;
+  min-width: 0;
+}
+.ik-detail-actions {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.ik-detail-shell:hover .ik-detail-actions,
+.ik-detail-shell:focus-within .ik-detail-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.ik-detail-action-btn {
+  padding: 8px 13px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 680;
+  box-shadow: 0 12px 28px rgba(0,0,0,.1);
+}
+.ik-detail-action-btn:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+.ik-detail-action-danger {
+  color: var(--danger);
+}
 @media (prefers-reduced-motion: reduce) {
   .ik-mind-card { transition: none; }
+  .ik-tree-row,
+  .ik-tree-meta,
+  .ik-row-actions,
+  .ik-detail-actions {
+    transition: none;
+  }
+}
+@media (max-width: 980px) {
+  .ik-floating-toolbar {
+    position: static;
+    flex-direction: row;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .ik-floating-toolbar > button,
+  .ik-floating-toolbar > label {
+    min-width: 0;
+  }
+  .ik-free-layout {
+    grid-template-columns: 1fr;
+  }
+  .ik-free-layout > aside,
+  .ik-free-layout > div > aside {
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  .ik-detail-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
 }

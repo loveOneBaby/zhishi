@@ -1,27 +1,27 @@
 import type { Entry } from './types.js';
-import { toSearchText } from './pinyin-search.js';
+import { buildNeedles, matchesQuery, toSearchText } from './pinyin-search.js';
 import { indexText } from './index-tree.js';
 
 // 打分逻辑：标题前缀 > 拼音词前缀 > 标题包含 > 拼音包含 > 全文(含索引)包含
 export function score(e: Entry, q: string): number {
+  const needles = buildNeedles(q);
+  if (!needles.length) return -1;
   const t = toSearchText(e.title);
   const py = toSearchText(e.py);
   const idxText = indexText({ intro: e.intro, nodes: e.nodes });
   const h = [
-    toSearchText(e.title, e.py, (e.tags || []).join(' '), e.cat, idxText),
-    (e.summary || '').toLowerCase(),
-    idxText.toLowerCase(),
+    toSearchText(e.title, e.py, (e.tags || []).join(' '), e.cat, e.summary, idxText),
   ].join(' ');
-  if (t.startsWith(q)) return 100;
-  if (py.split(' ').some((w) => w.startsWith(q))) return 90;
-  if (t.includes(q)) return 80;
-  if (py.includes(q)) return 70;
-  if (h.includes(q)) return 50;
+  if (needles.some((needle) => t.startsWith(needle))) return 100;
+  if (needles.some((needle) => py.split(/\s+/).some((w) => w.startsWith(needle)))) return 90;
+  if (needles.some((needle) => t.includes(needle))) return 80;
+  if (needles.some((needle) => py.includes(needle))) return 70;
+  if (matchesQuery(h, q)) return 50;
   return -1;
 }
 
 export function searchEntries(all: Entry[], rawQuery: string): Entry[] {
-  const q = (rawQuery || '').trim().toLowerCase();
+  const q = (rawQuery || '').trim();
   if (!q) return all;
   return all
     .map((e) => ({ e, s: score(e, q) }))

@@ -28,6 +28,7 @@ import {
   type ImportPayload,
 } from './db.js';
 import { convertEntry } from './blocks-import.js';
+import { knowledgeTreeToImportPayload } from './knowledge-tree-import.js';
 import { searchEntries } from './search.js';
 import { askAI } from './ask.js';
 
@@ -162,32 +163,38 @@ export function createApp() {
     res.json(exportData());
   });
 
-  // 导入：body = { version?, kbs?, folders?, assets?, entries: [...], replace?: boolean }
-  // kb-import-2 的富块结构（intro/nodes.blocks、assets）在此自动折叠为扁平 markdown
+  function requestToImportPayload(body: unknown): ImportPayload {
+    const b = (body ?? {}) as { tree?: unknown; entries?: unknown; assets?: unknown };
+    if (Array.isArray(b.tree)) return knowledgeTreeToImportPayload(body);
+    if (Array.isArray(b.entries)) {
+      const assets = Array.isArray(b.assets) ? b.assets : [];
+      return { entries: b.entries.map((e: unknown) => convertEntry(e, assets)) };
+    }
+    throw new Error('tree 必须是数组');
+  }
+
+  // 导入：主格式为 { version:"knowledge-tree-v1", meta, tree:[...] }
   api.post('/import', (req, res) => {
-    const raw = req.body?.entries;
-    if (!Array.isArray(raw)) return res.status(400).json({ error: 'entries 必须是数组' });
-    if (raw.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
-    const assets = Array.isArray(req.body?.assets) ? req.body.assets : [];
-    const kbs = Array.isArray(req.body?.kbs) ? req.body.kbs : undefined;
-    const folders = Array.isArray(req.body?.folders) ? req.body.folders : undefined;
-    // convertEntry 对扁平旧条目是直通，v1/v2 可混用
-    const entries = raw.map((e: unknown) => convertEntry(e, assets));
-    const payload: ImportPayload = { kbs, folders, entries };
-    const { imported } = importEntries(payload, Boolean(req.body?.replace));
-    res.json({ ok: true, imported, kbs: listKbs(), folders: listFolders(), entries: listEntries() });
+    try {
+      const payload = requestToImportPayload(req.body);
+      if (payload.entries.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
+      const { imported } = importEntries(payload, Boolean(req.body?.replace));
+      res.json({ ok: true, imported, kbs: listKbs(), folders: listFolders(), entries: listEntries() });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
-  // 导入预览：解析载荷（与 /import 同样的 convertEntry）但不写库，
-  // 返回归一化后的条目与统计（新增 / 更新 / 跳过 / 按知识库），供前端确认。
+  // 导入预览：解析 knowledge-tree-v1，但不写库。
   api.post('/import/preview', (req, res) => {
-    const raw = req.body?.entries;
-    if (!Array.isArray(raw)) return res.status(400).json({ error: 'entries 必须是数组' });
-    if (raw.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
-    const assets = Array.isArray(req.body?.assets) ? req.body.assets : [];
-    const list = raw.map((e: unknown) => convertEntry(e, assets));
-    const preview = buildImportPreview(list);
-    res.json({ preview });
+    try {
+      const payload = requestToImportPayload(req.body);
+      if (payload.entries.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
+      const preview = buildImportPreview(payload.entries);
+      res.json({ preview });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // 排序（管理模块拖拽）：body = { ids: string[] }

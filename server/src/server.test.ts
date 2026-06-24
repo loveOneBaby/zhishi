@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseBodyToIndex, normalizeIndex, indexText } from './index-tree.js';
 import { blocksToMarkdown, convertEntry } from './blocks-import.js';
+import { knowledgeTreeToImportPayload } from './knowledge-tree-import.js';
 import { score, searchEntries } from './search.js';
 import { toSearchText } from './pinyin-search.js';
 import type { Entry } from './types.js';
@@ -121,4 +122,81 @@ test('convertEntry: 扁平旧条目直通（v1 兼容）', () => {
   });
   assert.equal(out.intro, '引言');
   assert.equal(out.nodes![0].content, 'c');
+});
+
+test('knowledgeTreeToImportPayload: tree 文件夹 + knowledge 叶子转为导入结构', () => {
+  const payload = knowledgeTreeToImportPayload({
+    version: 'knowledge-tree-v1',
+    meta: { title: 'AI Agent 面试知识树', source: 'xiaolinnote', sourceUrl: 'https://example.com' },
+    tree: [
+      {
+        type: 'folder',
+        title: 'Agent',
+        children: [
+          {
+            type: 'knowledge',
+            title: 'ReAct',
+            summary: '边思考边行动。',
+            tags: ['Agent'],
+            aliases: ['reason act'],
+            interview: {
+              question: 'ReAct 是什么？',
+              answer: 'ReAct 通过 Thought / Action / Observation 循环工作。',
+              keyPoints: ['推理与行动交替'],
+              pitfalls: ['不是单次函数调用'],
+              followUps: ['如何避免无限循环？'],
+            },
+            content: [{ title: '定义', body: 'ReAct 是经典 Agent 工作模式。' }],
+            links: [{ title: '原文', url: 'https://example.com/react' }],
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(payload.kbs?.[0].name, 'AI Agent 面试知识树');
+  assert.equal(payload.folders?.length, 1);
+  assert.equal(payload.entries.length, 1);
+  assert.equal(payload.entries[0].title, 'ReAct');
+  assert.equal(payload.entries[0].folderId, payload.folders?.[0].id);
+  assert.ok(payload.entries[0].tags?.includes('reason act'));
+  assert.equal(payload.entries[0].nodes?.[0].title, '面试回答');
+  assert.deepEqual(payload.entries[0].nodes?.[0].children.map((n) => n.title), ['关键点', '易错点', '常见追问']);
+});
+
+test('knowledgeTreeToImportPayload: 指定 targetKbId 时仍写入知识库映射', () => {
+  const payload = knowledgeTreeToImportPayload({
+    version: 'knowledge-tree-v1',
+    meta: { title: 'AI Agent 面试知识树' },
+    targetKbId: 'kb_current',
+    targetKbName: '当前知识库',
+    tree: [{ type: 'knowledge', title: 'Agent', summary: '智能体' }],
+  });
+  assert.deepEqual(payload.kbs, [{ id: 'kb_current', name: '当前知识库', sort: 0 }]);
+  assert.equal(payload.entries[0].kbId, 'kb_current');
+});
+
+test('knowledgeTreeToImportPayload: 导入知识点图片和内容图片', () => {
+  const payload = knowledgeTreeToImportPayload({
+    version: 'knowledge-tree-v1',
+    meta: { title: 'AI Agent 面试知识树' },
+    tree: [
+      {
+        type: 'knowledge',
+        title: 'Agent 架构图',
+        summary: '带图知识点。',
+        images: [{ title: 'Agent 总览', url: 'https://cdn.example.com/agent-flow.png' }],
+        content: [
+          {
+            title: '执行链路',
+            body: '先规划，再调用工具。',
+            images: [{ caption: '执行流程', src: 'data:image/png;base64,abc123' }],
+          },
+        ],
+      },
+    ],
+  });
+  const entry = payload.entries[0];
+  assert.equal(entry.nodes?.[0].title, '图片');
+  assert.ok(entry.nodes?.[0].content.includes('![Agent 总览](https://cdn.example.com/agent-flow.png)'));
+  assert.ok(entry.nodes?.[1].content.includes('![执行流程](data:image/png;base64,abc123)'));
 });

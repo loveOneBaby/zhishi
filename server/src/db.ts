@@ -645,7 +645,7 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
       progress = false;
       for (let i = pending.length - 1; i >= 0; i--) {
         const f = pending[i];
-        const kbId = (f.kbId && (kbIdMap.get(f.kbId) ?? f.kbId)) || fallbackKbId;
+        const kbId = f.kbId ? (kbIdMap.get(f.kbId) ?? resolveKbId(f.kbId, undefined)) : fallbackKbId;
         if (f.parentId && !folderIdMap.has(f.parentId)) continue; // 等父先建
         const parentId = f.parentId ? folderIdMap.get(f.parentId) ?? null : null;
         const now = Date.now();
@@ -662,7 +662,7 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
     }
     for (const f of pending) {
       // 父缺失，强制挂根
-      const kbId = (f.kbId && (kbIdMap.get(f.kbId) ?? f.kbId)) || fallbackKbId;
+      const kbId = f.kbId ? (kbIdMap.get(f.kbId) ?? resolveKbId(f.kbId, undefined)) : fallbackKbId;
       const now = Date.now();
       if (f.id) { insertFolder.run(f.id, kbId, null, f.name, f.sort ?? 0, now, now); folderIdMap.set(f.id, f.id); }
       else { const folder = ensureFolder(kbId, f.name, null); folderIdMap.set(f.name + '::', folder.id); }

@@ -213,23 +213,22 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
     });
   };
 
-  // 点击节点：预览该处知识 + 手风琴展开（同级互斥）+ 居中（保持缩放）
+  // 点击节点：只有知识点根节点展示详情；索引 / 文件夹节点只负责展开收起。
   const activateNode = (node: GNode): void => {
-    if (node.depth === 0) return; // 根节点（知识库）不预览/不折叠
-    setPreviewId(node.id);
+    if (node.depth === 0) return; // 知识库根节点不处理
+
+    if (node.type === 'entry') {
+      setPreviewId(node.id);
+      pendingFocusRef.current = node.id;
+      window.setTimeout(() => focusNode(node.id), 0);
+      return;
+    }
+
     if (!searchActive && node.children.length > 0) {
       setCollapsed((cur) => {
         const next = new Set(cur);
-        const siblings = node.parentId ? (model.get(node.parentId)?.children ?? []) : [];
-        const branchSiblings = siblings.filter((sid) => sid !== node.id && (model.get(sid)?.children.length ?? 0) > 0);
-        const selfOpen = !next.has(node.id);
-        const othersOpen = branchSiblings.some((sid) => !next.has(sid));
-        if (selfOpen && !othersOpen) {
-          next.add(node.id); // 同级仅自己展开时，再次点击则收起
-        } else {
-          next.delete(node.id); // 展开自己
-          for (const sid of branchSiblings) next.add(sid); // 收起同级其它
-        }
+        if (next.has(node.id)) next.delete(node.id);
+        else next.add(node.id);
         return next;
       });
     }
@@ -517,7 +516,8 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
           <span>右 ⌘ 切换知识库</span>
           <span>收起/展开全部</span>
           <span>关键点网格定位</span>
-          <span>点击专题卡看详情</span>
+          <span>知识点根节点看详情</span>
+          <span>子节点点击展开/收起</span>
           <span>Esc 退出</span>
         </div>
       )}
@@ -588,8 +588,8 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
           const visibleChildCount = placed.node.children.filter((id) => visible.has(id)).length;
           const canToggle = actualChildCount > 0;
           const isCollapsed = collapsed.has(placed.node.id) && !searchActive;
-          const cardClickable = !root; // 非根节点均可点击：预览 + 展开/收起
-          const isPreviewing = previewId === placed.node.id;
+          const cardClickable = !root;
+          const isPreviewing = previewId === placed.node.id && placed.node.type === 'entry';
           return (
             <div
               key={placed.node.id}
@@ -616,7 +616,7 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
                 cursor: cardClickable ? 'pointer' : 'default',
                 overflow: 'hidden',
               }}
-              aria-label={cardClickable ? `${isCollapsed ? '展开' : '收起'} ${placed.node.label}` : placed.node.label}
+              aria-label={cardClickable ? `${placed.node.type === 'entry' ? '查看详情' : isCollapsed ? '展开' : '收起'} ${placed.node.label}` : placed.node.label}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: root ? 14 : 9 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: root ? 11.5 : 10.5, fontWeight: 650, letterSpacing: '.07em', textTransform: 'uppercase', color: root ? t.bg : t.mut, opacity: root ? 0.72 : 1 }}>
@@ -672,13 +672,14 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
       </div>
 
       <div style={{ position: 'absolute', right: 14, bottom: 12, padding: '6px 9px', borderRadius: 8, background: 'color-mix(in srgb, var(--panel) 88%, transparent)', border: '1px solid var(--bd)', color: 'var(--mut)', fontSize: 10.5, pointerEvents: 'none' }}>
-        {layout.nodes.length} 个节点 · {searchActive ? '只显示命中关键链路' : '点击节点：预览知识 + 展开（同级互斥）'}
+        {layout.nodes.length} 个节点 · {searchActive ? '只显示命中关键链路' : '根知识点看详情，子节点点击展开/收起'}
       </div>
 
       {previewId && model.get(previewId) && (() => {
         const node = model.get(previewId)!;
+        if (node.type !== 'entry') return null;
         const entry = node.entryId ? entries.find((e) => e.id === node.entryId) : undefined;
-        const kind = node.type === 'folder' ? '文件夹' : node.type === 'entry' ? '知识点' : node.depth === 2 ? '二级索引' : node.depth === 3 ? '三级索引' : '四级索引';
+        const kind = '知识点';
         const intro = node.type === 'entry' ? (entry?.intro ?? '') : '';
         const hasBody = Boolean(intro.trim()) || Boolean((node.sub ?? '').trim()) || node.children.length > 0;
         // 索引路径（从知识库一路到当前节点的上一级）

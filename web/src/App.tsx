@@ -15,14 +15,12 @@ import {
   deleteKb,
   createFolder,
   renameFolder,
-  moveFolder,
   deleteFolder,
   type EntryInput as ApiEntryInput,
 } from './api';
 import TopBar, { type AppMode } from './components/TopBar';
 import SearchMode from './components/SearchMode';
 import FreeMode from './components/FreeMode';
-import ManageMode from './components/ManageMode';
 import DetailModal from './components/DetailModal';
 import AskModal from './components/AskModal';
 import EntryEditor from './components/EntryEditor';
@@ -212,10 +210,6 @@ export default function App() {
     const folder = await renameFolder(id, name);
     setFolders((prev) => prev.map((f) => (f.id === id ? folder : f)));
   }, []);
-  const handleMoveFolder = useCallback(async (id: string, opts: { parentId?: string | null; kbId?: string }): Promise<void> => {
-    const next = await moveFolder(id, opts);
-    setFolders(next);
-  }, []);
   const handleDeleteFolder = useCallback(async (id: string): Promise<void> => {
     const { folders: nf, entries: ne } = await deleteFolder(id);
     setFolders(nf);
@@ -237,7 +231,7 @@ export default function App() {
 
   return (
     <div style={{ ...themeVars(t), minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--font)', WebkitFontSmoothing: 'antialiased' }}>
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px' }}>
+      <div style={{ width: '100%', maxWidth: 'none', margin: 0, padding: '0 clamp(16px, 2.4vw, 44px) 44px' }}>
         <TopBar mode={mode} setMode={(m) => { setMode(m); setOpenId(null); if (m === 'search') setTimeout(() => inputRef.current?.focus(), 40); }} theme={theme} setTheme={setTheme} />
 
         {mode === 'search' && (
@@ -273,43 +267,28 @@ export default function App() {
         )}
 
         {mode === 'free' && (
-          <FreeMode
-            entries={entries}
-            kbs={kbs}
-            folders={folders}
-            freeKb={freeKb}
-            freeFolder={freeFolder}
-            setFreeKb={setFreeKb}
-            setFreeFolder={setFreeFolder}
-            onOpen={(id) => setOpenId(id)}
-            onNew={() => setFormOpen(true)}
-            onCreateKb={handleCreateKb}
-            onCreateFolder={handleCreateFolder}
-            onRenameKb={handleRenameKb}
-            onDeleteKb={handleDeleteKb}
-            onRenameFolder={handleRenameFolder}
-            onDeleteFolder={handleDeleteFolder}
-          />
-        )}
-
-        {mode === 'manage' && (
-          <ManageMode
-            entries={entries}
-            kbs={kbs}
-            folders={folders}
-            onCreate={handleCreate}
-            onUpdate={handleUpdate}
-            onDelete={handleDelete}
-            onReorder={handleReorder}
-            onImported={handleImported}
-            onCreateKb={handleCreateKb}
-            onRenameKb={handleRenameKb}
-            onDeleteKb={handleDeleteKb}
-            onCreateFolder={handleCreateFolder}
-            onRenameFolder={handleRenameFolder}
-            onMoveFolder={handleMoveFolder}
-            onDeleteFolder={handleDeleteFolder}
-          />
+          <div style={{ paddingTop: 14 }}>
+            <FreeMode
+              entries={entries}
+              kbs={kbs}
+              folders={folders}
+              freeKb={freeKb}
+              freeFolder={freeFolder}
+              setFreeKb={setFreeKb}
+              setFreeFolder={setFreeFolder}
+              onNew={() => setFormOpen(true)}
+              onCreate={handleCreate}
+              onUpdate={handleUpdate}
+              onDelete={handleDelete}
+              onImported={handleImported}
+              onCreateKb={handleCreateKb}
+              onCreateFolder={handleCreateFolder}
+              onRenameKb={handleRenameKb}
+              onDeleteKb={handleDeleteKb}
+              onRenameFolder={handleRenameFolder}
+              onDeleteFolder={handleDeleteFolder}
+            />
+          </div>
         )}
 
         {loaded && entries.length === 0 && (
@@ -349,6 +328,8 @@ export default function App() {
               initial={null}
               kbs={kbs}
               folders={folders}
+              defaultKbId={mode === 'free' ? freeKb ?? undefined : undefined}
+              defaultFolderId={mode === 'free' ? freeFolder : null}
               onCancel={closeAll}
               onSave={(input) =>
                 handleCreate(input).then((entry) => {

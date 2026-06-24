@@ -1,86 +1,57 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { Entry, EntryInput, IndexNode, KnowledgeBase, Folder } from '../types';
 import { forestOfKb } from '../tree';
 import type { FolderNode } from '../tree';
-import {
-  MAX_INDEX_DEPTH,
-  addChild,
-  addSibling,
-  descendantIds,
-  moveAsLastChild,
-  moveBefore,
-  moveNode,
-  newNode,
-  parentIdOf,
-  patchNode,
-  removeNode,
-} from '../outline';
-import { parseSections, renderMd } from '../markdown';
+import { renderMd } from '../markdown';
 import { toast } from '../toast';
-
-const LEVEL_CN = ['二', '三', '四', '五', '六'];
 
 const inputStyle: CSSProperties = {
   width: '100%',
   padding: '9px 11px',
   border: '1px solid var(--bd)',
   borderRadius: 10,
-  background: 'var(--bg)',
-  color: 'var(--fg)',
-  fontSize: 14,
-  outline: 'none',
-};
-
-const labelStyle: CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: 'var(--mut)',
-  letterSpacing: '0.06em',
-  textTransform: 'uppercase',
-  marginBottom: 5,
-  display: 'block',
-};
-
-const cardStyle: CSSProperties = {
-  border: '1px solid var(--bd)',
-  borderRadius: 14,
   background: 'var(--panel)',
-  padding: '14px 16px',
+  color: 'var(--fg)',
+  fontSize: 13,
+  outline: 'none',
+  fontFamily: 'inherit',
 };
 
-const iconBtn: CSSProperties = {
-  padding: '2px 7px',
+const ghostBtn: CSSProperties = {
+  padding: '9px 13px',
   border: '1px solid var(--bd)',
-  borderRadius: 7,
-  background: 'var(--bg)',
-  color: 'var(--mut)',
+  borderRadius: 12,
+  background: 'var(--panel)',
+  color: 'var(--fg)',
   cursor: 'pointer',
-  fontSize: 12,
-  lineHeight: '20px',
+  fontSize: 13,
+  fontFamily: 'inherit',
 };
 
-function snapshot(d: {
-  title: string;
-  kbId: string;
-  folderId: string | null;
-  tags: string[];
-  summary: string;
-  intro: string;
-  nodes: IndexNode[];
-}): string {
-  return JSON.stringify({
-    title: d.title.trim(),
-    kbId: d.kbId,
-    folderId: d.folderId,
-    tags: d.tags,
-    summary: d.summary.trim(),
-    intro: d.intro,
-    nodes: d.nodes,
-  });
+const primaryBtn: CSSProperties = {
+  padding: '10px 18px',
+  borderRadius: 12,
+  border: 'none',
+  background: 'var(--accent)',
+  color: '#fff',
+  fontWeight: 760,
+  fontSize: 13,
+  fontFamily: 'inherit',
+  cursor: 'pointer',
+};
+
+let idSeed = 0;
+function newIndexNode(title: string): IndexNode {
+  idSeed += 1;
+  return {
+    id: `ix_${Date.now().toString(36)}_${idSeed}`,
+    title,
+    content: '',
+    children: [],
+  };
 }
 
-// 将知识库内的文件夹森林展平为 <option>，多级用缩进前缀体现层级。
 function folderOptions(roots: FolderNode[], depth = 0): ReactNode[] {
   return roots.flatMap((n) => {
     const prefix = depth > 0 ? '　'.repeat(depth) + '└ ' : '';
@@ -94,8 +65,99 @@ function folderOptions(roots: FolderNode[], depth = 0): ReactNode[] {
   });
 }
 
+function nodeToMarkdown(node: IndexNode, level: number): string {
+  const heading = `${'#'.repeat(Math.min(level, 6))} ${node.title.trim() || '未命名'}`;
+  const parts = [heading];
+  if (node.content.trim()) parts.push(node.content.trim());
+  for (const child of node.children) parts.push(nodeToMarkdown(child, level + 1));
+  return parts.join('\n\n');
+}
+
+function entryToDocument(entry: Entry | null): string {
+  if (!entry) return '';
+  const parts: string[] = [];
+  if (entry.intro.trim()) parts.push(entry.intro.trim());
+  for (const node of entry.nodes) parts.push(nodeToMarkdown(node, 2));
+  return parts.join('\n\n').trim();
+}
+
+function parseDocumentToIndex(body: string): { intro: string; nodes: IndexNode[] } {
+  const lines = (body || '').split('\n');
+  const intro: string[] = [];
+  const roots: IndexNode[] = [];
+  const stack: { node: IndexNode; level: number; lines: string[] }[] = [];
+
+  const flush = (frame: { node: IndexNode; lines: string[] }): void => {
+    frame.node.content = frame.lines.join('\n').replace(/^\s*\n/, '').replace(/\s+$/, '');
+  };
+
+  for (const line of lines) {
+    const heading = /^(#{2,6})\s+(.+)$/.exec(line);
+    if (!heading) {
+      if (stack.length) stack[stack.length - 1].lines.push(line);
+      else intro.push(line);
+      continue;
+    }
+
+    const level = heading[1].length;
+    const node = newIndexNode(heading[2].trim());
+    while (stack.length && stack[stack.length - 1].level >= level) flush(stack.pop()!);
+    if (stack.length) stack[stack.length - 1].node.children.push(node);
+    else roots.push(node);
+    stack.push({ node, level, lines: [] });
+  }
+
+  while (stack.length) flush(stack.pop()!);
+  return { intro: intro.join('\n').trim(), nodes: roots };
+}
+
+function flattenNodes(nodes: IndexNode[]): IndexNode[] {
+  const out: IndexNode[] = [];
+  const walk = (list: IndexNode[]): void => {
+    for (const node of list) {
+      out.push(node);
+      walk(node.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+function cleanLine(line: string): string {
+  return line
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^[-*]\s+/, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .trim();
+}
+
+function deriveSummary(title: string, doc: string, tree: { intro: string; nodes: IndexNode[] }): string {
+  const firstText = doc
+    .split('\n')
+    .map(cleanLine)
+    .find((line) => line && line !== title.trim());
+  return (firstText || tree.nodes[0]?.title || title.trim() || '自建知识点').slice(0, 160);
+}
+
+function snapshot(d: {
+  title: string;
+  kbId: string;
+  folderId: string | null;
+  tags: string[];
+  doc: string;
+}): string {
+  return JSON.stringify({
+    title: d.title.trim(),
+    kbId: d.kbId,
+    folderId: d.folderId,
+    tags: d.tags,
+    doc: d.doc.trim(),
+  });
+}
+
 interface Props {
-  /** null = 新建 */
   initial: Entry | null;
   kbs: KnowledgeBase[];
   folders: Folder[];
@@ -114,15 +176,8 @@ export default function EntryEditor(props: Props): ReactNode {
   const [kbId, setKbId] = useState(initial?.kbId ?? defaultKbId ?? kbs[0]?.id ?? '');
   const [folderId, setFolderId] = useState<string | null>(initial?.folderId ?? defaultFolderId ?? null);
   const [tags, setTags] = useState(initial?.tags.join(', ') ?? '');
-  const [summary, setSummary] = useState(initial?.summary ?? '');
-  const [intro, setIntro] = useState(initial?.intro ?? '');
-  const [nodes, setNodes] = useState<IndexNode[]>(initial?.nodes ?? []);
-
-  const [openContent, setOpenContent] = useState<Set<string>>(new Set());
-  const [previewIds, setPreviewIds] = useState<Set<string>>(new Set());
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
-
+  const [doc, setDoc] = useState(entryToDocument(initial));
+  const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
 
@@ -138,24 +193,20 @@ export default function EntryEditor(props: Props): ReactNode {
       kbId: initial?.kbId ?? defaultKbId ?? kbs[0]?.id ?? '',
       folderId: initial?.folderId ?? defaultFolderId ?? null,
       tags: initial?.tags ?? [],
-      summary: initial?.summary ?? '',
-      intro: initial?.intro ?? '',
-      nodes: initial?.nodes ?? [],
+      doc: entryToDocument(initial),
     });
   }
 
-  const dirty = snapshot({ title, kbId, folderId, tags: tagList, summary, intro, nodes }) !== baseRef.current;
+  const tree = useMemo(() => parseDocumentToIndex(doc), [doc]);
+  const nodes = useMemo(() => flattenNodes(tree.nodes), [tree.nodes]);
+  const dirty = snapshot({ title, kbId, folderId, tags: tagList, doc }) !== baseRef.current;
+  const selectedKbName = kbs.find((k) => k.id === kbId)?.name ?? '知识库';
+  const selectedFolderName = folderId ? folders.find((f) => f.id === folderId)?.name ?? '文件夹' : '根目录';
+  const headingCount = nodes.length;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
-
-  const toggleSet = (set: Set<string>, id: string, next: boolean): Set<string> => {
-    const copy = new Set(set);
-    if (next) copy.add(id);
-    else copy.delete(id);
-    return copy;
-  };
 
   function handleSave(): void {
     if (saving) return;
@@ -167,33 +218,32 @@ export default function EntryEditor(props: Props): ReactNode {
       toast('请选择知识库', 'error');
       return;
     }
+
+    const nextTree = parseDocumentToIndex(doc);
     setSaving(true);
     onSave({
       title: title.trim(),
       kbId,
       folderId,
       tags: tagList,
-      summary: summary.trim(),
+      summary: deriveSummary(title, doc, nextTree),
       py: title.trim(),
-      intro,
-      nodes,
+      intro: nextTree.intro,
+      nodes: nextTree.nodes,
     })
       .then((saved) => {
+        const nextDoc = entryToDocument(saved);
         setTitle(saved.title);
         setKbId(saved.kbId);
         setFolderId(saved.folderId);
         setTags(saved.tags.join(', '));
-        setSummary(saved.summary ?? '');
-        setIntro(saved.intro ?? '');
-        setNodes(saved.nodes ?? []);
+        setDoc(nextDoc);
         baseRef.current = snapshot({
           title: saved.title,
           kbId: saved.kbId,
           folderId: saved.folderId,
           tags: saved.tags,
-          summary: saved.summary ?? '',
-          intro: saved.intro ?? '',
-          nodes: saved.nodes ?? [],
+          doc: nextDoc,
         });
         setSavedAt(Date.now());
         toast(isEdit ? '知识点已更新' : '知识点已创建', 'success');
@@ -204,7 +254,6 @@ export default function EntryEditor(props: Props): ReactNode {
       .finally(() => setSaving(false));
   }
 
-  // ⌘S 保存（编辑器挂载时）
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
@@ -215,460 +264,189 @@ export default function EntryEditor(props: Props): ReactNode {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, kbId, folderId, tags, summary, intro, nodes, saving]);
-
-  function addTopNode(): void {
-    setNodes((ns) => [...ns, newNode()]);
-  }
-
-  function canDrop(targetId: string): boolean {
-    if (!dragId || dragId === targetId) return false;
-    if (descendantIds(nodes, dragId).has(targetId)) return false;
-    return true;
-  }
-
-  function handleDrop(targetId: string): void {
-    if (!dragId || !canDrop(targetId)) {
-      setDragId(null);
-      setDropTarget(null);
-      return;
-    }
-    const sameParent = parentIdOf(nodes, dragId) === parentIdOf(nodes, targetId);
-    if (sameParent) {
-      setNodes((ns) => moveBefore(ns, dragId, targetId));
-    } else {
-      setNodes((ns) => moveAsLastChild(ns, dragId, targetId));
-    }
-    setDragId(null);
-    setDropTarget(null);
-  }
-
-  const kbName = kbs.find((k) => k.id === kbId)?.name ?? '未分类';
-
-  const draftPreview: Entry = {
-    id: initial?.id ?? '__draft__',
-    cat: kbName,
-    kbId,
-    folderId,
-    title: title.trim() || '（未命名知识点）',
-    py: title.trim() || '',
-    tags: tagList,
-    summary: summary.trim() || intro.split('\n').map((l) => l.trim()).find(Boolean) || '',
-    intro,
-    nodes,
-    sort: initial?.sort ?? 0,
-    createdAt: initial?.createdAt ?? 0,
-    updatedAt: initial?.updatedAt ?? 0,
-  };
-
-  function renderNodes(list: IndexNode[], depth: number): ReactNode {
-    return list.map((n, i) => {
-      const open = openContent.has(n.id);
-      const previewMode = previewIds.has(n.id);
-      const canNest = depth < MAX_INDEX_DEPTH;
-      const isDropTarget = dropTarget === n.id;
-      const sameParent = dragId ? parentIdOf(nodes, dragId) === parentIdOf(nodes, n.id) : false;
-      return (
-        <div key={n.id} style={{ marginLeft: depth === 0 ? 0 : 14 }}>
-          <div
-            style={{
-              borderLeft: depth === 0 ? 'none' : `1px dashed var(--bd)`,
-              paddingLeft: depth === 0 ? 0 : 12,
-              marginTop: 6,
-            }}
-          >
-            <div
-              draggable
-              onDragStart={() => setDragId(n.id)}
-              onDragEnd={() => {
-                setDragId(null);
-                setDropTarget(null);
-              }}
-              onDragOver={(e) => {
-                if (canDrop(n.id)) {
-                  e.preventDefault();
-                  setDropTarget(n.id);
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleDrop(n.id);
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '5px 6px',
-                borderRadius: 9,
-                background: dragId === n.id ? 'var(--sel)' : isDropTarget ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent',
-                borderTop: isDropTarget && sameParent ? '2px solid var(--accent)' : '2px solid transparent',
-                boxShadow: isDropTarget && !sameParent ? 'inset 0 0 0 2px var(--accent)' : 'none',
-                transition: 'background 0.12s',
-              }}
-            >
-              <span
-                title="拖拽排序：拖到同级上=前移，拖到其他层级上=变为它的下级"
-                style={{ cursor: 'grab', color: 'var(--mut)', userSelect: 'none', fontSize: 14, padding: '0 2px' }}
-              >
-                ⠿
-              </span>
-              <input
-                value={n.title}
-                onChange={(e) => setNodes((ns) => patchNode(ns, n.id, { title: e.target.value }))}
-                placeholder={`（${LEVEL_CN[depth] || '级'}标题）`}
-                style={{
-                  ...inputStyle,
-                  fontWeight: depth === 0 ? 700 : 600,
-                  padding: '7px 10px',
-                  fontSize: depth === 0 ? 14 : 13,
-                }}
-              />
-              <button
-                type="button"
-                title="上移"
-                style={iconBtn}
-                onClick={() => setNodes((ns) => moveNode(ns, n.id, -1))}
-                disabled={i === 0}
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                title="下移"
-                style={iconBtn}
-                onClick={() => setNodes((ns) => moveNode(ns, n.id, +1))}
-                disabled={i === list.length - 1}
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                title={open ? '收起内容' : '展开内容'}
-                style={{ ...iconBtn, color: open ? 'var(--accent)' : 'var(--mut)' }}
-                onClick={() => setOpenContent((s) => toggleSet(s, n.id, !open))}
-              >
-                {open ? '▾' : '▸'} 内容
-              </button>
-              <button
-                type="button"
-                title="新增同级"
-                style={iconBtn}
-                onClick={() => setNodes((ns) => addSibling(ns, n.id, newNode()))}
-              >
-                ＋同级
-              </button>
-              {canNest && (
-                <button
-                  type="button"
-                  title={`新增${LEVEL_CN[depth + 1] || '下'}级`}
-                  style={iconBtn}
-                  onClick={() => {
-                    setNodes((ns) => addChild(ns, n.id, newNode()));
-                    setOpenContent((s) => toggleSet(s, n.id, true));
-                  }}
-                >
-                  ＋下级
-                </button>
-              )}
-              <button
-                type="button"
-                title="删除"
-                style={{ ...iconBtn, color: 'var(--danger)' }}
-                onClick={() => setNodes((ns) => removeNode(ns, n.id))}
-              >
-                ✕
-              </button>
-            </div>
-
-            {open && (
-              <div style={{ marginTop: 6, marginBottom: 6 }}>
-                <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                  <button
-                    type="button"
-                    style={{ ...iconBtn, color: !previewMode ? 'var(--accent)' : 'var(--mut)' }}
-                    onClick={() => setPreviewIds((s) => toggleSet(s, n.id, false))}
-                  >
-                    编辑
-                  </button>
-                  <button
-                    type="button"
-                    style={{ ...iconBtn, color: previewMode ? 'var(--accent)' : 'var(--mut)' }}
-                    onClick={() => setPreviewIds((s) => toggleSet(s, n.id, true))}
-                  >
-                    预览
-                  </button>
-                  <span style={{ fontSize: 11, color: 'var(--mut)', alignSelf: 'center' }}>支持 Markdown</span>
-                </div>
-                {previewMode ? (
-                  <div
-                    className="ik-md"
-                    style={{
-                      border: '1px solid var(--bd)',
-                      borderRadius: 10,
-                      padding: '10px 12px',
-                      background: 'var(--bg)',
-                      minHeight: 60,
-                      fontSize: 13,
-                    }}
-                  >
-                    {n.content?.trim() ? renderMd(n.content) : <span style={{ color: 'var(--mut)' }}>（无内容）</span>}
-                  </div>
-                ) : (
-                  <textarea
-                    value={n.content}
-                    onChange={(e) => setNodes((ns) => patchNode(ns, n.id, { content: e.target.value }))}
-                    placeholder="此处的正文内容，支持 **加粗**、`code`、列表、代码块等 Markdown 语法…"
-                    style={{
-                      width: '100%',
-                      minHeight: 120,
-                      padding: '10px 12px',
-                      border: '1px solid var(--bd)',
-                      borderRadius: 10,
-                      background: 'var(--bg)',
-                      color: 'var(--fg)',
-                      fontSize: 13,
-                      lineHeight: 1.7,
-                      resize: 'vertical',
-                      outline: 'none',
-                      fontFamily: 'inherit',
-                    }}
-                  />
-                )}
-              </div>
-            )}
-
-            {n.children.length > 0 && renderNodes(n.children, depth + 1)}
-          </div>
-        </div>
-      );
-    });
-  }
+  }, [title, kbId, folderId, tags, doc, saving]);
 
   return (
-    <div>
-      {/* 头部 */}
+    <div style={{ maxWidth: 1040, margin: '0 auto' }}>
       <div
         style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 3,
           display: 'flex',
           alignItems: 'center',
           gap: 10,
-          marginBottom: 12,
-          position: 'sticky',
-          top: 0,
-          zIndex: 2,
-          background: 'var(--bg)',
-          padding: '6px 0',
+          padding: '12px 0 14px',
+          marginBottom: 10,
+          background: 'linear-gradient(to bottom, var(--bg) 82%, color-mix(in srgb, var(--bg) 0%, transparent))',
         }}
       >
-        <div style={{ fontSize: 15, fontWeight: 800 }}>
-          {isEdit ? '编辑知识点' : '新建知识点'}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, color: 'var(--mut)', letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 820 }}>
+            {isEdit ? 'Edit Document' : 'New Document'}
+          </div>
+          <div style={{ marginTop: 3, fontSize: 13, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {selectedKbName} · {headingCount ? `${headingCount} 个标题会生成知识树` : '用 ## 标题生成知识树'}
+            {dirty ? ' · 未保存' : savedAt ? ' · 已保存' : ''}
+          </div>
         </div>
-        <span
-          style={{
-            fontSize: 12,
-            color: 'var(--mut)',
-            background: 'var(--panel)',
-            border: '1px solid var(--bd)',
-            padding: '2px 8px',
-            borderRadius: 20,
-          }}
-        >
-          {savedAt ? '已保存' : dirty ? '未保存' : isEdit ? '无改动' : '草稿'}
-        </span>
-        <div style={{ flex: 1 }} />
-        <button type="button" style={iconBtn} onClick={onCancel}>
-          关闭
+
+        <button type="button" style={ghostBtn} onClick={() => setShowPreview((v) => !v)}>
+          {showPreview ? '继续编辑' : '预览'}
         </button>
+        {onCancel && (
+          <button type="button" style={ghostBtn} onClick={onCancel}>
+            {isEdit ? '返回' : '取消'}
+          </button>
+        )}
         <button
           type="button"
           onClick={handleSave}
           disabled={saving || !dirty}
           style={{
-            padding: '7px 18px',
-            borderRadius: 10,
-            border: 'none',
+            ...primaryBtn,
             background: dirty ? 'var(--accent)' : 'var(--bd)',
             color: dirty ? '#fff' : 'var(--mut)',
-            fontWeight: 700,
-            fontSize: 13,
             cursor: dirty && !saving ? 'pointer' : 'not-allowed',
+            opacity: saving ? 0.7 : 1,
           }}
         >
-          {saving ? '保存中…' : '保存（⌘S）'}
+          {saving ? '保存中…' : '保存 ⌘S'}
         </button>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
-        {/* 左：编辑区 */}
-        <div style={{ flex: '1 1 460px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={cardStyle}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={labelStyle}>标题</label>
-                <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="知识点标题" style={inputStyle} autoFocus={!isEdit} />
-              </div>
-              <div>
-                <label style={labelStyle}>知识库</label>
-                <select
-                  value={kbId}
-                  onChange={(e) => {
-                    setKbId(e.target.value);
-                    // 切换知识库后归属文件夹失效，回退到根目录
-                    setFolderId(null);
-                  }}
-                  style={inputStyle}
-                >
-                  {kbs.map((k) => (
-                    <option key={k.id} value={k.id}>{k.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <label style={labelStyle}>文件夹</label>
-              <select
-                value={folderId ?? ''}
-                onChange={(e) => setFolderId(e.target.value || null)}
-                style={inputStyle}
-              >
-                <option value="">根目录</option>
-                {folderOptions(forestOfKb(folders, kbId))}
-              </select>
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <label style={labelStyle}>标签（逗号分隔）</label>
-              <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="js, 闭包, 基础" style={inputStyle} />
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <label style={labelStyle}>摘要</label>
-              <input value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="一句话概要（用于列表/检索）" style={inputStyle} />
-            </div>
-          </div>
+      <div
+        style={{
+          border: '1px solid var(--bd)',
+          borderRadius: 18,
+          background: 'var(--panel)',
+          boxShadow: '0 22px 60px rgba(0,0,0,.06)',
+          overflow: 'hidden',
+        }}
+      >
+        <details
+          style={{
+            borderBottom: '1px solid var(--bd)',
+            background: 'color-mix(in srgb, var(--bg) 55%, transparent)',
+          }}
+        >
+          <summary
+            style={{
+              padding: '12px 18px',
+              cursor: 'pointer',
+              color: 'var(--mut)',
+              fontSize: 12.5,
+              userSelect: 'none',
+            }}
+          >
+            属性 · {selectedKbName} / {selectedFolderName}{tagList.length ? ` · ${tagList.length} 个标签` : ''}
+          </summary>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(150px, 190px) minmax(150px, 190px) minmax(180px, 1fr)',
+              gap: 10,
+              padding: '0 18px 14px',
+            }}
+          >
+            <select
+              value={kbId}
+              onChange={(e) => {
+                setKbId(e.target.value);
+                setFolderId(null);
+              }}
+              style={inputStyle}
+              title="知识库"
+            >
+              {kbs.map((k) => (
+                <option key={k.id} value={k.id}>{k.name}</option>
+              ))}
+            </select>
 
-          <div style={cardStyle}>
-            <label style={{ ...labelStyle, marginBottom: 0 }}>
-              引言 <span style={{ textTransform: 'none', fontWeight: 500, color: 'var(--mut)' }}>· 正文前的导言（可选）</span>
-            </label>
+            <select value={folderId ?? ''} onChange={(e) => setFolderId(e.target.value || null)} style={inputStyle} title="文件夹">
+              <option value="">根目录</option>
+              {folderOptions(forestOfKb(folders, kbId))}
+            </select>
+
+            <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="标签，用逗号分隔" style={inputStyle} />
+          </div>
+        </details>
+
+        <div style={{ padding: '46px 64px 64px' }}>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="无标题知识点"
+            autoFocus={!isEdit}
+            style={{
+              width: '100%',
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              color: 'var(--fg)',
+              fontSize: 38,
+              lineHeight: 1.15,
+              fontWeight: 860,
+              letterSpacing: '-.04em',
+              fontFamily: 'inherit',
+              marginBottom: 24,
+            }}
+          />
+
+          {showPreview ? (
+            <div
+              className="ik-md"
+              style={{
+                minHeight: 560,
+                color: 'var(--fg)',
+                fontSize: 16,
+                lineHeight: 1.85,
+              }}
+            >
+              {doc.trim() ? renderMd(doc) : <span style={{ color: 'var(--mut)' }}>还没有正文内容。</span>}
+            </div>
+          ) : (
             <textarea
-              value={intro}
-              onChange={(e) => setIntro(e.target.value)}
-              placeholder="知识点开篇的引言，简述背景或核心结论…"
+              value={doc}
+              onChange={(e) => setDoc(e.target.value)}
+              placeholder={`直接像写文档一样输入内容。\n\n普通段落会作为开篇说明。\n\n## 核心定义\n这里写面试回答。\n\n### 常见追问\n这里写追问和回答。\n\n#### 易错点\n这里写坑点。`}
+              spellCheck={false}
               style={{
                 width: '100%',
-                marginTop: 8,
-                minHeight: 64,
-                padding: '10px 12px',
-                border: '1px solid var(--bd)',
-                borderRadius: 10,
-                background: 'var(--bg)',
-                color: 'var(--fg)',
-                fontSize: 13,
-                lineHeight: 1.7,
-                resize: 'vertical',
+                minHeight: 620,
+                border: 'none',
                 outline: 'none',
+                resize: 'vertical',
+                background: 'transparent',
+                color: 'var(--fg)',
+                fontSize: 16,
+                lineHeight: 1.9,
                 fontFamily: 'inherit',
               }}
             />
-          </div>
+          )}
 
-          <div style={{ ...cardStyle, padding: '12px 14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <label style={{ ...labelStyle, margin: 0 }}>多级索引</label>
-              <span style={{ fontSize: 11, color: 'var(--mut)' }}>
-                拖动 ⠿ 在同级间排序，拖到其他层级上可改变归属
-              </span>
-              <div style={{ flex: 1 }} />
-              <button type="button" style={iconBtn} onClick={addTopNode}>
-                ＋ 添加二级索引
-              </button>
-            </div>
-            {nodes.length === 0 ? (
-              <div
-                style={{
-                  padding: '22px 12px',
-                  textAlign: 'center',
-                  border: '1px dashed var(--bd)',
-                  borderRadius: 10,
-                  color: 'var(--mut)',
-                  fontSize: 13,
-                }}
-              >
-                暂无索引，点击「＋ 添加二级索引」开始构建知识结构
-              </div>
-            ) : (
-              <div>{renderNodes(nodes, 0)}</div>
-            )}
-          </div>
-        </div>
-
-        {/* 右：实时预览 */}
-        <div style={{ flex: '1 1 300px', minWidth: 280, position: 'sticky', top: 64 }}>
-          <div style={{ ...cardStyle, padding: '14px 16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--mut)', letterSpacing: '0.06em' }}>
-                实时预览
-              </span>
-              <span
-                style={{
-                  fontSize: 11,
-                  color: 'var(--mut)',
-                  border: '1px solid var(--bd)',
-                  borderRadius: 20,
-                  padding: '1px 8px',
-                }}
-              >
-                {draftPreview.cat}
-              </span>
-            </div>
-            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>{draftPreview.title}</div>
-            {draftPreview.summary ? (
-              <div style={{ fontSize: 13, color: 'var(--mut)', marginBottom: 10 }}>{draftPreview.summary}</div>
-            ) : null}
-            {draftPreview.tags.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                {draftPreview.tags.map((t) => (
-                  <span
-                    key={t}
-                    style={{
-                      fontSize: 11,
-                      padding: '1px 8px',
-                      borderRadius: 20,
-                      background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
-                      color: 'var(--accent)',
-                    }}
-                  >
-                    #{t}
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="ik-md" style={{ fontSize: 13, lineHeight: 1.8 }}>
-              {renderPreview(draftPreview)}
-            </div>
+          <div
+            style={{
+              marginTop: 18,
+              paddingTop: 14,
+              borderTop: '1px solid var(--bd)',
+              display: 'flex',
+              gap: 12,
+              flexWrap: 'wrap',
+              color: 'var(--mut)',
+              fontSize: 12,
+              lineHeight: 1.7,
+            }}
+          >
+            <span>普通段落 = 开篇说明</span>
+            <span>## = 一级考点</span>
+            <span>### = 子考点</span>
+            <span>#### = 追问 / 易错点</span>
+            <span>保存后自动同步到画布和检索</span>
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function renderPreview(entry: Entry): ReactNode {
-  const sections = parseSections(entry);
-  const hasIntro = !!sections.intro;
-  const hasNodes = sections.nodes.length > 0;
-  if (!hasIntro && !hasNodes) {
-    return <span style={{ color: 'var(--mut)' }}>（引言与索引均为空，先在左侧填写内容）</span>;
-  }
-  return (
-    <>
-      {hasIntro ? <div style={{ color: 'var(--mut)', marginBottom: 8 }}>{sections.intro}</div> : null}
-      {sections.nodes.map((n) => (
-        <div key={n.key} style={{ marginBottom: 8, paddingLeft: 10, borderLeft: '2px solid var(--bd)' }}>
-          <div style={{ fontWeight: 700, margin: '4px 0 2px' }}>{n.title}</div>
-          <div style={{ fontSize: 13 }}>{n.content}</div>
-        </div>
-      ))}
-    </>
   );
 }

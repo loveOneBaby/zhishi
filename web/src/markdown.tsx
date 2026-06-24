@@ -2,29 +2,64 @@ import React from 'react';
 import type { Entry } from './types';
 import { highlightText } from './highlight';
 
-// 轻量 markdown 渲染：支持链接 / 加粗 / 代码 / 多级标题 / 列表 / 代码块
+function safeImageSrc(src: string): string {
+  const s = src.trim();
+  if (/^\/(Users|var|private|tmp|home)\//i.test(s)) return '';
+  if (/^(https?:\/\/|data:image\/|\/)/i.test(s)) return s;
+  return '';
+}
+
+function imageNode(src: string, alt: string, key: React.Key): React.ReactNode {
+  const safe = safeImageSrc(src);
+  if (!safe) {
+    return <span key={key} style={{ color: 'var(--mut)' }}>{alt || '图片'}</span>;
+  }
+  return (
+    <figure key={key} style={{ margin: '10px 0 16px' }}>
+      <img
+        src={safe}
+        alt={alt}
+        loading="lazy"
+        style={{
+          display: 'block',
+          maxWidth: '100%',
+          maxHeight: 520,
+          objectFit: 'contain',
+          borderRadius: 14,
+          border: '1px solid var(--bd)',
+          background: 'var(--bg)',
+        }}
+      />
+      {alt ? <figcaption style={{ marginTop: 6, fontSize: 12, color: 'var(--mut)', lineHeight: 1.5 }}>{alt}</figcaption> : null}
+    </figure>
+  );
+}
+
+// 轻量 markdown 渲染：支持图片 / 链接 / 加粗 / 代码 / 多级标题 / 列表 / 代码块
 function inline(t: string, query = ''): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   let last = 0;
   let k = 0;
-  const re = /\[([^\]]+)]\((https?:\/\/[^)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`/g;
+  const re = /!\[([^\]]*)]\(([^)]+)\)|\[([^\]]+)]\((https?:\/\/[^)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(t))) {
     if (m.index > last) parts.push(<React.Fragment key={k++}>{highlightText(t.slice(last, m.index), query)}</React.Fragment>);
     if (m[1] != null) {
-      parts.push(
-        <a key={k++} href={m[2]} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3 }}>{highlightText(m[1], query)}</a>
-      );
+      parts.push(imageNode(m[2], m[1], k++));
     } else if (m[3] != null) {
       parts.push(
-        <strong key={k++} style={{ fontWeight: 700 }}>{highlightText(m[3], query)}</strong>
+        <a key={k++} href={m[4]} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3 }}>{highlightText(m[3], query)}</a>
+      );
+    } else if (m[5] != null) {
+      parts.push(
+        <strong key={k++} style={{ fontWeight: 700 }}>{highlightText(m[5], query)}</strong>
       );
     } else {
       parts.push(
         <code
           key={k++}
           style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '.9em', background: 'var(--sel)', padding: '1px 6px', borderRadius: '5px' }}
-        >{highlightText(m[4], query)}</code>
+        >{highlightText(m[6], query)}</code>
       );
     }
     last = re.lastIndex;
@@ -40,6 +75,12 @@ export function renderMd(md: string, query = ''): React.ReactNode {
   let k = 0;
   while (i < lines.length) {
     const ln = lines[i];
+    const img = /^!\[([^\]]*)]\((.+)\)$/.exec(ln.trim());
+    if (img) {
+      out.push(imageNode(img[2], img[1], k++));
+      i++;
+      continue;
+    }
     if (ln.startsWith('```')) {
       const code: string[] = [];
       i++;

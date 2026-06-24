@@ -157,13 +157,13 @@ export async function exportAll(): Promise<ExportPayload> {
   return j<ExportPayload>(await fetch(`${BASE}/export`));
 }
 
-// 导入载荷：兼容 kb-export-2（带 kbs/folders）与旧的纯 entries 数组 / kb-import-2
+// 导入载荷：主格式为 knowledge-tree-v1（meta + tree）
 export interface ImportPayload {
   version?: string;
-  kbs?: unknown[];
-  folders?: unknown[];
-  assets?: unknown[];
-  entries: unknown[];
+  meta?: unknown;
+  tree: unknown[];
+  targetKbId?: string;
+  targetKbName?: string;
 }
 
 export interface ImportResult {

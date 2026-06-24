@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { Entry, EntryInput, KnowledgeBase, Folder } from '../types';
 import { folderPathName, folderSubtreeIds } from '../tree';
+import { matchesQuery, toSearchText } from '../pinyin-search';
 import EntryEditor from './EntryEditor';
 import ImportPreviewModal from './ImportPreviewModal';
 import { exportAll, importAll, previewImport, type ImportPayload, type ImportPreview } from '../api';
@@ -23,6 +24,7 @@ interface Props {
   onRenameFolder: (id: string, name: string) => Promise<void>;
   onMoveFolder: (id: string, opts: { parentId?: string | null; kbId?: string }) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
+  topOffset?: number;
 }
 
 const cardStyle: CSSProperties = {
@@ -62,16 +64,31 @@ const menuBoxStyle: CSSProperties = {
   overflow: 'hidden',
 };
 
+function entryIndexText(e: Entry): string {
+  const parts: string[] = [e.intro];
+  const walk = (nodes: Entry['nodes']): void => {
+    for (const node of nodes) {
+      parts.push(node.title, node.content);
+      walk(node.children);
+    }
+  };
+  walk(e.nodes);
+  return parts.filter(Boolean).join(' ');
+}
+
 function matches(e: Entry, q: string, folders: Folder[]): boolean {
   if (!q) return true;
-  const s = q.toLowerCase();
-  return (
-    e.title.toLowerCase().includes(s) ||
-    (e.summary ?? '').toLowerCase().includes(s) ||
-    (e.py ?? '').toLowerCase().includes(s) ||
-    e.tags.some((t) => t.toLowerCase().includes(s)) ||
-    e.cat.toLowerCase().includes(s) ||
-    folderPathName(folders, e.folderId).toLowerCase().includes(s)
+  return matchesQuery(
+    toSearchText(
+      e.title,
+      e.summary,
+      e.py,
+      e.tags.join(' '),
+      e.cat,
+      folderPathName(folders, e.folderId),
+      entryIndexText(e)
+    ),
+    q
   );
 }
 
@@ -92,6 +109,7 @@ export default function ManageMode(props: Props): ReactNode {
     onRenameFolder,
     onMoveFolder,
     onDeleteFolder,
+    topOffset = 60,
   } = props;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -238,15 +256,12 @@ export default function ManageMode(props: Props): ReactNode {
         toast('文件解析失败：' + (err instanceof Error ? err.message : String(err)), 'error');
         return;
       }
-      // 兼容：纯数组、{ entries }、kb-export-2 的 { version, kbs, folders, entries }
-      const obj = parsed as { version?: string; kbs?: unknown[]; folders?: unknown[]; assets?: unknown[]; entries?: unknown[] };
-      const arr: unknown[] = Array.isArray(parsed)
-        ? (parsed as unknown[])
-        : Array.isArray(obj?.entries)
-        ? obj.entries
-        : [];
-      if (!arr.length) { toast('文件中没有可导入的知识点', 'error'); return; }
-      const payload: ImportPayload = { version: obj?.version, kbs: obj?.kbs, folders: obj?.folders, assets: obj?.assets, entries: arr };
+      const obj = parsed as { version?: string; meta?: unknown; tree?: unknown[] };
+      if (!Array.isArray(obj?.tree) || obj.tree.length === 0) {
+        toast('文件中没有 tree 数组，当前只支持 knowledge-tree-v1', 'error');
+        return;
+      }
+      const payload: ImportPayload = { version: obj.version, meta: obj.meta, tree: obj.tree };
       previewImport(payload)
         .then((preview) => setImportPreview({ payload, preview }))
         .catch((err) => toast('解析失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
@@ -652,7 +667,7 @@ export default function ManageMode(props: Props): ReactNode {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: `calc(100vh - ${topOffset}px)` }}>
       {/* 顶部工具栏 */}
       <div
         style={{
