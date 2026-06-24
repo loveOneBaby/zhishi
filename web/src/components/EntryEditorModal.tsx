@@ -96,7 +96,7 @@ export default function EntryEditorModal({ initial, knownCats, onClose, onSubmit
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 18 }}>
-          <span style={{ fontSize: 12, color: '#e5484d' }}>{err}</span>
+          <span style={{ fontSize: 12, color: 'var(--danger)' }}>{err}</span>
           <div style={{ display: 'flex', gap: 10 }}>
             <button onClick={onClose} style={{ padding: '9px 16px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'transparent', color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 9 }}>取消</button>
             <button onClick={submit} disabled={saving} style={{ padding: '9px 20px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'var(--fg)', color: 'var(--bg)', border: 'none', borderRadius: 9, fontWeight: 500, opacity: saving ? 0.6 : 1 }}>{saving ? '保存中…' : '保存'}</button>

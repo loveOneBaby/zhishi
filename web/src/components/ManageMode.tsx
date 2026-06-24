@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent } from 'react';
 import type { Entry, IndexNode } from '../types';
-import type { EntryInput } from '../api';
+import { exportAll, type EntryInput } from '../api';
 import { filterEntries } from '../search';
 import { chip } from '../ui';
+import { toast } from '../toast';
 import EntryEditorModal from './EntryEditorModal';
 import IndexTreeEditor from './IndexTreeEditor';
 
@@ -13,6 +14,7 @@ interface Props {
   onUpdate: (id: string, input: EntryInput) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onReorder: (ids: string[]) => Promise<void>;
+  onImport: (list: unknown[], replace: boolean) => Promise<void>;
 }
 
 function fmtDate(ms?: number): string {
@@ -27,7 +29,8 @@ const cellBtn: CSSProperties = {
   background: 'transparent', border: '1px solid var(--bd)', borderRadius: 7, color: 'var(--fg)',
 };
 
-export default function ManageMode({ entries, onCreate, onUpdate, onDelete, onReorder }: Props) {
+export default function ManageMode({ entries, onCreate, onUpdate, onDelete, onReorder, onImport }: Props) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState('');
   const [activeCat, setActiveCat] = useState('全部');
   const [editorOpen, setEditorOpen] = useState(false);
@@ -79,18 +82,51 @@ export default function ManageMode({ entries, onCreate, onUpdate, onDelete, onRe
     else await onCreate(input);
     setEditorOpen(false);
     setEditing(null);
+    toast(editing ? '知识点已更新' : '知识点已创建', 'success');
   }
 
   // 保存某知识点的多级索引（仅改 intro / nodes，其余字段保持）
   async function handleSaveIndex(e: Entry, intro: string, nodes: IndexNode[]) {
     await onUpdate(e.id, { title: e.title, cat: e.cat, tags: e.tags, summary: e.summary, intro, nodes });
+    toast('索引已保存', 'success');
   }
 
   async function handleDelete(id: string) {
     setBusyId(id);
-    try { await onDelete(id); setConfirmId(null); }
-    catch (e) { alert('删除失败：' + (e instanceof Error ? e.message : String(e))); }
+    try { await onDelete(id); setConfirmId(null); toast('已删除', 'success'); }
+    catch (e) { toast('删除失败：' + (e instanceof Error ? e.message : String(e)), 'error'); }
     finally { setBusyId(null); }
+  }
+
+  async function handleExport() {
+    try {
+      const data = await exportAll();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `知识库备份-${stamp}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast(`已导出 ${data.entries.length} 条`, 'success');
+    } catch (e) {
+      toast('导出失败：' + (e instanceof Error ? e.message : String(e)), 'error');
+    }
+  }
+
+  async function handleImportFile(file: File) {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const list: unknown[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.entries) ? parsed.entries : [];
+      if (!list.length) { toast('文件中没有可导入的知识点', 'error'); return; }
+      const replace = window.confirm(`将导入 ${list.length} 条。\n\n确定 = 覆盖替换（先清空现有，再整体导入）\n取消 = 合并（按 id 更新已有、新增其余）`);
+      await onImport(list, replace);
+      toast(`已${replace ? '替换' : '合并'}导入 ${list.length} 条`, 'success');
+    } catch (e) {
+      toast('导入失败：' + (e instanceof Error ? e.message : String(e)), 'error');
+    }
   }
 
   // 组内拖拽排序
@@ -117,7 +153,18 @@ export default function ManageMode({ entries, onCreate, onUpdate, onDelete, onRe
           <div style={{ fontSize: 18, fontWeight: 700 }}>知识点管理</div>
           <div style={{ fontSize: 12.5, color: 'var(--mut)', marginTop: 3 }}>共 {entries.length} 条 · {cats.length} 个知识库 · 当前显示 {shownCount} 条</div>
         </div>
-        <button onClick={openCreate} style={{ padding: '10px 18px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'var(--fg)', color: 'var(--bg)', border: 'none', borderRadius: 9, fontWeight: 600 }}>＋ 新建知识点</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            style={{ display: 'none' }}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportFile(f); e.target.value = ''; }}
+          />
+          <button onClick={handleExport} style={{ padding: '10px 14px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'transparent', color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 9 }}>导出</button>
+          <button onClick={() => fileRef.current?.click()} style={{ padding: '10px 14px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'transparent', color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 9 }}>导入</button>
+          <button onClick={openCreate} style={{ padding: '10px 18px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'var(--fg)', color: 'var(--bg)', border: 'none', borderRadius: 9, fontWeight: 600 }}>＋ 新建知识点</button>
+        </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -182,13 +229,13 @@ export default function ManageMode({ entries, onCreate, onUpdate, onDelete, onRe
                     <span style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                       {confirmId === e.id ? (
                         <>
-                          <button onClick={() => handleDelete(e.id)} disabled={busyId === e.id} style={{ ...cellBtn, color: '#fff', background: '#e5484d', border: 'none' }}>{busyId === e.id ? '…' : '确认删除'}</button>
+                          <button onClick={() => handleDelete(e.id)} disabled={busyId === e.id} style={{ ...cellBtn, color: 'var(--bg)', background: 'var(--danger)', border: 'none' }}>{busyId === e.id ? '…' : '确认删除'}</button>
                           <button onClick={() => setConfirmId(null)} style={cellBtn}>取消</button>
                         </>
                       ) : (
                         <>
                           <button onClick={() => openEdit(e)} style={cellBtn}>编辑</button>
-                          <button onClick={() => setConfirmId(e.id)} style={{ ...cellBtn, color: '#e5484d' }}>删除</button>
+                          <button onClick={() => setConfirmId(e.id)} style={{ ...cellBtn, color: 'var(--danger)' }}>删除</button>
                         </>
                       )}
                     </span>

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { Entry, ThemeKey } from './types';
 import { THEMES, themeVars } from './themes';
 import { filterEntries, suggestQueries } from './search';
-import { fetchEntries, createEntry, updateEntry, deleteEntry, reorderEntries, type NewEntryInput, type EntryInput } from './api';
+import { fetchEntries, createEntry, updateEntry, deleteEntry, reorderEntries, importAll, type NewEntryInput, type EntryInput } from './api';
 import TopBar, { type AppMode } from './components/TopBar';
 import SearchMode from './components/SearchMode';
 import FreeMode from './components/FreeMode';
@@ -10,6 +10,8 @@ import ManageMode from './components/ManageMode';
 import DetailModal from './components/DetailModal';
 import AskModal from './components/AskModal';
 import NewEntryModal from './components/NewEntryModal';
+import Toaster from './components/Toaster';
+import { toast } from './toast';
 
 export default function App() {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -44,13 +46,15 @@ export default function App() {
   };
 
   const t = THEMES[theme];
+  // 防抖：输入即时更新，过滤/建议在空闲时计算（避免逐字全量重算）
+  const deferredQuery = useDeferredValue(query);
   const results = useMemo(
-    () => (mode === 'search' ? filterEntries(entries, query) : []),
-    [entries, query, mode]
+    () => (mode === 'search' ? filterEntries(entries, deferredQuery) : []),
+    [entries, deferredQuery, mode]
   );
   const suggestions = useMemo(
-    () => (mode === 'search' ? suggestQueries(entries, query) : []),
-    [entries, query, mode]
+    () => (mode === 'search' ? suggestQueries(entries, deferredQuery) : []),
+    [entries, deferredQuery, mode]
   );
 
   const closeAll = useCallback(() => { setOpenId(null); setAiOpen(false); setFormOpen(false); }, []);
@@ -97,7 +101,7 @@ export default function App() {
       setEntries((prev) => [...prev, entry]);
       setFormOpen(false);
     } catch (e) {
-      alert('保存失败：' + (e instanceof Error ? e.message : String(e)));
+      toast('保存失败：' + (e instanceof Error ? e.message : String(e)), 'error');
     }
   }
 
@@ -118,6 +122,10 @@ export default function App() {
   }, []);
   const handleReorder = useCallback(async (ids: string[]) => {
     const next = await reorderEntries(ids);
+    setEntries(next);
+  }, []);
+  const handleImport = useCallback(async (list: unknown[], replace: boolean) => {
+    const next = await importAll(list, replace);
     setEntries(next);
   }, []);
 
@@ -176,6 +184,7 @@ export default function App() {
             onUpdate={handleUpdate}
             onDelete={handleDelete}
             onReorder={handleReorder}
+            onImport={handleImport}
           />
         )}
 
@@ -189,6 +198,7 @@ export default function App() {
       {modalEntry && <DetailModal entry={modalEntry} onClose={closeAll} />}
       {aiOpen && <AskModal query={query} onClose={closeAll} />}
       {formOpen && <NewEntryModal onClose={closeAll} onSave={handleSave} />}
+      <Toaster />
     </div>
   );
 }

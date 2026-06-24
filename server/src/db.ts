@@ -204,13 +204,20 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
     intro: input.intro ?? cur.intro,
     nodes: input.nodes ?? cur.nodes,
   });
+  const nextTitle = input.title?.trim() ?? cur.title;
+  // 标题变更且未显式给 py 时，按新标题重算拼音源，避免检索过期
+  const nextPy = input.py != null
+    ? input.py.toLowerCase()
+    : (input.title != null ? nextTitle.toLowerCase() : cur.py);
+  let nextSummary = input.summary ?? cur.summary;
+  if (!nextSummary || !nextSummary.trim()) nextSummary = deriveSummary({}, tree);
   const next: Entry = {
     ...cur,
     cat: input.cat ?? cur.cat,
-    title: input.title?.trim() ?? cur.title,
-    py: (input.py ?? cur.py).toLowerCase(),
+    title: nextTitle,
+    py: nextPy,
     tags: input.tags ?? cur.tags,
-    summary: input.summary ?? cur.summary,
+    summary: nextSummary,
     intro: tree.intro,
     nodes: tree.nodes,
     updatedAt: Date.now(),
@@ -229,4 +236,60 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
 export function deleteEntry(id: string): boolean {
   const info = db.prepare('DELETE FROM entries WHERE id = ?').run(id);
   return Number(info.changes) > 0;
+}
+
+// 批量导入（备份恢复 / 迁移）。replace=true 先清空；按 id upsert，兼容旧 body 字段。
+export interface ImportEntry {
+  id?: string;
+  cat?: string;
+  title?: string;
+  py?: string;
+  tags?: string[];
+  summary?: string;
+  intro?: string;
+  nodes?: IndexNode[];
+  body?: string;
+}
+
+export function importEntries(list: ImportEntry[], replace: boolean): { imported: number } {
+  const insert = db.prepare(
+    `INSERT INTO entries (id, cat, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
+     VALUES (:id, :cat, :title, :py, :tags, :summary, '', :idx, :sort, :createdAt, :updatedAt)`
+  );
+  const update = db.prepare(
+    `UPDATE entries SET cat=:cat, title=:title, py=:py, tags=:tags, summary=:summary, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
+  );
+  let imported = 0;
+  db.exec('BEGIN');
+  try {
+    if (replace) db.exec('DELETE FROM entries');
+    let maxSort = Number((db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM entries').get() as { m: number }).m);
+    for (const raw of list) {
+      if (!raw || typeof raw.title !== 'string' || !raw.title.trim()) continue;
+      const now = Date.now();
+      const id = typeof raw.id === 'string' && raw.id ? raw.id : 'u' + now + Math.floor(Math.random() * 100000);
+      const tree = (raw.nodes !== undefined || raw.intro !== undefined)
+        ? normalizeIndex({ intro: raw.intro ?? '', nodes: raw.nodes ?? [] })
+        : parseBodyToIndex(raw.body ?? '');
+      const idx = JSON.stringify(tree);
+      const cat = (raw.cat && String(raw.cat).trim()) || '自定义';
+      const title = raw.title.trim();
+      const py = (raw.py || title).toLowerCase();
+      const tags = JSON.stringify(Array.isArray(raw.tags) ? raw.tags : []);
+      const summary = (raw.summary && raw.summary.trim()) ? raw.summary.trim() : deriveSummary({}, tree);
+      const exists = db.prepare('SELECT 1 FROM entries WHERE id = ?').get(id);
+      if (exists) {
+        update.run({ id, cat, title, py, tags, summary, idx, updatedAt: now });
+      } else {
+        maxSort += 1;
+        insert.run({ id, cat, title, py, tags, summary, idx, sort: maxSort, createdAt: now, updatedAt: now });
+      }
+      imported += 1;
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return { imported };
 }

@@ -7,6 +7,7 @@
 - **检索模式**：关键词 / 拼音 / 缩写即时检索（如 `bibao`、`scws`、`gc`），支持「列表」与「画布」两种视图。
 - **画布（知识库视图）**：每个分类（如 `前端`、`Java`）就是一个独立**知识库**，没有上层大根。选中某个知识库后**默认即展开**其下的知识点与小节（节点上直接显示摘要 / 片段，无需点击就能看到知识）；可在知识库内做**内容搜索**；点击知识点 / 小节查看完整详情。
 - **沉浸模式与快捷键**：画布右上角「⤢ 沉浸」进入全屏。沉浸下支持快捷键——**左 ⌘ 呼出搜索**、**右 ⌘ 切换知识库**、**Esc 退出**。
+- **导入 / 导出**：管理页可一键导出整个知识库为 JSON 备份，或导入 JSON（支持「合并」与「覆盖替换」两种方式）。
 - **自由模式**：按分类浏览全部知识点卡片。
 - **详情思维导图**：点开任一知识点，左侧主卡 + 右侧按小标题拆分的知识点节点。
 - **结构化多级索引**：知识点的索引是**一等结构化数据**（`{ intro, nodes }`，每个节点含标题/内容/子节点），不再靠解析 markdown `##` 推导。知识点为一级索引，下设二/三/四级。
@@ -92,6 +93,19 @@ AI_MODEL=gpt-4o-mini
 
 未配置时，AI 弹窗会提示「未配置」，其余功能不受影响。
 
+## 数据模型
+
+知识点的索引是**结构化的一等数据**（不再解析 markdown `##`）。每条知识点为：
+
+```
+{ id, cat, title, py, tags, summary,
+  intro,                       // 索引前引言
+  nodes: IndexNode[],          // 多级索引：{ id, title, content, children: IndexNode[] }
+  sort, createdAt, updatedAt }
+```
+
+存储为 SQLite，索引以 JSON 存在 `idx` 列。旧库 / 旧种子的 markdown 正文在首次启动时一次性转换为结构化索引（保留 `body` 列仅作迁移兼容）。
+
 ## API 一览
 
 | 方法 | 路径 | 说明 |
@@ -100,6 +114,18 @@ AI_MODEL=gpt-4o-mini
 | GET | `/api/search?q=` | 检索 |
 | GET | `/api/entries/:id` | 单条 |
 | POST | `/api/entries` | 新建 |
-| PUT | `/api/entries/:id` | 更新 |
+| PUT | `/api/entries/:id` | 更新（改标题自动重算拼音、空摘要自动派生） |
 | DELETE | `/api/entries/:id` | 删除 |
+| POST | `/api/entries/reorder` | 拖拽排序，body `{ ids }` |
+| GET | `/api/export` | 导出全部（备份） |
+| POST | `/api/import` | 批量导入，body `{ entries, replace }` |
 | POST | `/api/ask` | AI 问答（预留） |
+
+## 测试
+
+核心纯逻辑（检索评分、索引解析/规范化、拼音 needles、画布建模/布局、索引树操作）有单元测试：
+
+```bash
+npm --prefix server test   # 服务端：node:test
+npm --prefix web test      # 前端：node:test（需先 npm install）
+```

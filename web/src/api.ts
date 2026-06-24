@@ -66,6 +66,26 @@ export async function reorderEntries(ids: string[]): Promise<Entry[]> {
   return data.entries;
 }
 
+export interface ExportPayload {
+  version: string;
+  exportedAt: number;
+  entries: Entry[];
+}
+
+export async function exportAll(): Promise<ExportPayload> {
+  return j<ExportPayload>(await fetch(`${BASE}/export`));
+}
+
+export async function importAll(entries: unknown[], replace: boolean): Promise<Entry[]> {
+  const res = await fetch(`${BASE}/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entries, replace }),
+  });
+  const data = await j<{ entries: Entry[] }>(res);
+  return data.entries;
+}
+
 export interface AskResponse {
   configured: boolean;
   answer: string;

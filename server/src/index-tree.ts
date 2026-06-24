@@ -44,22 +44,34 @@ export function parseBodyToIndex(body: string): IndexTree {
   return { intro: intro.join('\n').trim(), nodes: roots };
 }
 
-// 规范化外部传入的索引（补 id、保证字段与数组类型）
+// 校验上限，避免超大 / 超深 JSON 打入存储
+const MAX_DEPTH = 6;
+const MAX_TOTAL_NODES = 2000;
+const MAX_TITLE = 200;
+const MAX_CONTENT = 20000;
+const MAX_INTRO = 20000;
+
+// 规范化外部传入的索引（补 id、保证字段与数组类型、并施加上限）
 export function normalizeIndex(input: unknown): IndexTree {
   const obj = (input ?? {}) as { intro?: unknown; nodes?: unknown };
-  const normNodes = (arr: unknown): IndexNode[] => {
-    if (!Array.isArray(arr)) return [];
-    return arr.map((raw) => {
+  let total = 0;
+  const normNodes = (arr: unknown, depth: number): IndexNode[] => {
+    if (!Array.isArray(arr) || depth > MAX_DEPTH) return [];
+    const out: IndexNode[] = [];
+    for (const raw of arr) {
+      if (total >= MAX_TOTAL_NODES) break;
+      total += 1;
       const n = (raw ?? {}) as Partial<IndexNode>;
-      return {
-        id: typeof n.id === 'string' && n.id ? n.id : newId(),
-        title: String(n.title ?? '').trim() || '未命名索引',
-        content: String(n.content ?? ''),
-        children: normNodes(n.children),
-      };
-    });
+      out.push({
+        id: typeof n.id === 'string' && n.id ? n.id.slice(0, 64) : newId(),
+        title: (String(n.title ?? '').trim() || '未命名索引').slice(0, MAX_TITLE),
+        content: String(n.content ?? '').slice(0, MAX_CONTENT),
+        children: normNodes(n.children, depth + 1),
+      });
+    }
+    return out;
   };
-  return { intro: String(obj.intro ?? ''), nodes: normNodes(obj.nodes) };
+  return { intro: String(obj.intro ?? '').slice(0, MAX_INTRO), nodes: normNodes(obj.nodes, 0) };
 }
 
 // 结构化索引 → 可检索文本（标题 + 内容，递归）

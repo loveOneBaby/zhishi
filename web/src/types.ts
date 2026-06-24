@@ -31,5 +31,6 @@ export interface Theme {
   panel: string;
   sel: string;
   accent: string;
+  danger: string;
   font: string;
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { IndexNode } from '../types';
 import { patchNode, removeNode, moveNode, addChild, newNode, MAX_INDEX_DEPTH } from '../outline';
+import { toast } from '../toast';
 
 interface Props {
   intro: string;
@@ -44,7 +45,7 @@ export default function IndexTreeEditor({ intro: introProp, nodes: nodesProp, on
     if (saving) return;
     setSaving(true);
     try { await onSave(intro, nodes); setSaved(true); }
-    catch (e) { alert('保存失败：' + (e instanceof Error ? e.message : String(e))); }
+    catch (e) { toast('保存失败：' + (e instanceof Error ? e.message : String(e)), 'error'); }
     finally { setSaving(false); }
   }
 
@@ -69,7 +70,7 @@ export default function IndexTreeEditor({ intro: introProp, nodes: nodesProp, on
             {depth < MAX_INDEX_DEPTH && (
               <button style={textBtn} title="新增下级索引" onClick={() => { setNodes((cur) => addChild(cur, n.id, newNode())); setOpenContent((c) => new Set(c).add(n.id)); setSaved(false); }}>＋下级</button>
             )}
-            <button style={{ ...iconBtn, color: '#e5484d' }} title="删除该索引及其下级" onClick={() => { setNodes((cur) => removeNode(cur, n.id)); setSaved(false); }}>✕</button>
+            <button style={{ ...iconBtn, color: 'var(--danger)' }} title="删除该索引及其下级" onClick={() => { setNodes((cur) => removeNode(cur, n.id)); setSaved(false); }}>✕</button>
           </div>
           {contentOpen && (
             <textarea

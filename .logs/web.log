@@ -3,12 +3,7 @@
 > vite
 
 
-  VITE v5.4.21  ready in 250 ms
+  VITE v5.4.21  ready in 295 ms
 
   ➜  Local:   http://localhost:3000/
   ➜  Network: use --host to expose
-3:40:25 PM [vite] hmr update /src/components/CanvasView.tsx
-3:40:37 PM [vite] hmr update /src/components/CanvasView.tsx
-3:45:06 PM [vite] hmr update /src/App.tsx
-3:45:42 PM [vite] hmr update /src/components/SearchMode.tsx
-3:45:48 PM [vite] hmr update /src/components/ManageMode.tsx
