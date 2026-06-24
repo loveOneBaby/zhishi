@@ -2,15 +2,22 @@ import type { ThemeKey } from '../types';
 import { THEMES } from '../themes';
 import { seg, chip } from '../ui';
 
+export type AppMode = 'search' | 'free' | 'manage';
+
 interface Props {
-  mode: 'search' | 'free';
-  setMode: (m: 'search' | 'free') => void;
+  mode: AppMode;
+  setMode: (m: AppMode) => void;
   theme: ThemeKey;
   setTheme: (t: ThemeKey) => void;
 }
 
+const MODES: { key: AppMode; label: string }[] = [
+  { key: 'search', label: '检索' },
+  { key: 'free', label: '自由' },
+  { key: 'manage', label: '管理' },
+];
+
 export default function TopBar({ mode, setMode, theme, setTheme }: Props) {
-  const isSearch = mode === 'search';
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 60, borderBottom: '1px solid var(--bd)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -20,8 +27,9 @@ export default function TopBar({ mode, setMode, theme, setTheme }: Props) {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
         <div style={{ display: 'flex', gap: 2, background: 'var(--sel)', padding: 3, borderRadius: 9 }}>
-          <button style={seg(isSearch)} onClick={() => setMode('search')}>检索</button>
-          <button style={seg(!isSearch)} onClick={() => setMode('free')}>自由</button>
+          {MODES.map((m) => (
+            <button key={m.key} style={seg(mode === m.key)} onClick={() => setMode(m.key)}>{m.label}</button>
+          ))}
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {(Object.keys(THEMES) as ThemeKey[]).map((k) => (

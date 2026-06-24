@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Entry, ThemeKey } from './types';
 import { THEMES, themeVars } from './themes';
 import { filterEntries, suggestQueries } from './search';
-import { fetchEntries, createEntry, type NewEntryInput } from './api';
-import TopBar from './components/TopBar';
+import { fetchEntries, createEntry, updateEntry, deleteEntry, reorderEntries, type NewEntryInput, type EntryInput } from './api';
+import TopBar, { type AppMode } from './components/TopBar';
 import SearchMode from './components/SearchMode';
 import FreeMode from './components/FreeMode';
+import ManageMode from './components/ManageMode';
 import DetailModal from './components/DetailModal';
 import AskModal from './components/AskModal';
 import NewEntryModal from './components/NewEntryModal';
@@ -14,7 +15,7 @@ export default function App() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loaded, setLoaded] = useState(false);
 
-  const [mode, setMode] = useState<'search' | 'free'>('search');
+  const [mode, setMode] = useState<AppMode>('search');
   const [viewType, setViewType] = useState<'list' | 'canvas'>('canvas');
   const [query, setQuery] = useState('');
   const [sel, setSel] = useState(0);
@@ -100,6 +101,26 @@ export default function App() {
     }
   }
 
+  // 管理模块的增删改：直接同步到共享 entries，检索/画布即时反映
+  const handleCreate = useCallback(async (input: EntryInput) => {
+    const entry = await createEntry(input);
+    setEntries((prev) => [...prev, entry]);
+  }, []);
+  const handleUpdate = useCallback(async (id: string, input: EntryInput) => {
+    const entry = await updateEntry(id, input);
+    setEntries((prev) => prev.map((e) => (e.id === id ? entry : e)));
+    setOpenId((cur) => (cur === id ? null : cur));
+  }, []);
+  const handleDelete = useCallback(async (id: string) => {
+    await deleteEntry(id);
+    setEntries((prev) => prev.filter((e) => e.id !== id));
+    setOpenId((cur) => (cur === id ? null : cur));
+  }, []);
+  const handleReorder = useCallback(async (ids: string[]) => {
+    const next = await reorderEntries(ids);
+    setEntries(next);
+  }, []);
+
   const openEntry = openId ? entries.find((e) => e.id === openId) ?? null : null;
   const selectedListEntry = isSearchList
     ? (results.find((e) => e.id === openId) ?? results[Math.min(sel, Math.max(0, results.length - 1))] ?? null)
@@ -109,10 +130,10 @@ export default function App() {
 
   return (
     <div style={{ ...themeVars(t), minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--font)', WebkitFontSmoothing: 'antialiased' }}>
-      <div style={{ maxWidth: isSearchList ? 1320 : 860, margin: '0 auto', padding: '0 24px' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px' }}>
         <TopBar mode={mode} setMode={(m) => { setMode(m); setOpenId(null); if (m === 'search') setTimeout(() => inputRef.current?.focus(), 40); }} theme={theme} setTheme={setTheme} />
 
-        {mode === 'search' ? (
+        {mode === 'search' && (
           <SearchMode
             ref={inputRef}
             query={query}
@@ -136,13 +157,25 @@ export default function App() {
             onOpen={(id, index) => { if (typeof index === 'number') setSel(index); setOpenId(id); }}
             onOpenAI={() => setAiOpen(true)}
           />
-        ) : (
+        )}
+
+        {mode === 'free' && (
           <FreeMode
             entries={entries}
             activeCat={freeCat}
             setCat={setFreeCat}
             onOpen={(id) => setOpenId(id)}
             onNew={() => setFormOpen(true)}
+          />
+        )}
+
+        {mode === 'manage' && (
+          <ManageMode
+            entries={entries}
+            onCreate={handleCreate}
+            onUpdate={handleUpdate}
+            onDelete={handleDelete}
+            onReorder={handleReorder}
           />
         )}
 

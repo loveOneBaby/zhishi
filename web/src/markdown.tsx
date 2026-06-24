@@ -91,29 +91,31 @@ export interface Sections {
   nodes: MindNode[];
 }
 
-// 把 body 按 ## 小标题拆分成「简介 + 若干知识点节点」，用于详情思维导图
+// 渲染一个索引节点的内容：自身内容 + 递归的下级索引（标题加粗 + 内容）
+function renderNodeContent(node: import('./types').IndexNode, query: string): React.ReactNode {
+  return (
+    <>
+      {node.content.trim() ? renderMd(node.content, query) : null}
+      {node.children.map((child) => (
+        <div key={child.id} style={{ marginTop: 10, paddingLeft: 12, borderLeft: '2px solid var(--bd)' }}>
+          <div style={{ fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>{highlightText(child.title, query)}</div>
+          {renderNodeContent(child, query)}
+        </div>
+      ))}
+    </>
+  );
+}
+
+// 用结构化索引构建「简介 + 若干索引节点」，用于详情思维导图
 export function parseSections(e: Entry, query = ''): Sections {
-  const lines = (e.body || '').split('\n');
-  const intro: string[] = [];
-  const secs: { title: string; lines: string[] }[] = [];
-  let cur: { title: string; lines: string[] } | null = null;
-  lines.forEach((ln) => {
-    if (ln.startsWith('## ')) {
-      cur = { title: ln.slice(3), lines: [] };
-      secs.push(cur);
-    } else {
-      (cur ? cur.lines : intro).push(ln);
-    }
-  });
-  const introMd = intro.join('\n').trim();
-  let nodes: MindNode[];
-  if (secs.length) {
-    nodes = secs.map((sc, i) => ({ key: i, title: inline(sc.title, query), content: renderMd(sc.lines.join('\n'), query) }));
-  } else {
-    nodes = [{ key: 0, title: highlightText('详解', query), content: renderMd(introMd, query) }];
+  const introNode = e.intro && e.intro.trim() ? renderMd(e.intro, query) : null;
+  if (!e.nodes || e.nodes.length === 0) {
+    return { intro: null, nodes: [{ key: 0, title: highlightText('详解', query), content: introNode ?? <span style={{ color: 'var(--mut)' }}>暂无内容</span> }] };
   }
-  return {
-    intro: secs.length && introMd ? renderMd(introMd, query) : null,
-    nodes,
-  };
+  const nodes: MindNode[] = e.nodes.map((n, i) => ({
+    key: i,
+    title: highlightText(n.title, query),
+    content: renderNodeContent(n, query),
+  }));
+  return { intro: introNode, nodes };
 }

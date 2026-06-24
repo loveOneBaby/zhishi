@@ -1,22 +1,16 @@
 import type { Entry } from './types.js';
 import { toSearchText } from './pinyin-search.js';
+import { indexText } from './index-tree.js';
 
-function headingTitles(body: string): string {
-  return (body || '')
-    .split('\n')
-    .map((line) => /^(#{2,4})\s+(.+)$/.exec(line)?.[2] ?? '')
-    .filter(Boolean)
-    .join(' ');
-}
-
-// 打分逻辑：标题前缀 > 拼音词前缀 > 标题包含 > 拼音包含 > 全文包含
+// 打分逻辑：标题前缀 > 拼音词前缀 > 标题包含 > 拼音包含 > 全文(含索引)包含
 export function score(e: Entry, q: string): number {
   const t = toSearchText(e.title);
   const py = toSearchText(e.py);
+  const idxText = indexText({ intro: e.intro, nodes: e.nodes });
   const h = [
-    toSearchText(e.title, e.py, (e.tags || []).join(' '), e.cat, headingTitles(e.body)),
+    toSearchText(e.title, e.py, (e.tags || []).join(' '), e.cat, idxText),
     (e.summary || '').toLowerCase(),
-    (e.body || '').toLowerCase(),
+    idxText.toLowerCase(),
   ].join(' ');
   if (t.startsWith(q)) return 100;
   if (py.split(' ').some((w) => w.startsWith(q))) return 90;

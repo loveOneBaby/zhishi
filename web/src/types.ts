@@ -1,3 +1,11 @@
+// 结构化多级索引节点
+export interface IndexNode {
+  id: string;
+  title: string;
+  content: string;
+  children: IndexNode[];
+}
+
 export interface Entry {
   id: string;
   cat: string;
@@ -5,7 +13,9 @@ export interface Entry {
   py: string;
   tags: string[];
   summary: string;
-  body: string;
+  intro: string;        // 索引前的引言
+  nodes: IndexNode[];   // 结构化多级索引
+  sort?: number;
   createdAt?: number;
   updatedAt?: number;
 }

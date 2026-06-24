@@ -137,7 +137,7 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
   };
 
   return (
-    <div style={{ padding: '40px 0 60px' }}>
+    <div style={{ padding: '28px 0 60px' }}>
       <div style={{ position: 'relative', marginBottom: 8 }}>
         <span style={{ position: 'absolute', left: 18, top: '50%', transform: 'translateY(-50%)', color: 'var(--mut)', fontSize: 17 }}>⌕</span>
         <input

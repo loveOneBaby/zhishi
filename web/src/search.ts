@@ -1,4 +1,4 @@
-import type { Entry } from './types';
+import type { Entry, IndexNode } from './types';
 import { toSearchText } from './pinyin-search';
 
 export interface SearchSuggestion {
@@ -9,28 +9,30 @@ export interface SearchSuggestion {
   entryId?: string;
 }
 
-function headingTitles(body: string): string {
-  return (body || '')
-    .split('\n')
-    .map((line) => plainText(/^(#{2,4})\s+(.+)$/.exec(line)?.[2] ?? ''))
-    .filter(Boolean)
-    .join(' ');
+// 递归收集索引节点标题
+function indexTitles(nodes: IndexNode[]): string[] {
+  const out: string[] = [];
+  const walk = (ns: IndexNode[]): void => { for (const n of ns) { out.push(n.title); walk(n.children); } };
+  walk(nodes);
+  return out;
 }
 
-function plainText(value: string): string {
-  return value
-    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
-    .replace(/[*`]/g, '')
-    .trim();
+// 索引全文（标题 + 内容，含引言）
+function indexText(e: Entry): string {
+  const parts: string[] = [e.intro];
+  const walk = (ns: IndexNode[]): void => { for (const n of ns) { parts.push(n.title, n.content); walk(n.children); } };
+  walk(e.nodes);
+  return parts.filter(Boolean).join(' ');
 }
 
 export function score(e: Entry, q: string): number {
   const t = toSearchText(e.title);
   const py = toSearchText(e.py);
+  const idx = indexText(e);
   const h = [
-    toSearchText(e.title, e.py, (e.tags || []).join(' '), e.cat, headingTitles(e.body)),
+    toSearchText(e.title, e.py, (e.tags || []).join(' '), e.cat, indexTitles(e.nodes).join(' ')),
     (e.summary || '').toLowerCase(),
-    (e.body || '').toLowerCase(),
+    idx.toLowerCase(),
   ].join(' ');
   if (t.startsWith(q)) return 100;
   if (py.split(' ').some((w) => w.startsWith(q))) return 90;
@@ -48,13 +50,6 @@ export function filterEntries(all: Entry[], rawQuery: string): Entry[] {
     .filter((x) => x.s >= 0)
     .sort((a, b) => b.s - a.s || a.e.title.localeCompare(b.e.title))
     .map((x) => x.e);
-}
-
-function headings(body: string): string[] {
-  return (body || '')
-    .split('\n')
-    .map((line) => plainText(/^(#{2,4})\s+(.+)$/.exec(line)?.[2] ?? ''))
-    .filter(Boolean);
 }
 
 export function suggestQueries(all: Entry[], rawQuery: string, limit = 8): SearchSuggestion[] {
@@ -97,7 +92,7 @@ export function suggestQueries(all: Entry[], rawQuery: string, limit = 8): Searc
     add(entry.title, '知识点', `${entry.cat}${entry.tags[0] ? ` · ${entry.tags[0]}` : ''}`, entry, 90);
     add(entry.cat, '知识库', '分类', entry, 45);
     for (const tag of entry.tags) add(tag, '标签', entry.title, entry, 62);
-    for (const title of headings(entry.body)) add(title, '面试点', entry.title, entry, 78);
+    for (const title of indexTitles(entry.nodes)) add(title, '索引', entry.title, entry, 78);
   }
 
   return Array.from(seen.values())

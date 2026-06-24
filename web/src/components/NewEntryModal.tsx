@@ -13,7 +13,7 @@ export default function NewEntryModal({ onClose, onSave }: Props) {
   const [title, setTitle] = useState('');
   const [cat, setCat] = useState('前端');
   const [tags, setTags] = useState('');
-  const [body, setBody] = useState('');
+  const [intro, setIntro] = useState('');
   const [saving, setSaving] = useState(false);
 
   const inputStyle: CSSProperties = {
@@ -27,7 +27,7 @@ export default function NewEntryModal({ onClose, onSave }: Props) {
     setSaving(true);
     const tagList = tags.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
     try {
-      await onSave({ title: title.trim(), cat, tags: tagList, body });
+      await onSave({ title: title.trim(), cat, tags: tagList, intro });
     } finally {
       setSaving(false);
     }
@@ -45,11 +45,11 @@ export default function NewEntryModal({ onClose, onSave }: Props) {
           <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="标签，逗号分隔" spellCheck={false} style={{ ...inputStyle, flex: 1.4, fontSize: 14 }} />
         </div>
         <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="内容（支持 ## 小标题、- 列表、**加粗**、`代码`）"
+          value={intro}
+          onChange={(e) => setIntro(e.target.value)}
+          placeholder="引言 / 概述（多级索引在「管理」中展开编辑）"
           spellCheck={false}
-          style={{ ...inputStyle, minHeight: 160, fontSize: 14, lineHeight: 1.6, resize: 'vertical' }}
+          style={{ ...inputStyle, minHeight: 140, fontSize: 14, lineHeight: 1.6, resize: 'vertical' }}
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
           <button onClick={onClose} style={{ padding: '9px 16px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'transparent', color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 9 }}>取消</button>

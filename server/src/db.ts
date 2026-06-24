@@ -2,7 +2,8 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { SEED_LIBRARIES } from './seed-data/index.js';
-import type { Entry, EntryRow } from './types.js';
+import type { Entry, EntryRow, IndexNode } from './types.js';
+import { parseBodyToIndex, normalizeIndex, type IndexTree } from './index-tree.js';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'knowledge.db');
@@ -22,6 +23,8 @@ db.exec(`
     tags      TEXT NOT NULL DEFAULT '[]',
     summary   TEXT NOT NULL DEFAULT '',
     body      TEXT NOT NULL DEFAULT '',
+    idx       TEXT NOT NULL DEFAULT '',
+    sort      INTEGER NOT NULL DEFAULT 0,
     createdAt INTEGER NOT NULL,
     updatedAt INTEGER NOT NULL
   );
@@ -32,59 +35,79 @@ db.exec(`
   );
 `);
 
+// 迁移旧库：补 sort / idx 列，并把旧 markdown 正文一次性转换为结构化索引
+const entryColumns = db.prepare('PRAGMA table_info(entries)').all() as { name: string }[];
+if (!entryColumns.some((c) => c.name === 'sort')) {
+  db.exec('ALTER TABLE entries ADD COLUMN sort INTEGER NOT NULL DEFAULT 0');
+  db.exec('UPDATE entries SET sort = createdAt');
+}
+if (!entryColumns.some((c) => c.name === 'idx')) {
+  db.exec("ALTER TABLE entries ADD COLUMN idx TEXT NOT NULL DEFAULT ''");
+  const rows = db.prepare('SELECT id, body FROM entries').all() as { id: string; body: string }[];
+  const setIdx = db.prepare('UPDATE entries SET idx = :idx WHERE id = :id');
+  db.exec('BEGIN');
+  try {
+    for (const r of rows) setIdx.run({ id: r.id, idx: JSON.stringify(parseBodyToIndex(r.body || '')) });
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  console.log(`[db] 已将 ${rows.length} 条旧正文转换为结构化索引`);
+}
+
+function treeOf(r: EntryRow): IndexTree {
+  if (r.idx) {
+    try { return normalizeIndex(JSON.parse(r.idx)); } catch { /* fallthrough */ }
+  }
+  return parseBodyToIndex(r.body || '');
+}
+
 function rowToEntry(r: EntryRow): Entry {
   let tags: string[] = [];
   try { tags = JSON.parse(r.tags); } catch { tags = []; }
+  const tree = treeOf(r);
   return {
     id: r.id, cat: r.cat, title: r.title, py: r.py,
-    tags, summary: r.summary, body: r.body,
+    tags, summary: r.summary, intro: tree.intro, nodes: tree.nodes,
+    sort: r.sort ?? r.createdAt,
     createdAt: r.createdAt, updatedAt: r.updatedAt,
   };
 }
 
-// 按版本导入知识库。兼容旧数据库，并避免被用户删除的内置条目在重启后自动恢复。
+// 按版本导入知识库；旧种子的 markdown 正文在写入时转换为结构化索引
 export function seedBuiltins(): void {
   const applied = new Set(
-    (db.prepare('SELECT version FROM seed_migrations').all() as { version: string }[])
-      .map((row) => row.version)
+    (db.prepare('SELECT version FROM seed_migrations').all() as { version: string }[]).map((row) => row.version)
   );
   const count = db.prepare('SELECT COUNT(*) AS n FROM entries').get() as { n: number };
   const insert = db.prepare(
-    `INSERT OR IGNORE INTO entries (id, cat, title, py, tags, summary, body, createdAt, updatedAt)
-     VALUES (:id, :cat, :title, :py, :tags, :summary, :body, :createdAt, :updatedAt)`
+    `INSERT OR IGNORE INTO entries (id, cat, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
+     VALUES (:id, :cat, :title, :py, :tags, :summary, :body, :idx, :sort, :createdAt, :updatedAt)`
   );
   const updateBuiltin = db.prepare(
     `UPDATE entries SET cat=:cat, title=:title, py=:py, tags=:tags,
-       summary=:summary, body=:body, updatedAt=:updatedAt WHERE id=:id`
+       summary=:summary, body=:body, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
   );
   const deleteBuiltin = db.prepare('DELETE FROM entries WHERE id = ?');
-  const markApplied = db.prepare(
-    'INSERT INTO seed_migrations (version, appliedAt) VALUES (?, ?)'
-  );
-  let added = 0;
-  let updated = 0;
-  let removed = 0;
+  const markApplied = db.prepare('INSERT INTO seed_migrations (version, appliedAt) VALUES (?, ?)');
+  let added = 0, updated = 0, removed = 0;
 
   db.exec('BEGIN');
   try {
     for (const library of SEED_LIBRARIES) {
       if (applied.has(library.version)) continue;
-
-      // 升级自旧版本时，原有基础库已经存在，只补记迁移版本。
       const skipLegacyBase = library.version === 'base-v1' && count.n > 0;
       if (!skipLegacyBase) {
         const now = Date.now();
         for (const e of library.entries) {
+          const idx = JSON.stringify(parseBodyToIndex(e.body));
           const values = {
             id: e.id, cat: e.cat, title: e.title, py: e.py,
-            tags: JSON.stringify(e.tags), summary: e.summary, body: e.body,
-            createdAt: now, updatedAt: now,
+            tags: JSON.stringify(e.tags), summary: e.summary, body: e.body, idx,
+            sort: now, createdAt: now, updatedAt: now,
           };
           if (library.overwrite) {
             const info = updateBuiltin.run({
               id: e.id, cat: e.cat, title: e.title, py: e.py,
-              tags: JSON.stringify(e.tags), summary: e.summary, body: e.body,
-              updatedAt: now,
+              tags: JSON.stringify(e.tags), summary: e.summary, body: e.body, idx, updatedAt: now,
             });
             if (Number(info.changes) > 0) updated += Number(info.changes);
             else added += Number(insert.run(values).changes);
@@ -92,9 +115,7 @@ export function seedBuiltins(): void {
             added += Number(insert.run(values).changes);
           }
         }
-        for (const id of library.removeIds ?? []) {
-          removed += Number(deleteBuiltin.run(id).changes);
-        }
+        for (const id of library.removeIds ?? []) removed += Number(deleteBuiltin.run(id).changes);
       }
       markApplied.run(library.version, Date.now());
     }
@@ -109,7 +130,7 @@ export function seedBuiltins(): void {
 }
 
 export function listEntries(): Entry[] {
-  const rows = db.prepare('SELECT * FROM entries ORDER BY createdAt ASC').all() as unknown as EntryRow[];
+  const rows = db.prepare('SELECT * FROM entries ORDER BY sort ASC, createdAt ASC').all() as unknown as EntryRow[];
   return rows.map(rowToEntry);
 }
 
@@ -124,33 +145,65 @@ export interface EntryInput {
   py?: string;
   tags?: string[];
   summary?: string;
-  body?: string;
+  intro?: string;
+  nodes?: IndexNode[];
+}
+
+function deriveSummary(input: { summary?: string }, tree: IndexTree): string {
+  if (input.summary && input.summary.trim()) return input.summary.trim();
+  const firstIntro = tree.intro.split('\n').map((l) => l.trim()).find(Boolean);
+  return firstIntro || tree.nodes[0]?.title || '自建知识点';
 }
 
 export function createEntry(input: EntryInput): Entry {
   const now = Date.now();
   const id = 'u' + now + Math.floor(Math.random() * 1000);
+  const tree = normalizeIndex({ intro: input.intro ?? '', nodes: input.nodes ?? [] });
+  const maxRow = db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM entries').get() as { m: number };
   const entry: Entry = {
     id,
     cat: input.cat || '自定义',
     title: input.title.trim(),
     py: (input.py || input.title).toLowerCase(),
     tags: input.tags || [],
-    summary: input.summary || (input.body || '').split('\n').find((l) => l.trim()) || '自建知识点',
-    body: input.body || '（暂无内容）',
+    summary: deriveSummary(input, tree),
+    intro: tree.intro,
+    nodes: tree.nodes,
+    sort: Number(maxRow.m) + 1,
     createdAt: now,
     updatedAt: now,
   };
   db.prepare(
-    `INSERT INTO entries (id, cat, title, py, tags, summary, body, createdAt, updatedAt)
-     VALUES (:id, :cat, :title, :py, :tags, :summary, :body, :createdAt, :updatedAt)`
-  ).run({ ...entry, tags: JSON.stringify(entry.tags) });
+    `INSERT INTO entries (id, cat, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
+     VALUES (:id, :cat, :title, :py, :tags, :summary, '', :idx, :sort, :createdAt, :updatedAt)`
+  ).run({
+    id: entry.id, cat: entry.cat, title: entry.title, py: entry.py,
+    tags: JSON.stringify(entry.tags), summary: entry.summary,
+    idx: JSON.stringify(tree), sort: entry.sort, createdAt: now, updatedAt: now,
+  });
   return entry;
+}
+
+// 按给定顺序重排（管理模块拖拽）。ids 为某个知识库内的全部知识点 id。
+export function reorderEntries(ids: string[]): void {
+  const stmt = db.prepare('UPDATE entries SET sort = :sort WHERE id = :id');
+  db.exec('BEGIN');
+  try {
+    ids.forEach((id, index) => stmt.run({ id, sort: index }));
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
 export function updateEntry(id: string, input: Partial<EntryInput>): Entry | null {
   const cur = getEntry(id);
   if (!cur) return null;
+  const tree = normalizeIndex({
+    intro: input.intro ?? cur.intro,
+    nodes: input.nodes ?? cur.nodes,
+  });
   const next: Entry = {
     ...cur,
     cat: input.cat ?? cur.cat,
@@ -158,16 +211,17 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
     py: (input.py ?? cur.py).toLowerCase(),
     tags: input.tags ?? cur.tags,
     summary: input.summary ?? cur.summary,
-    body: input.body ?? cur.body,
+    intro: tree.intro,
+    nodes: tree.nodes,
     updatedAt: Date.now(),
   };
   db.prepare(
     `UPDATE entries SET cat=:cat, title=:title, py=:py, tags=:tags,
-       summary=:summary, body=:body, updatedAt=:updatedAt WHERE id=:id`
+       summary=:summary, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
   ).run({
     id: next.id, cat: next.cat, title: next.title, py: next.py,
     tags: JSON.stringify(next.tags), summary: next.summary,
-    body: next.body, updatedAt: next.updatedAt,
+    idx: JSON.stringify(tree), updatedAt: next.updatedAt,
   });
   return next;
 }

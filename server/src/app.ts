@@ -8,6 +8,7 @@ import {
   createEntry,
   updateEntry,
   deleteEntry,
+  reorderEntries,
 } from './db.js';
 import { searchEntries } from './search.js';
 import { askAI } from './ask.js';
@@ -44,12 +45,22 @@ export function createApp() {
 
   // 新建
   api.post('/entries', (req, res) => {
-    const { title, cat, tags, body, py, summary } = req.body ?? {};
+    const { title, cat, tags, py, summary, intro, nodes } = req.body ?? {};
     if (!title || !String(title).trim()) {
       return res.status(400).json({ error: 'title 不能为空' });
     }
-    const entry = createEntry({ title, cat, tags, body, py, summary });
+    const entry = createEntry({ title, cat, tags, py, summary, intro, nodes });
     res.status(201).json({ entry });
+  });
+
+  // 排序（管理模块拖拽）：body = { ids: string[] }
+  api.post('/entries/reorder', (req, res) => {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.some((i) => typeof i !== 'string')) {
+      return res.status(400).json({ error: 'ids 必须是字符串数组' });
+    }
+    reorderEntries(ids);
+    res.json({ ok: true, entries: listEntries() });
   });
 
   // 更新

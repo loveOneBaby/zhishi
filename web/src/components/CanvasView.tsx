@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CSSProperties,
+  ReactNode,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
-import type { Entry, Theme } from '../types';
-import { toSearchText } from '../pinyin-search';
+import type { Entry, IndexNode, Theme } from '../types';
+import { toSearchText, matchesQuery } from '../pinyin-search';
 import { highlightText } from '../highlight';
+import { renderMd } from '../markdown';
 
 interface Props {
   entries: Entry[];
@@ -205,7 +207,6 @@ function buildModel(entries: Entry[]): { map: Map<string, GNode>; kbs: string[] 
     }
 
     const entryId = `ent::${entry.id}`;
-    const headings = parseHeadingTree(entry.body);
     map.set(entryId, {
       id: entryId,
       label: entry.title,
@@ -217,34 +218,32 @@ function buildModel(entries: Entry[]): { map: Map<string, GNode>; kbs: string[] 
       children: [],
       text: [
         toSearchText(entry.cat, entry.title, entry.py, entry.tags.join(' ')),
-        toSearchText(entry.summary, entry.body),
+        toSearchText(entry.summary, entry.intro),
       ].join(' '),
       meta: entry.tags,
     });
     map.get(kbId)!.children.push(entryId);
 
-    const addHeadings = (headings: HeadingNode[], parentId: string, path: string): void => {
-      headings.forEach((heading, index) => {
-        const nodePath = path ? `${path}.${index}` : String(index);
-        const nodeId = `${entryId}#${nodePath}`;
+    // 直接用结构化的多级索引节点构建画布层级
+    const addNodes = (nodes: IndexNode[], parentId: string, depth: number): void => {
+      nodes.forEach((node) => {
+        const nodeId = `${entryId}#${node.id}`;
         map.set(nodeId, {
           id: nodeId,
-          label: heading.title,
+          label: node.title,
           type: 'section',
-          depth: heading.level,
-          sub: heading.content,
+          depth,
+          sub: node.content,
           entryId: entry.id,
           parentId,
           children: [],
-          text: [
-            toSearchText(heading.title, heading.content),
-          ].join(' '),
+          text: toSearchText(node.title, node.content),
         });
         map.get(parentId)!.children.push(nodeId);
-        addHeadings(heading.children, nodeId, nodePath);
+        addNodes(node.children, nodeId, depth + 1);
       });
     };
-    addHeadings(headings, entryId, '');
+    addNodes(entry.nodes, entryId, 2);
   }
 
   return { map, kbs };
@@ -261,8 +260,8 @@ function collectVisible(
   const visible = new Set<string>();
   const root = map.get(rootId);
   if (!root) return visible;
-  const q = toSearchText(query.trim());
-  const showKeyPathOnly = searchActive && Boolean(q);
+  const trimmed = query.trim();
+  const showKeyPathOnly = searchActive && Boolean(trimmed);
   const limit = showKeyPathOnly || showFullTree ? Infinity : MAX_VISIBLE_DEPTH;
 
   const includeSubtree = (startId: string, startDepth = 0): void => {
@@ -279,7 +278,7 @@ function collectVisible(
     }
   };
 
-  if (!q) {
+  if (!trimmed) {
     includeSubtree(rootId);
     return visible;
   }
@@ -293,7 +292,7 @@ function collectVisible(
   }
 
   for (const id of descendants) {
-    if (!map.get(id)?.text.includes(q)) continue;
+    if (!matchesQuery(map.get(id)?.text ?? '', trimmed)) continue;
     let current: string | null = id;
     while (current) {
       visible.add(current);
@@ -400,6 +399,9 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [showFullTree, setShowFullTree] = useState(false);
   const [keyGridOpen, setKeyGridOpen] = useState(false);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+
+  const FIXED_SCALE = 0.9; // 保持约 90% 缩放，避免字太小
 
   useEffect(() => {
     if (!kbId || !model.has(kbId)) {
@@ -417,6 +419,7 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
   useEffect(() => {
     setCollapsed(new Set());
     setShowFullTree(false);
+    setPreviewId(null);
   }, [graphRoot?.id]);
 
   const visible = useMemo(
@@ -427,25 +430,26 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
     () => graphRoot ? buildTreeLayout(model, graphRoot.id, visible) : null,
     [model, graphRoot, visible]
   );
+  // 关键点网格：展示当前知识库「整棵树」的全部关键点（不受折叠 / 深度限制影响）
   const keyPointItems = useMemo(
     () => {
-      if (!layout) return [];
-      return layout.nodes
-        .filter((placed) => placed.depth > 0 && placed.node.type !== 'cat')
-        .sort((a, b) => {
-          const depthScore = a.depth - b.depth;
-          if (depthScore !== 0 && (a.depth <= 1 || b.depth <= 1)) return depthScore;
-          return a.x - b.x || a.y - b.y;
-        })
-        .slice(0, 72)
-        .map((placed, index) => ({
-          id: placed.node.id,
-          label: placed.node.label,
-          kind: placed.depth === 1 ? '专题' : placed.depth === 2 ? '维度' : '面试点',
-          key: KEY_GRID_LABELS[index % KEY_GRID_LABELS.length],
-        }));
+      if (!graphRoot) return [];
+      const items: { id: string; label: string; depth: number }[] = [];
+      const walk = (id: string, depth: number): void => {
+        const node = model.get(id);
+        if (!node) return;
+        if (node.type !== 'cat') items.push({ id, label: node.label, depth });
+        for (const child of node.children) walk(child, depth + 1);
+      };
+      for (const child of graphRoot.children) walk(child, 1);
+      return items.slice(0, 240).map((item, index) => ({
+        id: item.id,
+        label: item.label,
+        kind: item.depth === 1 ? '专题' : item.depth === 2 ? '维度' : '面试点',
+        key: KEY_GRID_LABELS[index % KEY_GRID_LABELS.length],
+      }));
     },
-    [layout]
+    [model, graphRoot]
   );
   const collapsibleNodeIds = useMemo(
     () => {
@@ -468,21 +472,15 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
     setKeyGridOpen(false);
   }, [graphRoot?.id, activeQuery]);
 
+  // 固定 ~90% 缩放，把根节点放在左侧、垂直居中（不再为了塞下整棵树而缩小）
   const resetViewport = (): void => {
     const container = containerRef.current;
     if (!container || !layout || !graphRoot) return;
     const root = layout.byId.get(graphRoot.id);
     if (!root) return;
-    const availableWidth = Math.max(320, container.clientWidth - 140);
-    const availableHeight = Math.max(260, container.clientHeight - 140);
-    const readableOverviewHeight = Math.min(layout.height, 3600);
-    const scale = clamp(
-      Math.min(availableWidth / layout.width, availableHeight / readableOverviewHeight),
-      RESET_MIN_SCALE,
-      0.88
-    );
+    const scale = FIXED_SCALE;
     setViewport({
-      x: 48 - root.x * scale,
+      x: 64 - root.x * scale,
       y: container.clientHeight / 2 - (root.y + root.height / 2) * scale,
       scale,
     });
@@ -516,10 +514,28 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
     }));
   };
 
+  const pendingFocusRef = useRef<string | null>(null);
   const focusKeyPoint = (id: string): void => {
     setKeyGridOpen(false);
-    window.setTimeout(() => focusNode(id), 0);
+    if (layout?.byId.has(id)) {
+      window.setTimeout(() => focusNode(id), 0);
+      return;
+    }
+    // 目标当前被折叠 / 超出可见深度：先展开全部，再在布局更新后定位
+    pendingFocusRef.current = id;
+    setShowFullTree(true);
+    setCollapsed(new Set());
   };
+
+  // 布局更新后，把待定位的节点居中（保持当前缩放）
+  useEffect(() => {
+    const id = pendingFocusRef.current;
+    if (id && layout?.byId.has(id)) {
+      pendingFocusRef.current = null;
+      const timer = window.setTimeout(() => focusNode(id), 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [layout]);
 
   const collapseAllNodes = (): void => {
     setKeyGridOpen(false);
@@ -542,21 +558,56 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
     });
   };
 
-  const openNode = (node: GNode): void => {
-    if (node.entryId) onOpen(node.entryId);
+  // 点击节点：预览该处知识 + 手风琴展开（同级互斥）+ 居中（保持缩放）
+  const activateNode = (node: GNode): void => {
+    if (node.depth === 0) return; // 根节点（知识库）不预览/不折叠
+    setPreviewId(node.id);
+    if (!searchActive && node.children.length > 0) {
+      setCollapsed((cur) => {
+        const next = new Set(cur);
+        const siblings = node.parentId ? (model.get(node.parentId)?.children ?? []) : [];
+        const branchSiblings = siblings.filter((sid) => sid !== node.id && (model.get(sid)?.children.length ?? 0) > 0);
+        const selfOpen = !next.has(node.id);
+        const othersOpen = branchSiblings.some((sid) => !next.has(sid));
+        if (selfOpen && !othersOpen) {
+          next.add(node.id); // 同级仅自己展开时，再次点击则收起
+        } else {
+          next.delete(node.id); // 展开自己
+          for (const sid of branchSiblings) next.add(sid); // 收起同级其它
+        }
+        return next;
+      });
+    }
+    pendingFocusRef.current = node.id;
+    window.setTimeout(() => focusNode(node.id), 0);
   };
 
   const handleCardKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>, node: GNode): void => {
-    if (!node.entryId || (event.target as HTMLElement).closest('[data-node-toggle]')) return;
+    if ((event.target as HTMLElement).closest('[data-node-toggle]')) return;
     if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (node.depth === 0) return;
     event.preventDefault();
-    onOpen(node.entryId);
+    activateNode(node);
   };
 
+  // 预览面板：渲染某节点的内容及其下级（索引末端即知识点内容）
+  const renderPreviewNode = (id: string, depth: number): ReactNode => {
+    const node = model.get(id);
+    if (!node) return null;
+    return (
+      <div key={id} style={{ marginTop: depth === 0 ? 0 : 12, paddingLeft: depth <= 1 ? 0 : 12, borderLeft: depth <= 1 ? 'none' : '2px solid var(--bd)' }}>
+        {depth > 0 && <div style={{ fontWeight: 700, fontSize: depth === 1 ? 14 : 13, margin: '0 0 5px' }}>{node.label}</div>}
+        {(node.sub ?? '').trim() ? <div style={{ fontSize: 13, lineHeight: 1.75 }}>{renderMd(node.sub ?? '')}</div> : null}
+        {node.children.map((c) => renderPreviewNode(c, depth + 1))}
+      </div>
+    );
+  };
+
+  // 仅在切换知识库 / 进出沉浸时复位视口；展开收起不再触发自动缩放
   useEffect(() => {
     const timer = window.setTimeout(resetViewport, 50);
     return () => window.clearTimeout(timer);
-  }, [layout, graphRoot?.id, immersive]);
+  }, [graphRoot?.id, immersive]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -882,14 +933,16 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
           const visibleChildCount = placed.node.children.filter((id) => visible.has(id)).length;
           const canToggle = actualChildCount > 0;
           const isCollapsed = collapsed.has(placed.node.id) && !searchActive;
+          const cardClickable = !root; // 非根节点均可点击：预览 + 展开/收起
+          const isPreviewing = previewId === placed.node.id;
           return (
             <div
               key={placed.node.id}
               data-mind-card
-              role={placed.node.entryId ? 'button' : undefined}
-              tabIndex={placed.node.entryId ? 0 : -1}
+              role={cardClickable ? 'button' : undefined}
+              tabIndex={cardClickable ? 0 : -1}
               className="ik-mind-card"
-              onClick={() => openNode(placed.node)}
+              onClick={() => activateNode(placed.node)}
               onKeyDown={(event) => handleCardKeyDown(event, placed.node)}
               style={{
                 position: 'absolute',
@@ -898,24 +951,24 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
                 width: placed.width,
                 height: placed.height,
                 padding: root ? '24px 26px' : leaf ? '16px 18px' : '18px 20px',
-                border: root ? `1px solid ${t.fg}` : `1px solid ${t.bd}`,
+                border: isPreviewing ? `2px solid ${t.accent}` : root ? `1px solid ${t.fg}` : `1px solid ${t.bd}`,
                 borderRadius: root ? 22 : leaf ? 14 : 17,
                 background: root ? t.fg : leaf ? t.sel : t.panel,
                 color: root ? t.bg : t.fg,
                 boxShadow: root ? '0 22px 50px rgba(0,0,0,.18)' : '0 8px 24px rgba(0,0,0,.055)',
                 textAlign: 'left',
                 fontFamily: 'inherit',
-                cursor: placed.node.entryId ? 'pointer' : 'default',
+                cursor: cardClickable ? 'pointer' : 'default',
                 overflow: 'hidden',
               }}
-              aria-label={`查看 ${placed.node.label}`}
+              aria-label={cardClickable ? `${isCollapsed ? '展开' : '收起'} ${placed.node.label}` : placed.node.label}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: root ? 14 : 9 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: root ? 11.5 : 10.5, fontWeight: 650, letterSpacing: '.07em', textTransform: 'uppercase', color: root ? t.bg : t.mut, opacity: root ? 0.72 : 1 }}>
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: root ? t.bg : t.fg, opacity: root ? 1 : 0.75 }} />
                   {root ? (placed.node.meta?.join(' · ') || currentKb.label) : placed.depth === 1 ? '知识树分类' : placed.depth === 2 ? '考查维度' : '高频问题'}
                 </span>
-                {canToggle && (
+                {canToggle && !root && (
                   <button
                     type="button"
                     data-node-toggle
@@ -964,8 +1017,48 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
       </div>
 
       <div style={{ position: 'absolute', right: 14, bottom: 12, padding: '6px 9px', borderRadius: 8, background: 'color-mix(in srgb, var(--panel) 88%, transparent)', border: '1px solid var(--bd)', color: 'var(--mut)', fontSize: 10.5, pointerEvents: 'none' }}>
-        {layout.nodes.length} 个节点 · {searchActive ? '只显示命中关键链路' : '点击节点右上角收起/展开'}
+        {layout.nodes.length} 个节点 · {searchActive ? '只显示命中关键链路' : '点击节点：预览知识 + 展开（同级互斥）'}
       </div>
+
+      {previewId && model.get(previewId) && (() => {
+        const node = model.get(previewId)!;
+        const entry = node.entryId ? entries.find((e) => e.id === node.entryId) : undefined;
+        const kind = node.depth === 1 ? '知识点' : node.depth === 2 ? '二级索引' : node.depth === 3 ? '三级索引' : '四级索引';
+        const intro = node.type === 'entry' ? (entry?.intro ?? '') : '';
+        const hasBody = Boolean(intro.trim()) || Boolean((node.sub ?? '').trim()) || node.children.length > 0;
+        // 索引路径（从知识库一路到当前节点的上一级）
+        const pathLabels: string[] = [];
+        let pcur = node.parentId;
+        while (pcur) { const p = model.get(pcur); if (!p) break; pathLabels.unshift(p.label); pcur = p.parentId; }
+        return (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: 'absolute', top: 14, right: 14, bottom: 14, width: 'min(380px, 42%)', zIndex: 9, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--bd)', borderRadius: 18, background: 'color-mix(in srgb, var(--panel) 92%, transparent)', boxShadow: '0 24px 60px rgba(0,0,0,.2)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', animation: 'ik-pop .16s ease' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, padding: '16px 18px', borderBottom: '1px solid var(--bd)' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: 'var(--mut)', marginBottom: 5, lineHeight: 1.5, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
+                  {pathLabels.map((lbl, i) => (
+                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      {i > 0 && <span style={{ opacity: 0.5 }}>/</span>}
+                      <span>{lbl}</span>
+                    </span>
+                  ))}
+                  <span style={{ marginLeft: pathLabels.length ? 4 : 0, padding: '1px 7px', border: '1px solid var(--bd)', borderRadius: 6 }}>{kind}</span>
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 760, letterSpacing: '-.01em', lineHeight: 1.2 }}>{node.label}</div>
+              </div>
+              <button onClick={() => setPreviewId(null)} style={{ ...utilityButton, padding: '6px 10px', flexShrink: 0 }}>关闭</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: '14px 18px', fontSize: 13.5 }}>
+              {intro.trim() ? <div style={{ marginBottom: 14, color: 'var(--mut)', lineHeight: 1.7 }}>{renderMd(intro)}</div> : null}
+              {renderPreviewNode(node.id, 0)}
+              {!hasBody && <div style={{ color: 'var(--mut)', fontSize: 12.5 }}>（该索引暂无内容，可在「管理」中补充）</div>}
+            </div>
+          </div>
+        );
+      })()}
 
       {keyGridOpen && (
         <div
