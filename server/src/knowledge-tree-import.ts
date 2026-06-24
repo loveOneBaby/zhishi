@@ -41,6 +41,7 @@ interface KnowledgeTreeNode {
   images?: unknown;
   interview?: KnowledgeTreeInterview | null;
   content?: unknown;
+  doc?: unknown;          // BlockNote 块文档(canonical;给了就直接用,优先级最高)
   links?: unknown;
   children?: unknown;
 }
@@ -189,6 +190,7 @@ function hasKnowledgeShape(node: KnowledgeTreeNode): boolean {
     node.images ||
     node.interview ||
     node.content ||
+    node.doc ||
     node.links
   );
 }
@@ -217,19 +219,24 @@ function toKnowledgeEntry(raw: KnowledgeTreeNode, opts: {
     text(opts.meta.sourceUrl) ? `来源：[${text(opts.meta.source) || '原文'}](${text(opts.meta.sourceUrl)})` : '',
   ].filter(Boolean);
 
+  // 给了 doc(BlockNote 块)就直接用作 canonical 内容,优先级最高
+  const docOverride = Array.isArray(raw.doc) ? (raw.doc as ImportEntry['doc']) : undefined;
+
   const nodes: IndexNode[] = [];
-  const images = imageMarkdown([
-    ...imageRefs(raw.cover, title),
-    ...imageRefs(raw.image, title),
-    ...imageRefs(raw.images, title),
-  ]);
-  if (images) nodes.push(indexNode(`${seed}/images`, '图片', images));
-  const interview = interviewNode(raw.interview, seed);
-  if (interview) nodes.push(interview);
-  nodes.push(...contentNodes(raw.content, seed));
-  const links = linkNode(raw.links, seed);
-  if (links) nodes.push(links);
-  if (!nodes.length && summary) nodes.push(indexNode(`${seed}/summary`, '核心结论', summary));
+  if (!docOverride) {
+    const images = imageMarkdown([
+      ...imageRefs(raw.cover, title),
+      ...imageRefs(raw.image, title),
+      ...imageRefs(raw.images, title),
+    ]);
+    if (images) nodes.push(indexNode(`${seed}/images`, '图片', images));
+    const interview = interviewNode(raw.interview, seed);
+    if (interview) nodes.push(interview);
+    nodes.push(...contentNodes(raw.content, seed));
+    const links = linkNode(raw.links, seed);
+    if (links) nodes.push(links);
+    if (!nodes.length && summary) nodes.push(indexNode(`${seed}/summary`, '核心结论', summary));
+  }
 
   return {
     id: stableId('ke', seed),
@@ -241,7 +248,8 @@ function toKnowledgeEntry(raw: KnowledgeTreeNode, opts: {
     tags,
     summary,
     intro: introParts.join('\n\n'),
-    nodes,
+    nodes: docOverride ? undefined : nodes,
+    doc: docOverride,
   };
 }
 

@@ -4,6 +4,9 @@ import path from 'node:path';
 import { SEED_LIBRARIES } from './seed-data/index.js';
 import type { Entry, EntryRow, IndexNode, KnowledgeBase, Folder, KbRow, FolderRow } from './types.js';
 import { parseBodyToIndex, normalizeIndex, type IndexTree } from './index-tree.js';
+import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc } from './assets.js';
+import { normalizeDocBlocks, splitDocToIndex, markdownToDocBlocks, treeToDoc } from './doc.js';
+import type { Block } from './blocks.js';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'knowledge.db');
@@ -52,6 +55,20 @@ db.exec(`
     version   TEXT PRIMARY KEY,
     appliedAt INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS assets (
+    id        TEXT PRIMARY KEY,
+    kind      TEXT NOT NULL,        -- 'data'(站内存储二进制) | 'external'(外链)
+    mime      TEXT NOT NULL DEFAULT '',
+    hash      TEXT,                 -- data 资源的内容哈希,用于去重
+    data      BLOB,                 -- kind=data 时的二进制
+    url       TEXT,                 -- kind=external 时的外链
+    width     INTEGER,
+    height    INTEGER,
+    alt       TEXT NOT NULL DEFAULT '',
+    size      INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_assets_hash ON assets(hash);
 `);
 
 // 迁移旧库：补 sort / idx / kbId / folderId 列
@@ -132,11 +149,36 @@ function migrateKbFolder(): void {
 }
 migrateKbFolder();
 
-function treeOf(r: EntryRow): IndexTree {
+// 统一取出 canonical 块文档:优先 idx.doc;兼容旧 idx.nodes / 旧 body
+function docOf(r: EntryRow): Block[] {
   if (r.idx) {
-    try { return normalizeIndex(JSON.parse(r.idx)); } catch { /* fallthrough */ }
+    try {
+      const parsed = JSON.parse(r.idx) as { doc?: unknown; nodes?: unknown; intro?: unknown };
+      if (Array.isArray(parsed.doc)) return normalizeDocBlocks(parsed.doc);
+      if (Array.isArray(parsed.nodes)) return treeToDoc(normalizeIndex(parsed));
+    } catch { /* fallthrough */ }
   }
-  return parseBodyToIndex(r.body || '');
+  return treeToDoc(parseBodyToIndex(r.body || ''));
+}
+
+// 把图片块里的 data:base64 落库为 asset,只留站内 url(去重,避免 JSON 膨胀)
+function rewriteDocImages(doc: Block[]): Block[] {
+  const walk = (blocks: Block[]): void => {
+    for (const b of blocks) {
+      if (b.type === 'image') {
+        const props = (b.props ?? {}) as Record<string, unknown>;
+        const url = String(props.url ?? '');
+        if (/^data:/i.test(url)) {
+          const asset = createDataAsset(url, String(props.caption ?? ''));
+          if (asset) props.url = asset.url;
+        }
+        b.props = props;
+      }
+      if (Array.isArray(b.children)) walk(b.children);
+    }
+  };
+  walk(doc);
+  return doc;
 }
 
 function rowToKb(r: KbRow): KnowledgeBase {
@@ -156,17 +198,32 @@ function kbNameOf(kbId: string): string {
 function rowToEntry(r: EntryRow, kbName?: string): Entry {
   let tags: string[] = [];
   try { tags = JSON.parse(r.tags); } catch { tags = []; }
-  const tree = treeOf(r);
+  const doc = docOf(r);
+  const tree = splitDocToIndex(doc);
   return {
     id: r.id,
     cat: kbName ?? kbNameOf(r.kbId ?? ''),
     kbId: r.kbId ?? '',
     folderId: r.folderId ?? null,
     title: r.title, py: r.py,
-    tags, summary: r.summary, intro: tree.intro, nodes: tree.nodes,
+    tags, summary: r.summary, intro: tree.intro, nodes: tree.nodes, doc,
     sort: r.sort ?? r.createdAt,
     createdAt: r.createdAt, updatedAt: r.updatedAt,
   };
+}
+
+// 由各种输入(doc / intro+nodes / body)得到 canonical 块文档(不含落库副作用,供预览复用)
+function deriveDoc(input: { doc?: unknown; intro?: unknown; nodes?: unknown; body?: string }): Block[] {
+  if (Array.isArray(input.doc)) return normalizeDocBlocks(input.doc);
+  if (input.nodes !== undefined || input.intro !== undefined) return treeToDoc(normalizeIndex({ intro: input.intro ?? '', nodes: input.nodes ?? [] }));
+  return treeToDoc(parseBodyToIndex(input.body ?? ''));
+}
+
+// 统一得到 canonical 块文档 + 派生索引,并落 idx(写入路径:含图片落库)
+function buildDocIdx(input: { doc?: unknown; intro?: unknown; nodes?: unknown; body?: string }): { doc: Block[]; tree: IndexTree; idx: string } {
+  const doc = rewriteDocImages(deriveDoc(input));
+  const tree = splitDocToIndex(doc);
+  return { doc, tree, idx: JSON.stringify({ doc }) };
 }
 
 // 取首个知识库 id；无则创建默认库（用于兜底归属）
@@ -373,6 +430,7 @@ export interface EntryInput {
   summary?: string;
   intro?: string;
   nodes?: IndexNode[];
+  doc?: Block[];         // BlockNote 块文档(canonical;优先于 intro/nodes)
 }
 
 function deriveSummary(input: { summary?: string }, tree: IndexTree): string {
@@ -384,7 +442,7 @@ function deriveSummary(input: { summary?: string }, tree: IndexTree): string {
 export function createEntry(input: EntryInput): Entry {
   const now = Date.now();
   const id = 'u' + now + Math.floor(Math.random() * 1000);
-  const tree = normalizeIndex({ intro: input.intro ?? '', nodes: input.nodes ?? [] });
+  const { doc, tree, idx } = buildDocIdx(input);
   const maxRow = db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM entries').get() as { m: number };
   const kbId = resolveKbId(input.kbId, input.cat);
   const folderId = input.folderId ?? null;
@@ -399,6 +457,7 @@ export function createEntry(input: EntryInput): Entry {
     summary: deriveSummary(input, tree),
     intro: tree.intro,
     nodes: tree.nodes,
+    doc,
     sort: Number(maxRow.m) + 1,
     createdAt: now,
     updatedAt: now,
@@ -410,7 +469,7 @@ export function createEntry(input: EntryInput): Entry {
     id: entry.id, cat: entry.cat, kbId: entry.kbId, folderId: entry.folderId,
     title: entry.title, py: entry.py,
     tags: JSON.stringify(entry.tags), summary: entry.summary,
-    idx: JSON.stringify(tree), sort: entry.sort, createdAt: now, updatedAt: now,
+    idx, sort: entry.sort, createdAt: now, updatedAt: now,
   });
   return entry;
 }
@@ -431,10 +490,13 @@ export function reorderEntries(ids: string[]): void {
 export function updateEntry(id: string, input: Partial<EntryInput>): Entry | null {
   const cur = getEntry(id);
   if (!cur) return null;
-  const tree = normalizeIndex({
-    intro: input.intro ?? cur.intro,
-    nodes: input.nodes ?? cur.nodes,
-  });
+  // 内容来源优先级:显式 doc > 显式 intro/nodes > 保持原内容(仅改元数据时)
+  const docSource = input.doc !== undefined
+    ? { doc: input.doc }
+    : (input.intro !== undefined || input.nodes !== undefined)
+      ? { intro: input.intro ?? cur.intro, nodes: input.nodes ?? cur.nodes }
+      : { doc: cur.doc };
+  const { doc, tree, idx } = buildDocIdx(docSource);
   const nextTitle = input.title?.trim() ?? cur.title;
   // 标题变更且未显式给 py 时，按新标题重算拼音源，避免检索过期
   const nextPy = input.py != null
@@ -456,6 +518,7 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
     summary: nextSummary,
     intro: tree.intro,
     nodes: tree.nodes,
+    doc,
     updatedAt: Date.now(),
   };
   db.prepare(
@@ -465,7 +528,7 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
     id: next.id, cat: next.cat, kbId: next.kbId, folderId: next.folderId,
     title: next.title, py: next.py,
     tags: JSON.stringify(next.tags), summary: next.summary,
-    idx: JSON.stringify(tree), updatedAt: next.updatedAt,
+    idx, updatedAt: next.updatedAt,
   });
   return next;
 }
@@ -473,6 +536,87 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
 export function deleteEntry(id: string): boolean {
   const info = db.prepare('DELETE FROM entries WHERE id = ?').run(id);
   return Number(info.changes) > 0;
+}
+
+// ───────────── 资源(图片) ─────────────
+
+export interface AssetMeta {
+  id: string;
+  kind: 'data' | 'external';
+  mime: string;
+  url: string;            // 统一对外可用地址(data → /api/assets/:id/raw；external → 原 url)
+  width: number | null;
+  height: number | null;
+  alt: string;
+  size: number;
+  createdAt: number;
+}
+
+function assetRowToMeta(r: Record<string, unknown>): AssetMeta {
+  const kind = r.kind === 'external' ? 'external' : 'data';
+  return {
+    id: String(r.id),
+    kind,
+    mime: String(r.mime ?? ''),
+    url: kind === 'external' ? String(r.url ?? '') : `/api/assets/${String(r.id)}/raw`,
+    width: r.width == null ? null : Number(r.width),
+    height: r.height == null ? null : Number(r.height),
+    alt: String(r.alt ?? ''),
+    size: Number(r.size ?? 0),
+    createdAt: Number(r.createdAt ?? 0),
+  };
+}
+
+// 落库一张 data:base64 图片(按内容哈希去重),返回元信息(含站内 url)
+export function createDataAsset(dataUrl: string, alt = ''): AssetMeta | null {
+  const parsed = parseDataUrl(dataUrl);
+  if (!parsed) return null;
+  const hash = sha256(parsed.bytes);
+  const existing = db.prepare('SELECT * FROM assets WHERE hash = ? AND kind = \'data\' LIMIT 1').get(hash) as Record<string, unknown> | undefined;
+  if (existing) return assetRowToMeta(existing);
+  const size = sniffImageSize(parsed.bytes);
+  const id = 'as_' + hash.slice(0, 16);
+  db.prepare(
+    `INSERT OR IGNORE INTO assets (id, kind, mime, hash, data, url, width, height, alt, size, createdAt)
+     VALUES (:id, 'data', :mime, :hash, :data, NULL, :width, :height, :alt, :size, :createdAt)`
+  ).run({
+    id, mime: parsed.mime, hash, data: parsed.bytes,
+    width: size?.width ?? null, height: size?.height ?? null,
+    alt, size: parsed.bytes.length, createdAt: Date.now(),
+  });
+  const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown>;
+  return assetRowToMeta(row);
+}
+
+// 登记一个外链图片(不下载,仅存引用)
+export function registerExternalAsset(url: string, alt = ''): AssetMeta {
+  const id = 'ax_' + sha256(Buffer.from(url)).slice(0, 16);
+  db.prepare(
+    `INSERT OR IGNORE INTO assets (id, kind, mime, hash, data, url, width, height, alt, size, createdAt)
+     VALUES (:id, 'external', '', NULL, NULL, :url, NULL, NULL, :alt, 0, :createdAt)`
+  ).run({ id, url, alt, createdAt: Date.now() });
+  const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown>;
+  return assetRowToMeta(row);
+}
+
+// 统一入口:把任意图片地址(data: / 外链)收敛成站内可用的稳定 url
+export function ingestImageSrc(src: string, alt = ''): AssetMeta | null {
+  const ref = classifyImageSrc(src);
+  if (!ref) return null;
+  if (ref.kind === 'data' && ref.dataUrl) return createDataAsset(ref.dataUrl, alt);
+  if (ref.kind === 'external' && ref.url) return registerExternalAsset(ref.url, alt);
+  return null;
+}
+
+export function getAsset(id: string): AssetMeta | null {
+  const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  return row ? assetRowToMeta(row) : null;
+}
+
+export function getAssetBytes(id: string): { mime: string; bytes: Buffer } | null {
+  const row = db.prepare('SELECT mime, data FROM assets WHERE id = ? AND kind = \'data\'').get(id) as { mime: string; data: Buffer } | undefined;
+  if (!row || !row.data) return null;
+  return { mime: row.mime, bytes: Buffer.from(row.data) };
 }
 
 // ───────────────────────── 导入 / 导出 ─────────────────────────
@@ -489,6 +633,7 @@ export interface ImportEntry {
   intro?: string;
   nodes?: IndexNode[];
   body?: string;
+  doc?: Block[];         // BlockNote 块文档(canonical;优先于 intro/nodes/body)
 }
 
 export interface ImportKb { id?: string; name: string; sort?: number; }
@@ -568,9 +713,8 @@ export function buildImportPreview(list: ImportEntry[]): ImportPreview {
   for (const raw of list) {
     const title = typeof raw.title === 'string' ? raw.title.trim() : '';
     const isValid = Boolean(title);
-    const tree = (raw.nodes !== undefined || raw.intro !== undefined)
-      ? normalizeIndex({ intro: raw.intro ?? '', nodes: raw.nodes ?? [] })
-      : parseBodyToIndex(raw.body ?? '');
+    // 预览不写库:用 deriveDoc(不落图片)派生索引
+    const tree = splitDocToIndex(deriveDoc({ doc: raw.doc, intro: raw.intro, nodes: raw.nodes, body: raw.body }));
     const cat = (raw.cat && String(raw.cat).trim()) || '未分类';
     const exists = typeof raw.id === 'string' && raw.id.length > 0 && existing.has(raw.id);
     entries.push({
@@ -595,6 +739,23 @@ export function buildImportPreview(list: ImportEntry[]): ImportPreview {
     .map(([cat, count]) => ({ cat, count }))
     .sort((a, b) => b.count - a.count);
   return { total: list.length, valid, skipped, newCount, updateCount, byCat, entries };
+}
+
+// 把 markdown 里内联的 data:base64 图片落库为 assets,内容只保留站内引用 url(去重,避免 JSON 膨胀)
+function rewriteDataImages(md: string): string {
+  if (!md || !md.includes('data:')) return md;
+  return md.replace(/!\[([^\]]*)\]\((data:[^)]+)\)/g, (full, alt: string, src: string) => {
+    const asset = createDataAsset(src, alt);
+    return asset ? `![${alt}](${asset.url})` : full;
+  });
+}
+function rewriteTreeImages(tree: IndexTree): IndexTree {
+  const walk = (nodes: IndexNode[]): void => {
+    for (const n of nodes) { n.content = rewriteDataImages(n.content); walk(n.children); }
+  };
+  tree.intro = rewriteDataImages(tree.intro);
+  walk(tree.nodes);
+  return tree;
 }
 
 // 批量导入（备份恢复 / 迁移）。replace=true 先清空；按 id upsert，兼容旧 body / cat 字段。
@@ -674,10 +835,8 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
       if (!raw || typeof raw.title !== 'string' || !raw.title.trim()) continue;
       const now = Date.now();
       const id = typeof raw.id === 'string' && raw.id ? raw.id : 'u' + now + Math.floor(Math.random() * 100000);
-      const tree = (raw.nodes !== undefined || raw.intro !== undefined)
-        ? normalizeIndex({ intro: raw.intro ?? '', nodes: raw.nodes ?? [] })
-        : parseBodyToIndex(raw.body ?? '');
-      const idx = JSON.stringify(tree);
+      // 统一 doc-canonical:优先 doc 块,其次 intro/nodes,其次旧 body;图片落库去重
+      const { tree, idx } = buildDocIdx({ doc: raw.doc, intro: raw.intro, nodes: raw.nodes, body: raw.body });
       const cat = (raw.cat && String(raw.cat).trim()) || '未分类';
       const kbId = raw.kbId ? (kbIdMap.get(raw.kbId) ?? resolveKbId(raw.kbId, cat)) : resolveKbId(undefined, cat);
       // 优先用载荷 folderId；否则按 cat 在该库建根文件夹

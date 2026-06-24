@@ -1,9 +1,12 @@
-// 结构化「多级索引」：知识点(一级) 下挂 nodes（二/三/四级…），每个节点含标题与内容。
-// 这是知识点的一等数据结构；运行时不再解析 markdown 标题。
+// 结构化「多级索引」：知识点(一级) 下挂 nodes（二/三/四级…），每个节点的正文是「块文档」。
+// blocks 为 canonical(BlockNote 块树)；content 是由块派生的 markdown 投影,供检索/旧渲染使用。
+import { blocksToMarkdown, type Block } from './blocks.js';
+
 export interface IndexNode {
   id: string;
   title: string;
-  content: string;
+  content: string;      // 由 blocks 派生的 markdown 投影
+  blocks?: Block[];     // canonical 富内容(块文档)
   children: IndexNode[];
 }
 
@@ -62,10 +65,16 @@ export function normalizeIndex(input: unknown): IndexTree {
       if (total >= MAX_TOTAL_NODES) break;
       total += 1;
       const n = (raw ?? {}) as Partial<IndexNode>;
+      const blocks = Array.isArray(n.blocks) ? (n.blocks as Block[]) : undefined;
+      // 有块文档时 content 一律由块派生(保持单一事实源);否则用传入的 content
+      const content = blocks && blocks.length
+        ? blocksToMarkdown(blocks).slice(0, MAX_CONTENT)
+        : String(n.content ?? '').slice(0, MAX_CONTENT);
       out.push({
         id: typeof n.id === 'string' && n.id ? n.id.slice(0, 64) : newId(),
         title: (String(n.title ?? '').trim() || '未命名索引').slice(0, MAX_TITLE),
-        content: String(n.content ?? '').slice(0, MAX_CONTENT),
+        content,
+        ...(blocks ? { blocks } : {}),
         children: normNodes(n.children, depth + 1),
       });
     }

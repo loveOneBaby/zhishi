@@ -3,94 +3,11 @@
 > vite
 
 
-  VITE v5.4.21  ready in 118 ms
+  VITE v5.4.21  ready in 151 ms
 
   ➜  Local:   http://localhost:3000/
   ➜  Network: use --host to expose
-8:56:24 PM [vite] hmr update /src/components/DetailModal.tsx, /src/components/EntryEditor.tsx, /src/components/AskModal.tsx, /src/components/DetailSidePanel.tsx, /src/components/CanvasView.tsx, /src/components/ImportPreviewModal.tsx
-8:57:35 PM [vite] hmr update /src/components/DetailModal.tsx, /src/components/EntryEditor.tsx, /src/components/AskModal.tsx, /src/components/DetailSidePanel.tsx, /src/components/CanvasView.tsx, /src/components/ImportPreviewModal.tsx
-9:04:09 PM [vite] hmr update /src/App.tsx
-9:04:09 PM [vite] Internal server error: /Users/myj/Downloads/面试知识快速检索网站/web/src/App.tsx: Unexpected token, expected "," (325:6)
-
-  323 |       </div>
-  324 |
-> 325 |       {modalEntry && <DetailModal entry={modalEntry} onClose={closeAll} />}
-      |       ^
-  326 |       {aiOpen && <AskModal query={query} onClose={closeAll} />}
-  327 |       {formOpen && (
-  328 |         <div
-  Plugin: vite:react-babel
-  File: /Users/myj/Downloads/面试知识快速检索网站/web/src/App.tsx:325:6
-  323|        </div>
-  324|  
-  325|        {modalEntry && <DetailModal entry={modalEntry} onClose={closeAll} />}
-     |        ^
-  326|        {aiOpen && <AskModal query={query} onClose={closeAll} />}
-  327|        {formOpen && (
-      at constructor (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:365:19)
-      at TypeScriptParserMixin.raise (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:6616:19)
-      at TypeScriptParserMixin.unexpected (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:6636:16)
-      at TypeScriptParserMixin.expect (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:6916:12)
-      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11678:14)
-      at TypeScriptParserMixin.parseExprAtom (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11348:23)
-      at TypeScriptParserMixin.parseExprAtom (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:4776:20)
-      at TypeScriptParserMixin.parseExprSubscripts (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11098:23)
-      at TypeScriptParserMixin.parseUpdate (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11083:21)
-      at TypeScriptParserMixin.parseMaybeUnary (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11063:23)
-      at TypeScriptParserMixin.parseMaybeUnary (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:9854:18)
-      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10916:61)
-      at TypeScriptParserMixin.parseExprOpBaseRightExpr (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11003:34)
-      at TypeScriptParserMixin.parseExprOpRightExpr (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10998:21)
-      at TypeScriptParserMixin.parseExprOp (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10964:27)
-      at TypeScriptParserMixin.parseExprOp (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:9323:18)
-      at TypeScriptParserMixin.parseExprOp (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10970:21)
-      at TypeScriptParserMixin.parseExprOp (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:9323:18)
-      at TypeScriptParserMixin.parseExprOps (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10925:17)
-      at TypeScriptParserMixin.parseMaybeConditional (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10898:23)
-      at TypeScriptParserMixin.parseMaybeAssign (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10848:21)
-      at TypeScriptParserMixin.parseMaybeAssign (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:9803:20)
-      at TypeScriptParserMixin.parseExpressionBase (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10801:23)
-      at /Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10797:39
-      at TypeScriptParserMixin.allowInAnd (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:12443:12)
-      at TypeScriptParserMixin.parseExpression (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10797:17)
-      at TypeScriptParserMixin.jsxParseExpressionContainer (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:4644:31)
-      at TypeScriptParserMixin.jsxParseElementAt (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:4723:36)
-      at TypeScriptParserMixin.jsxParseElementAt (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:4710:32)
-      at TypeScriptParserMixin.jsxParseElement (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:4761:17)
-      at TypeScriptParserMixin.parseExprAtom (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:4771:19)
-      at TypeScriptParserMixin.parseExprSubscripts (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11098:23)
-      at TypeScriptParserMixin.parseUpdate (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11083:21)
-      at TypeScriptParserMixin.parseMaybeUnary (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11063:23)
-      at TypeScriptParserMixin.parseMaybeUnary (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:9854:18)
-      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10916:61)
-      at TypeScriptParserMixin.parseExprOps (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10921:23)
-      at TypeScriptParserMixin.parseMaybeConditional (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10898:23)
-      at TypeScriptParserMixin.parseMaybeAssign (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10848:21)
-      at /Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:9792:39
-      at TypeScriptParserMixin.tryParse (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:6924:20)
-      at TypeScriptParserMixin.parseMaybeAssign (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:9792:18)
-      at /Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10817:39
-      at TypeScriptParserMixin.allowInAnd (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:12443:12)
-      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:10817:17)
-      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:12510:17)
-      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11692:28)
-      at TypeScriptParserMixin.parseExprAtom (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11348:23)
-      at TypeScriptParserMixin.parseExprAtom (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:4776:20)
-      at TypeScriptParserMixin.parseExprSubscripts (/Users/myj/Downloads/面试知识快速检索网站/web/node_modules/@babel/parser/lib/index.js:11098:23)
-9:04:19 PM [vite] hmr update /src/components/TopBar.tsx
-9:04:35 PM [vite] hmr update /src/components/FreeMode.tsx
-9:05:01 PM [vite] hmr update /src/components/FreeMode.tsx
-9:05:21 PM [vite] hmr update /src/components/DetailSidePanel.tsx
-9:05:31 PM [vite] hmr update /src/styles.css
-9:05:52 PM [vite] hmr update /src/App.tsx
-9:09:38 PM [vite] hmr update /src/components/FreeMode.tsx
-9:09:55 PM [vite] hmr update /src/components/FreeMode.tsx
-9:10:08 PM [vite] hmr update /src/styles.css
-9:11:22 PM [vite] hmr update /src/App.tsx
-9:11:36 PM [vite] hmr update /src/components/FreeMode.tsx
-9:12:14 PM [vite] hmr update /src/components/FreeMode.tsx
-9:13:58 PM [vite] hmr update /src/components/FreeMode.tsx
-9:14:11 PM [vite] hmr update /src/styles.css
-9:15:26 PM [vite] hmr update /src/components/FreeMode.tsx
-9:15:39 PM [vite] hmr update /src/styles.css
-9:16:53 PM [vite] hmr update /src/components/TopBar.tsx
+10:53:34 PM [vite] hmr update /src/components/FreeMode.tsx
+10:53:34 PM [vite] hmr update /src/components/FreeMode.tsx
+10:56:28 PM [vite] hmr update /src/components/FreeMode.tsx
+10:56:44 PM [vite] hmr update /src/styles.css

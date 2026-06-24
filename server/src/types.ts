@@ -1,5 +1,7 @@
 import type { IndexNode } from './index-tree.js';
+import type { Block } from './blocks.js';
 export type { IndexNode, IndexTree } from './index-tree.js';
+export type { Block } from './blocks.js';
 
 // 知识库：顶层实体，容纳若干文件夹与知识点
 export interface KnowledgeBase {
@@ -31,7 +33,8 @@ export interface Entry {
   tags: string[];
   summary: string;
   intro: string;        // 索引前的引言
-  nodes: IndexNode[];   // 结构化多级索引
+  nodes: IndexNode[];   // 由 doc 派生的多级索引(标题块切分)
+  doc: Block[];         // canonical 内容:BlockNote 块文档
   sort: number;
   createdAt: number;
   updatedAt: number;

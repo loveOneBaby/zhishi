@@ -1,8 +1,18 @@
+// 富内容「块」(BlockNote 形态;对存储不透明,可自由扩展类型)
+export interface Block {
+  id?: string;
+  type?: string;
+  props?: Record<string, unknown>;
+  content?: unknown;
+  children?: Block[];
+}
+
 // 结构化多级索引节点
 export interface IndexNode {
   id: string;
   title: string;
-  content: string;
+  content: string;       // 由 blocks 派生的 markdown 投影(旧渲染/检索用)
+  blocks?: Block[];      // canonical 富内容(块文档)
   children: IndexNode[];
 }
 
@@ -36,7 +46,8 @@ export interface Entry {
   tags: string[];
   summary: string;
   intro: string;        // 索引前的引言
-  nodes: IndexNode[];   // 结构化多级索引
+  nodes: IndexNode[];   // 由 doc 派生的多级索引
+  doc?: Block[];        // canonical 内容:BlockNote 块文档
   sort?: number;
   createdAt?: number;
   updatedAt?: number;
@@ -53,6 +64,7 @@ export interface EntryInput {
   py?: string;
   intro?: string;
   nodes?: IndexNode[];
+  doc?: Block[];         // BlockNote 块文档(canonical;优先于 intro/nodes)
 }
 
 export type ThemeKey = 'mono' | 'ink' | 'paper';

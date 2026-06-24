@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import type { IndexNode } from '../types';
 import { patchNode, removeNode, moveNode, addChild, newNode, MAX_INDEX_DEPTH } from '../outline';
 import { toast } from '../toast';
+import BlockEditor from './BlockEditor';
 
 interface Props {
   intro: string;
@@ -73,13 +74,13 @@ export default function IndexTreeEditor({ intro: introProp, nodes: nodesProp, on
             <button style={{ ...iconBtn, color: 'var(--danger)' }} title="删除该索引及其下级" onClick={() => { setNodes((cur) => removeNode(cur, n.id)); setSaved(false); }}>✕</button>
           </div>
           {contentOpen && (
-            <textarea
-              value={n.content}
-              onChange={(e) => { setNodes((cur) => patchNode(cur, n.id, { content: e.target.value })); setSaved(false); }}
-              placeholder="该索引下的内容（支持 - 列表、**加粗**、`代码`、```代码块```）"
-              spellCheck={false}
-              style={{ width: '100%', marginTop: 6, minHeight: 80, padding: '10px 12px', fontSize: 12.5, lineHeight: 1.6, fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--fg)', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, outline: 'none', resize: 'vertical' }}
-            />
+            <div style={{ marginTop: 6, border: '1px solid var(--bd)', borderRadius: 8, overflow: 'hidden', background: 'var(--bg)' }}>
+              <BlockEditor
+                initialBlocks={n.blocks}
+                initialMarkdown={n.content}
+                onChange={(blocks) => { setNodes((cur) => patchNode(cur, n.id, { blocks })); setSaved(false); }}
+              />
+            </div>
           )}
           {n.children.length > 0 && renderNodes(n.children, depth + 1)}
         </div>

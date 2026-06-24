@@ -129,6 +129,7 @@ interface RawEntry {
   intro?: string | RawIntro;
   nodes?: RawNode[] | null;
   body?: string;
+  doc?: unknown;          // 直接给 BlockNote 块文档(优先)
   searchText?: string;
 }
 
@@ -159,5 +160,6 @@ export function convertEntry(raw: unknown, assets: Asset[] = []): ImportEntry {
     intro,
     nodes,
     body: e.body,
+    doc: Array.isArray(e.doc) ? (e.doc as ImportEntry['doc']) : undefined,
   };
 }

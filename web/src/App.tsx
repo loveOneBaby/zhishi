@@ -232,7 +232,7 @@ export default function App() {
   return (
     <div style={{ ...themeVars(t), minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--font)', WebkitFontSmoothing: 'antialiased' }}>
       <div style={{ width: '100%', maxWidth: 'none', margin: 0, padding: '0 clamp(16px, 2.4vw, 44px) 44px' }}>
-        <TopBar mode={mode} setMode={(m) => { setMode(m); setOpenId(null); if (m === 'search') setTimeout(() => inputRef.current?.focus(), 40); }} theme={theme} setTheme={setTheme} />
+        <TopBar mode={mode} setMode={(m) => { setMode(m); setOpenId(null); if (m === 'free') { setFreeKb(null); setFreeFolder(null); } if (m === 'search') setTimeout(() => inputRef.current?.focus(), 40); }} theme={theme} setTheme={setTheme} />
 
         {mode === 'search' && (
           <SearchMode

@@ -1,6 +1,6 @@
 import type { Entry } from '../types';
-import { parseSections } from '../markdown';
 import { highlightText } from '../highlight';
+import BlockEditor from './BlockEditor';
 
 interface Props {
   entry: Entry | null;
@@ -32,8 +32,6 @@ export default function DetailSidePanel({ entry, query = '' }: Props) {
     );
   }
 
-  const ps = parseSections(entry, query);
-
   return (
     <aside
       style={{
@@ -60,23 +58,9 @@ export default function DetailSidePanel({ entry, query = '' }: Props) {
         <div style={{ fontSize: 14.5, lineHeight: 1.7, color: 'var(--mut)' }}>{highlightText(entry.summary, query)}</div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '26px 32px 34px' }}>
-        {ps.intro && (
-          <div style={{ fontSize: 14, lineHeight: 1.8, color: 'var(--mut)', marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid var(--bd)' }}>
-            {ps.intro}
-          </div>
-        )}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {ps.nodes.map((node) => (
-            <section key={node.key} style={{ border: '1px solid var(--bd)', borderRadius: 10, background: 'var(--bg)', padding: '18px 22px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 760, marginBottom: 10 }}>
-                <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--fg)', opacity: 0.8, flexShrink: 0 }} />
-                {node.title}
-              </div>
-              <div style={{ fontSize: 14, lineHeight: 1.78, color: 'var(--fg)' }}>{node.content}</div>
-            </section>
-          ))}
-        </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '14px 18px 34px' }}>
+        {/* 原生 BlockNote 只读渲染:图片/表格/代码/标题等都按块原样显示 */}
+        <BlockEditor key={entry.id} editable={false} initialBlocks={entry.doc} />
       </div>
     </aside>
   );

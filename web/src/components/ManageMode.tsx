@@ -256,12 +256,14 @@ export default function ManageMode(props: Props): ReactNode {
         toast('文件解析失败：' + (err instanceof Error ? err.message : String(err)), 'error');
         return;
       }
-      const obj = parsed as { version?: string; meta?: unknown; tree?: unknown[] };
-      if (!Array.isArray(obj?.tree) || obj.tree.length === 0) {
-        toast('文件中没有 tree 数组，当前只支持 knowledge-tree-v1', 'error');
+      const obj = parsed as { version?: string; meta?: unknown; tree?: unknown[]; entries?: unknown[]; assets?: unknown[] };
+      const hasTree = Array.isArray(obj?.tree) && obj.tree.length > 0;
+      const hasEntries = Array.isArray(obj?.entries) && obj.entries.length > 0;
+      if (!hasTree && !hasEntries) {
+        toast('文件需要 entries 数组（BlockNote 块）或 tree 数组', 'error');
         return;
       }
-      const payload: ImportPayload = { version: obj.version, meta: obj.meta, tree: obj.tree };
+      const payload: ImportPayload = { version: obj.version, meta: obj.meta, tree: obj.tree, entries: obj.entries, assets: obj.assets };
       previewImport(payload)
         .then((preview) => setImportPreview({ payload, preview }))
         .catch((err) => toast('解析失败：' + (err instanceof Error ? err.message : String(err)), 'error'));

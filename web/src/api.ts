@@ -157,11 +157,13 @@ export async function exportAll(): Promise<ExportPayload> {
   return j<ExportPayload>(await fetch(`${BASE}/export`));
 }
 
-// 导入载荷：主格式为 knowledge-tree-v1（meta + tree）
+// 导入载荷：新格式 = entries（BlockNote 块文档）；兼容旧 knowledge-tree-v1（meta + tree）
 export interface ImportPayload {
   version?: string;
   meta?: unknown;
-  tree: unknown[];
+  tree?: unknown[];
+  entries?: unknown[];
+  assets?: unknown[];
   targetKbId?: string;
   targetKbName?: string;
 }
@@ -216,6 +218,23 @@ export async function previewImport(payload: ImportPayload): Promise<ImportPrevi
   });
   const data = await j<{ preview: ImportPreview }>(res);
   return data.preview;
+}
+
+// 上传图片(转 dataURL → /api/assets 落库去重),返回站内可用 url
+export async function uploadAsset(file: File): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.readAsDataURL(file);
+  });
+  const res = await fetch(`${BASE}/assets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataUrl, alt: file.name }),
+  });
+  const data = await j<{ asset: { url: string } }>(res);
+  return data.asset.url;
 }
 
 export interface AskResponse {

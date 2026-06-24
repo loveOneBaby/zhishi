@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import type { Entry, EntryInput, IndexNode, KnowledgeBase, Folder } from '../types';
+import type { Entry, EntryInput, IndexNode, KnowledgeBase, Folder, Block } from '../types';
 import { forestOfKb } from '../tree';
 import type { FolderNode } from '../tree';
 import { renderMd } from '../markdown';
 import { toast } from '../toast';
+import BlockEditor from './BlockEditor';
 
 const inputStyle: CSSProperties = {
   width: '100%',
@@ -77,7 +78,7 @@ function entryToDocument(entry: Entry | null): string {
   if (!entry) return '';
   const parts: string[] = [];
   if (entry.intro.trim()) parts.push(entry.intro.trim());
-  for (const node of entry.nodes) parts.push(nodeToMarkdown(node, 2));
+  for (const node of entry.nodes) parts.push(nodeToMarkdown(node, 1));
   return parts.join('\n\n').trim();
 }
 
@@ -92,7 +93,7 @@ function parseDocumentToIndex(body: string): { intro: string; nodes: IndexNode[]
   };
 
   for (const line of lines) {
-    const heading = /^(#{2,6})\s+(.+)$/.exec(line);
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     if (!heading) {
       if (stack.length) stack[stack.length - 1].lines.push(line);
       else intro.push(line);
@@ -177,6 +178,7 @@ export default function EntryEditor(props: Props): ReactNode {
   const [folderId, setFolderId] = useState<string | null>(initial?.folderId ?? defaultFolderId ?? null);
   const [tags, setTags] = useState(initial?.tags.join(', ') ?? '');
   const [doc, setDoc] = useState(entryToDocument(initial));
+  const [docBlocks, setDocBlocks] = useState<Block[]>(initial?.doc ?? []);
   const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
@@ -228,8 +230,7 @@ export default function EntryEditor(props: Props): ReactNode {
       tags: tagList,
       summary: deriveSummary(title, doc, nextTree),
       py: title.trim(),
-      intro: nextTree.intro,
-      nodes: nextTree.nodes,
+      doc: docBlocks,   // canonical:BlockNote 块文档,服务端据此派生索引
     })
       .then((saved) => {
         const nextDoc = entryToDocument(saved);
@@ -238,6 +239,7 @@ export default function EntryEditor(props: Props): ReactNode {
         setFolderId(saved.folderId);
         setTags(saved.tags.join(', '));
         setDoc(nextDoc);
+        setDocBlocks(saved.doc ?? []);
         baseRef.current = snapshot({
           title: saved.title,
           kbId: saved.kbId,
@@ -286,7 +288,7 @@ export default function EntryEditor(props: Props): ReactNode {
             {isEdit ? 'Edit Document' : 'New Document'}
           </div>
           <div style={{ marginTop: 3, fontSize: 13, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {selectedKbName} · {headingCount ? `${headingCount} 个标题会生成知识树` : '用 ## 标题生成知识树'}
+            {selectedKbName} · {headingCount ? `${headingCount} 个标题会生成知识树` : '用标题块生成知识树'}
             {dirty ? ' · 未保存' : savedAt ? ' · 已保存' : ''}
           </div>
         </div>
@@ -406,24 +408,14 @@ export default function EntryEditor(props: Props): ReactNode {
               {doc.trim() ? renderMd(doc) : <span style={{ color: 'var(--mut)' }}>还没有正文内容。</span>}
             </div>
           ) : (
-            <textarea
-              value={doc}
-              onChange={(e) => setDoc(e.target.value)}
-              placeholder={`直接像写文档一样输入内容。\n\n普通段落会作为开篇说明。\n\n## 核心定义\n这里写面试回答。\n\n### 常见追问\n这里写追问和回答。\n\n#### 易错点\n这里写坑点。`}
-              spellCheck={false}
-              style={{
-                width: '100%',
-                minHeight: 620,
-                border: 'none',
-                outline: 'none',
-                resize: 'vertical',
-                background: 'transparent',
-                color: 'var(--fg)',
-                fontSize: 16,
-                lineHeight: 1.9,
-                fontFamily: 'inherit',
-              }}
-            />
+            <div style={{ minHeight: 560, border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden', background: 'var(--panel)' }}>
+              <BlockEditor
+                initialBlocks={initial?.doc}
+                initialMarkdown={initial?.doc && initial.doc.length ? undefined : doc}
+                onChange={setDocBlocks}
+                onChangeMarkdown={setDoc}
+              />
+            </div>
           )}
 
           <div
@@ -439,10 +431,9 @@ export default function EntryEditor(props: Props): ReactNode {
               lineHeight: 1.7,
             }}
           >
+            <span>像写飞书文档一样输入(/ 唤起块菜单、可插图/代码/表格)</span>
+            <span>标题块(H1/H2/H3)= 各级知识树索引</span>
             <span>普通段落 = 开篇说明</span>
-            <span>## = 一级考点</span>
-            <span>### = 子考点</span>
-            <span>#### = 追问 / 易错点</span>
             <span>保存后自动同步到画布和检索</span>
           </div>
         </div>

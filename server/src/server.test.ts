@@ -5,12 +5,17 @@ import { blocksToMarkdown, convertEntry } from './blocks-import.js';
 import { knowledgeTreeToImportPayload } from './knowledge-tree-import.js';
 import { score, searchEntries } from './search.js';
 import { toSearchText } from './pinyin-search.js';
+import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc } from './assets.js';
+import { extractText, blocksToMarkdown as blockNoteToMarkdown } from './blocks.js';
+import { normalizeDocBlocks, splitDocToIndex, markdownToDocBlocks } from './doc.js';
 import type { Entry } from './types.js';
+
+const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
 function entry(over: Partial<Entry>): Entry {
   return {
     id: 'e1', cat: 'AI', kbId: 'kb1', folderId: null, title: '示例', py: '', tags: [], summary: '', intro: '',
-    nodes: [], sort: 0, createdAt: 0, updatedAt: 0, ...over,
+    nodes: [], doc: [], sort: 0, createdAt: 0, updatedAt: 0, ...over,
   };
 }
 
@@ -65,6 +70,100 @@ test('searchEntries: 中文子串 / 拼音 / 缩写命中, 无关不命中', () 
   const byAbbr = searchEntries(list, 'bb').map((e) => e.title);
   assert.deepEqual(byAbbr, ['闭包']);
   assert.equal(searchEntries(list, '完全不相关xyz').length, 0);
+});
+
+test('assets: parseDataUrl / sha256 / sniffImageSize / classifyImageSrc', () => {
+  const parsed = parseDataUrl(PNG_1x1);
+  assert.ok(parsed);
+  assert.equal(parsed!.mime, 'image/png');
+  assert.ok(parsed!.bytes.length > 0);
+  // 同内容哈希稳定
+  assert.equal(sha256(parsed!.bytes), sha256(parseDataUrl(PNG_1x1)!.bytes));
+  // 1x1 PNG 尺寸嗅探
+  assert.deepEqual(sniffImageSize(parsed!.bytes), { width: 1, height: 1 });
+  // 地址归类
+  assert.equal(classifyImageSrc('https://x.com/a.png')!.kind, 'external');
+  assert.equal(classifyImageSrc('/static/a.png')!.kind, 'external');
+  assert.equal(classifyImageSrc(PNG_1x1)!.kind, 'data');
+  assert.equal(classifyImageSrc('C:\\local\\a.png'), null);
+  assert.equal(parseDataUrl('not-a-data-url'), null);
+});
+
+test('blocks.extractText: BlockNote 形态抽纯文本(含 caption/表格/子块/未知块)', () => {
+  const blocks = [
+    { type: 'paragraph', content: [{ type: 'text', text: 'Query 预处理 → ' }, { type: 'text', text: '多路召回' }] },
+    { type: 'image', props: { url: 'https://x/a.png', caption: '检索链路' } },
+    { type: 'table', content: { type: 'tableContent', rows: [{ cells: [[{ type: 'text', text: '稠密' }], [{ type: 'text', text: '语义' }]] }] } },
+    { type: 'someFutureBlock', content: [{ type: 'text', text: '未知块文本' }], children: [{ type: 'paragraph', content: 'child 文本' }] },
+  ];
+  const txt = extractText(blocks);
+  assert.ok(txt.includes('多路召回'));
+  assert.ok(txt.includes('检索链路'));   // 图片 caption 进检索
+  assert.ok(txt.includes('稠密') && txt.includes('语义')); // 表格文字
+  assert.ok(txt.includes('未知块文本') && txt.includes('child 文本')); // 未知块不丢
+});
+
+test('blocks.blocksToMarkdown: heading/quote/table/code/list 不丢块', () => {
+  const md = blockNoteToMarkdown([
+    { type: 'heading', props: { level: 1 }, content: [{ type: 'text', text: '标题' }] },
+    { type: 'quote', content: [{ type: 'text', text: '名言' }] },
+    { type: 'codeBlock', props: { language: 'python' }, content: 'print(1)' },
+    { type: 'bulletListItem', content: [{ type: 'text', text: '稠密' }] },
+    { type: 'table', content: { type: 'tableContent', rows: [{ cells: [[{ type: 'text', text: '策略' }], [{ type: 'text', text: '场景' }]] }] } },
+  ]);
+  assert.ok(md.includes('## 标题'));
+  assert.ok(md.includes('> 名言'));
+  assert.ok(md.includes('```python\nprint(1)\n```'));
+  assert.ok(md.includes('- 稠密'));
+  assert.ok(md.includes('| 策略 | 场景 |'));
+});
+
+test('doc.normalizeDocBlocks: 简写 content/image 归一为合法块', () => {
+  const blocks = normalizeDocBlocks([
+    { type: 'heading', props: { level: 1 }, content: '定义' },
+    { type: 'paragraph', content: 'ReAct 循环' },
+    { type: 'image', url: 'https://cdn/x.png', caption: '流程' },
+  ]);
+  assert.equal(blocks.length, 3);
+  // content 字符串 → 行内数组
+  assert.ok(Array.isArray(blocks[0].content));
+  assert.equal((blocks[0].content as any)[0].text, '定义');
+  assert.ok(typeof blocks[0].id === 'string' && blocks[0].id.length > 0);
+  // image: 顶层 url/caption 收敛进 props,且无行内 content
+  assert.equal((blocks[2].props as any).url, 'https://cdn/x.png');
+  assert.equal((blocks[2].props as any).caption, '流程');
+  assert.equal(blocks[2].content, undefined);
+});
+
+test('doc.splitDocToIndex: 标题块切分为多级索引(顶层标题=二级索引)', () => {
+  const doc = normalizeDocBlocks([
+    { type: 'paragraph', content: '开篇说明' },
+    { type: 'heading', props: { level: 1 }, content: '定义' },
+    { type: 'paragraph', content: '正文A' },
+    { type: 'heading', props: { level: 2 }, content: '子点' },
+    { type: 'paragraph', content: '正文B' },
+    { type: 'heading', props: { level: 1 }, content: '追问' },
+  ]);
+  const tree = splitDocToIndex(doc);
+  assert.equal(tree.intro, '开篇说明');
+  assert.deepEqual(tree.nodes.map((n) => n.title), ['定义', '追问']);
+  assert.equal(tree.nodes[0].children[0].title, '子点');
+  assert.ok(tree.nodes[0].content.includes('正文A'));
+  assert.ok(tree.nodes[0].children[0].content.includes('正文B'));
+  // 每个索引节点带 blocks 切片
+  assert.ok(Array.isArray(tree.nodes[0].blocks) && tree.nodes[0].blocks!.length >= 1);
+});
+
+test('doc.markdownToDocBlocks: markdown → 块(种子/旧数据)', () => {
+  const blocks = markdownToDocBlocks('# 标题\n段落\n- 列表项\n![图](https://cdn/a.png)\n```py\nprint(1)\n```');
+  const types = blocks.map((b) => b.type);
+  assert.ok(types.includes('heading'));
+  assert.ok(types.includes('paragraph'));
+  assert.ok(types.includes('bulletListItem'));
+  assert.ok(types.includes('image'));
+  assert.ok(types.includes('codeBlock'));
+  const img = blocks.find((b) => b.type === 'image')!;
+  assert.equal((img.props as any).url, 'https://cdn/a.png');
 });
 
 test('score: 标题前缀分高于全文包含', () => {

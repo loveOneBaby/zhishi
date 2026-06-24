@@ -1,0 +1,60 @@
+{
+  "version": "kb-doc-v1",
+  "entries": [
+    {
+      "title": "ReAct",
+      "kbId": "",
+      "cat": "AI",
+      "tags": ["Agent", "推理范式"],
+      "summary": "按 思考 → 行动 → 观察 循环工作的 Agent 范式。",
+      "doc": [
+        { "type": "paragraph", "content": "ReAct = Reasoning + Acting,适合需要调用工具、边推理边行动的任务。" },
+
+        { "type": "heading", "props": { "level": 1 }, "content": "定义与边界" },
+        { "type": "paragraph", "content": "LLM 先产出 Thought,再决定 Action(调用工具),拿到 Observation 后继续推理,直到给出答案。" },
+        { "type": "image", "url": "https://cdn.example.com/agent/react-loop.png", "caption": "ReAct 思考-行动-观察循环" },
+
+        { "type": "heading", "props": { "level": 1 }, "content": "核心步骤" },
+        { "type": "numberedListItem", "content": "Thought:基于已知信息推理下一步" },
+        { "type": "numberedListItem", "content": "Action:选择并调用一个工具" },
+        { "type": "numberedListItem", "content": "Observation:接收工具返回,回到推理" },
+
+        { "type": "heading", "props": { "level": 2 }, "content": "伪代码" },
+        { "type": "codeBlock", "props": { "language": "python" }, "content": "while not done:\n    thought = llm.reason(history)\n    action = llm.choose_tool(thought)\n    obs = tools.run(action)\n    history.append((thought, action, obs))" },
+
+        { "type": "heading", "props": { "level": 1 }, "content": "常见追问" },
+        { "type": "quote", "content": "如何避免陷入无限循环?" },
+        { "type": "bulletListItem", "content": "设最大步数 / 超时" },
+        { "type": "bulletListItem", "content": "加反思(Reflection)与计划评估" }
+      ]
+    },
+
+    {
+      "title": "多路召回",
+      "kbId": "",
+      "cat": "AI",
+      "tags": ["RAG", "检索"],
+      "summary": "并行用多种召回源再融合,提升召回率与鲁棒性。",
+      "doc": [
+        { "type": "heading", "props": { "level": 1 }, "content": "做法" },
+        { "type": "paragraph", "content": "并行使用稠密、稀疏、规则、结构化、历史反馈等召回源,再做分数归一、RRF 融合和去重。" },
+
+        { "type": "heading", "props": { "level": 2 }, "content": "召回源对比" },
+        {
+          "type": "table",
+          "content": {
+            "type": "tableContent",
+            "rows": [
+              { "cells": [[{ "type": "text", "text": "策略", "styles": {} }], [{ "type": "text", "text": "适用场景", "styles": {} }]] },
+              { "cells": [[{ "type": "text", "text": "稠密", "styles": {} }], [{ "type": "text", "text": "语义相似", "styles": {} }]] },
+              { "cells": [[{ "type": "text", "text": "稀疏(BM25)", "styles": {} }], [{ "type": "text", "text": "关键词精确", "styles": {} }]] }
+            ]
+          }
+        },
+
+        { "type": "heading", "props": { "level": 1 }, "content": "示意图(base64 占位)" },
+        { "type": "image", "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "caption": "多路召回链路(占位图,导入后自动落库成 /api/assets)" }
+      ]
+    }
+  ]
+}
