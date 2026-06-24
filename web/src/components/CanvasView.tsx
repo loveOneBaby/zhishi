@@ -5,7 +5,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
-import type { Entry, Theme } from '../types';
+import type { Entry, Theme, Folder, KnowledgeBase } from '../types';
 import { highlightText } from '../highlight';
 import { renderMd } from '../markdown';
 import {
@@ -21,6 +21,8 @@ import {
 
 interface Props {
   entries: Entry[];
+  folders: Folder[];
+  kbs: KnowledgeBase[];
   theme: Theme;
   onOpen: (id: string) => void;
   hasQuery: boolean;
@@ -37,12 +39,12 @@ const MIN_SCALE = 0.05;
 const MAX_SCALE = 1.5;
 const KEY_GRID_LABELS = '1234567890QWERTYUIOPASDFGHJKLZXCVBNM'.split('');
 
-export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query }: Props) {
+export default function CanvasView({ entries, folders, kbs: kbList, theme: t, onOpen, hasQuery, query }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number } | null>(null);
 
-  const { map: model, kbs } = useMemo(() => buildModel(entries), [entries]);
+  const { map: model, kbs } = useMemo(() => buildModel(entries, folders, kbList), [entries, folders, kbList]);
   const [kbId, setKbId] = useState('');
   const [scoped, setScoped] = useState('');
   const [immersive, setImmersive] = useState(true);
@@ -90,7 +92,8 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
       const walk = (id: string, depth: number): void => {
         const node = model.get(id);
         if (!node) return;
-        if (node.type !== 'cat') items.push({ id, label: node.label, depth });
+        // 关键点网格只收录知识点 / 索引，跳过文件夹节点
+        if (node.type !== 'cat' && node.type !== 'folder') items.push({ id, label: node.label, depth });
         for (const child of node.children) walk(child, depth + 1);
       };
       for (const child of graphRoot.children) walk(child, 1);
@@ -618,7 +621,7 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: root ? 14 : 9 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: root ? 11.5 : 10.5, fontWeight: 650, letterSpacing: '.07em', textTransform: 'uppercase', color: root ? t.bg : t.mut, opacity: root ? 0.72 : 1 }}>
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: root ? t.bg : t.fg, opacity: root ? 1 : 0.75 }} />
-                  {root ? (placed.node.meta?.join(' · ') || currentKb.label) : placed.depth === 1 ? '知识树分类' : placed.depth === 2 ? '考查维度' : '高频问题'}
+                  {root ? (placed.node.meta?.join(' · ') || currentKb.label) : placed.node.type === 'folder' ? '文件夹' : placed.node.type === 'entry' ? '知识点' : placed.depth === 2 ? '考查维度' : '高频问题'}
                 </span>
                 {canToggle && !root && (
                   <button
@@ -675,7 +678,7 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query 
       {previewId && model.get(previewId) && (() => {
         const node = model.get(previewId)!;
         const entry = node.entryId ? entries.find((e) => e.id === node.entryId) : undefined;
-        const kind = node.depth === 1 ? '知识点' : node.depth === 2 ? '二级索引' : node.depth === 3 ? '三级索引' : '四级索引';
+        const kind = node.type === 'folder' ? '文件夹' : node.type === 'entry' ? '知识点' : node.depth === 2 ? '二级索引' : node.depth === 3 ? '三级索引' : '四级索引';
         const intro = node.type === 'entry' ? (entry?.intro ?? '') : '';
         const hasBody = Boolean(intro.trim()) || Boolean((node.sub ?? '').trim()) || node.children.length > 0;
         // 索引路径（从知识库一路到当前节点的上一级）

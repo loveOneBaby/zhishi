@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { Entry, Theme } from '../types';
+import type { Entry, Theme, KnowledgeBase, Folder } from '../types';
+import { folderPathName } from '../tree';
 import type { SearchSuggestion } from '../search';
 import { seg2 } from '../ui';
 import { highlightText } from '../highlight';
@@ -27,6 +28,8 @@ interface Props {
   onSuggest: (suggestion: SearchSuggestion) => void;
   onOpen: (id: string, index?: number) => void;
   onOpenAI: () => void;
+  kbs: KnowledgeBase[];
+  folders: Folder[];
 }
 
 const rowBase: CSSProperties = {
@@ -49,25 +52,32 @@ const suggestionButton: CSSProperties = {
   cursor: 'pointer',
 };
 
-const FOLDER_ORDER = ['前端', 'Java', 'AI', '基础', '算法', '自定义'];
-
 interface ResultGroup {
-  cat: string;
+  kbId: string;
+  name: string;
   items: { item: Entry; index: number }[];
 }
 
-function groupResults(results: Entry[]): ResultGroup[] {
+// 按知识库分组，顺序沿用 kbs 的用户排序；未知 kb 归入「未分类」并置尾。
+function groupResults(results: Entry[], kbs: KnowledgeBase[]): ResultGroup[] {
+  const order = kbs.map((k) => k.id);
+  const nameOf = new Map(kbs.map((k) => [k.id, k.name] as const));
   const map = new Map<string, ResultGroup>();
+  const ensure = (kbId: string): ResultGroup => {
+    let g = map.get(kbId);
+    if (!g) {
+      g = { kbId, name: nameOf.get(kbId) ?? '未分类', items: [] };
+      map.set(kbId, g);
+    }
+    return g;
+  };
   results.forEach((item, index) => {
-    const cat = item.cat || '未分类';
-    if (!map.has(cat)) map.set(cat, { cat, items: [] });
-    map.get(cat)!.items.push({ item, index });
+    ensure(item.kbId || '__unknown__').items.push({ item, index });
   });
   return Array.from(map.values()).sort((a, b) => {
-    const ai = FOLDER_ORDER.indexOf(a.cat);
-    const bi = FOLDER_ORDER.indexOf(b.cat);
-    if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-    return a.cat.localeCompare(b.cat);
+    const ai = order.indexOf(a.kbId);
+    const bi = order.indexOf(b.kbId);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
   });
 }
 
@@ -105,7 +115,7 @@ function FolderIcon({ open, active }: { open: boolean; active: boolean }) {
 }
 
 const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
-  { query, onInput, results, suggestions, sugSel, onSugHover, onSugActivate, onSummon, sel, total, viewType, setViewType, theme, selectedEntry, selectedId, onClear, onSuggest, onOpen, onOpenAI },
+  { query, onInput, results, suggestions, sugSel, onSugHover, onSugActivate, onSummon, sel, total, viewType, setViewType, theme, selectedEntry, selectedId, onClear, onSuggest, onOpen, onOpenAI, kbs, folders },
   inputRef
 ) {
   const isList = viewType === 'list';
@@ -114,28 +124,28 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
   const selClamped = Math.min(sel, Math.max(0, results.length - 1));
   const resultCount = hasQuery ? `${results.length} 个结果` : `共 ${total} 条知识 · 支持拼音 / 缩写检索`;
   const noMatch = hasQuery && results.length === 0;
-  const groupedResults = useMemo(() => groupResults(results), [results]);
+  const groupedResults = useMemo(() => groupResults(results, kbs), [results, kbs]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
-    setExpandedFolders(new Set(groupedResults.map((group) => group.cat)));
+    setExpandedFolders(new Set(groupedResults.map((group) => group.kbId)));
   }, [groupedResults]);
 
   useEffect(() => {
-    if (!selectedEntry?.cat) return;
+    if (!selectedEntry?.kbId) return;
     setExpandedFolders((current) => {
-      if (current.has(selectedEntry.cat)) return current;
+      if (current.has(selectedEntry.kbId)) return current;
       const next = new Set(current);
-      next.add(selectedEntry.cat);
+      next.add(selectedEntry.kbId);
       return next;
     });
-  }, [selectedEntry?.cat]);
+  }, [selectedEntry?.kbId]);
 
-  const toggleFolder = (cat: string): void => {
+  const toggleFolder = (kbId: string): void => {
     setExpandedFolders((current) => {
       const next = new Set(current);
-      if (next.has(cat)) next.delete(cat);
-      else next.add(cat);
+      if (next.has(kbId)) next.delete(kbId);
+      else next.add(kbId);
       return next;
     });
   };
@@ -244,13 +254,13 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
           <div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {groupedResults.map((group) => {
-                const open = expandedFolders.has(group.cat);
+                const open = expandedFolders.has(group.kbId);
                 const activeInGroup = group.items.some(({ item, index }) => item.id === selectedId || (!selectedId && index === selClamped));
                 return (
-                  <section key={group.cat} style={{ animation: 'ik-fade .16s' }}>
+                  <section key={group.kbId} style={{ animation: 'ik-fade .16s' }}>
                     <button
                       type="button"
-                      onClick={() => toggleFolder(group.cat)}
+                      onClick={() => toggleFolder(group.kbId)}
                       aria-expanded={open}
                       style={{
                         width: '100%',
@@ -271,11 +281,11 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
                       <FolderIcon open={open} active={activeInGroup} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 15, fontWeight: 720 }}>{highlightText(group.cat, query)}</span>
+                          <span style={{ fontSize: 15, fontWeight: 720 }}>{highlightText(group.name, query)}</span>
                           <span style={{ color: 'var(--mut)', fontSize: 11 }}>{open ? '已展开' : '已收起'}</span>
                         </div>
                         <div style={{ marginTop: 2, fontSize: 12, color: 'var(--mut)' }}>
-                          {hasQuery ? '命中文件夹' : '知识库文件夹'} · {group.items.length} 个知识点
+                          {hasQuery ? '命中知识库' : '知识库'} · {group.items.length} 个知识点
                         </div>
                       </div>
                       <span style={{ fontSize: 12, color: activeInGroup ? 'var(--fg)' : 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '3px 8px' }}>{group.items.length}</span>
@@ -286,6 +296,7 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
                       <div style={{ marginLeft: 25, padding: '7px 0 2px 18px', borderLeft: '1px solid var(--bd)', display: 'flex', flexDirection: 'column', gap: 4 }}>
                         {group.items.map(({ item, index }) => {
                           const active = item.id === selectedId || (!selectedId && index === selClamped);
+                          const path = folderPathName(folders, item.folderId);
                           return (
                             <div
                               key={item.id}
@@ -301,6 +312,9 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
                                 <div style={{ fontSize: 15, fontWeight: 650, marginBottom: 3 }}>{highlightText(item.title, query)}</div>
                                 <div style={{ fontSize: 13, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{highlightText(item.summary, query)}</div>
                               </div>
+                              {path && (
+                                <span style={{ fontSize: 11, color: 'var(--mut)', flexShrink: 0, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={path}>📁 {path}</span>
+                              )}
                               <span style={{ fontSize: 11, color: 'var(--mut)', flexShrink: 0 }}>{highlightText(item.tags[0] || '', query)}</span>
                             </div>
                           );
@@ -322,7 +336,7 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
         </div>
       )}
 
-      {isCanvas && <CanvasView entries={results} theme={theme} onOpen={onOpen} hasQuery={hasQuery} query={query} />}
+      {isCanvas && <CanvasView entries={results} folders={folders} kbs={kbs} theme={theme} onOpen={onOpen} hasQuery={hasQuery} query={query} />}
     </div>
   );
 });

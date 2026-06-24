@@ -1,4 +1,4 @@
-import type { Entry, EntryInput, IndexNode } from './types';
+import type { Entry, EntryInput, IndexNode, KnowledgeBase, Folder } from './types';
 
 const BASE = '/api';
 
@@ -10,6 +10,95 @@ async function j<T>(res: Response): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
+
+// ───────────── 知识库 ─────────────
+
+export async function fetchKbs(): Promise<KnowledgeBase[]> {
+  const data = await j<{ kbs: KnowledgeBase[] }>(await fetch(`${BASE}/kbs`));
+  return data.kbs;
+}
+
+export async function createKb(name: string): Promise<KnowledgeBase> {
+  const res = await fetch(`${BASE}/kbs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return j<{ kb: KnowledgeBase }>(res).then((d) => d.kb);
+}
+
+export async function renameKb(id: string, name: string): Promise<KnowledgeBase> {
+  const res = await fetch(`${BASE}/kbs/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return j<{ kb: KnowledgeBase }>(res).then((d) => d.kb);
+}
+
+export async function deleteKb(id: string): Promise<{ kbs: KnowledgeBase[]; folders: Folder[]; entries: Entry[] }> {
+  const res = await fetch(`${BASE}/kbs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return j(res);
+}
+
+export async function reorderKbs(ids: string[]): Promise<KnowledgeBase[]> {
+  const res = await fetch(`${BASE}/kbs/reorder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  return j<{ kbs: KnowledgeBase[] }>(res).then((d) => d.kbs);
+}
+
+// ───────────── 文件夹 ─────────────
+
+export async function fetchFolders(): Promise<Folder[]> {
+  const data = await j<{ folders: Folder[] }>(await fetch(`${BASE}/folders`));
+  return data.folders;
+}
+
+export async function createFolder(input: { kbId: string; parentId?: string | null; name: string }): Promise<Folder> {
+  const res = await fetch(`${BASE}/folders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return j<{ folder: Folder }>(res).then((d) => d.folder);
+}
+
+export async function renameFolder(id: string, name: string): Promise<Folder> {
+  const res = await fetch(`${BASE}/folders/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return j<{ folder: Folder }>(res).then((d) => d.folder);
+}
+
+export async function moveFolder(id: string, opts: { parentId?: string | null; kbId?: string }): Promise<Folder[]> {
+  const res = await fetch(`${BASE}/folders/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, ...opts }),
+  });
+  return j<{ folders: Folder[] }>(res).then((d) => d.folders);
+}
+
+export async function deleteFolder(id: string): Promise<{ folders: Folder[]; entries: Entry[] }> {
+  const res = await fetch(`${BASE}/folders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return j(res);
+}
+
+export async function reorderFolders(ids: string[]): Promise<Folder[]> {
+  const res = await fetch(`${BASE}/folders/reorder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  return j<{ folders: Folder[] }>(res).then((d) => d.folders);
+}
+
+// ───────────── 知识点 ─────────────
 
 export async function fetchEntries(): Promise<Entry[]> {
   const data = await j<{ entries: Entry[] }>(await fetch(`${BASE}/entries`));
@@ -56,27 +145,11 @@ export async function reorderEntries(ids: string[]): Promise<Entry[]> {
   return data.entries;
 }
 
-// 重命名知识库，返回更新后的全量列表
-export async function renameCategory(from: string, to: string): Promise<Entry[]> {
-  const res = await fetch(`${BASE}/categories/rename`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to }),
-  });
-  const data = await j<{ entries: Entry[] }>(res);
-  return data.entries;
-}
-
-// 删除知识库（及其下全部知识点），返回更新后的全量列表
-export async function deleteCategory(name: string): Promise<Entry[]> {
-  const res = await fetch(`${BASE}/categories/${encodeURIComponent(name)}`, { method: 'DELETE' });
-  const data = await j<{ entries: Entry[] }>(res);
-  return data.entries;
-}
-
 export interface ExportPayload {
   version: string;
   exportedAt: number;
+  kbs: KnowledgeBase[];
+  folders: Folder[];
   entries: Entry[];
 }
 
@@ -84,27 +157,38 @@ export async function exportAll(): Promise<ExportPayload> {
   return j<ExportPayload>(await fetch(`${BASE}/export`));
 }
 
-// 导入载荷：兼容 kb-import-2（带 version / assets）与旧的纯 entries 数组
+// 导入载荷：兼容 kb-export-2（带 kbs/folders）与旧的纯 entries 数组 / kb-import-2
 export interface ImportPayload {
   version?: string;
+  kbs?: unknown[];
+  folders?: unknown[];
   assets?: unknown[];
   entries: unknown[];
 }
 
-export async function importAll(payload: ImportPayload, replace: boolean): Promise<Entry[]> {
+export interface ImportResult {
+  ok: boolean;
+  imported: number;
+  kbs: KnowledgeBase[];
+  folders: Folder[];
+  entries: Entry[];
+}
+
+export async function importAll(payload: ImportPayload, replace: boolean): Promise<ImportResult> {
   const res = await fetch(`${BASE}/import`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...payload, replace }),
   });
-  const data = await j<{ entries: Entry[] }>(res);
-  return data.entries;
+  return j<ImportResult>(res);
 }
 
 // 导入预览：解析载荷但不写库，返回将导入的条目与统计。与 importAll 同构输入。
 export interface PreviewEntry {
   id?: string;
   cat: string;
+  kbId?: string;
+  folderId?: string | null;
   title: string;
   tags: string[];
   summary: string;

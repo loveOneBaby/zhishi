@@ -1,0 +1,15 @@
+import { seedBuiltins, listKbs, listFolders, listEntries } from './src/db.js';
+seedBuiltins();
+const kbs = listKbs();
+const folders = listFolders();
+const entries = listEntries();
+console.log('=== 知识库 ===');
+console.log(kbs.map(k => `${k.name}`).join(', '));
+console.log('=== 文件夹（根级）===');
+console.log(folders.filter(f => !f.parentId).map(f => `${f.name} (${entries.filter(e=>e.folderId===f.id).length}条)`).join(' | '));
+console.log('=== 知识点总数 ===', entries.length);
+console.log('=== 一致性 ===');
+const kbSet = new Set(kbs.map(k=>k.id)); const fSet = new Set(folders.map(f=>f.id));
+console.log('kbId悬空', entries.filter(e=>!kbSet.has(e.kbId)).length, 'folder悬空', entries.filter(e=>e.folderId&&!fSet.has(e.folderId!)).length, '无kbId', entries.filter(e=>!e.kbId).length);
+console.log('=== 样例 ===');
+console.log(entries.slice(0,5).map(e=>`${e.cat} > [folder:${e.folderId}] ${e.title}`).join('\n'));

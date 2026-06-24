@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { SEED_LIBRARIES } from './seed-data/index.js';
-import type { Entry, EntryRow, IndexNode } from './types.js';
+import type { Entry, EntryRow, IndexNode, KnowledgeBase, Folder, KbRow, FolderRow } from './types.js';
 import { parseBodyToIndex, normalizeIndex, type IndexTree } from './index-tree.js';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -15,9 +15,28 @@ export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS knowledge_bases (
+    id        TEXT PRIMARY KEY,
+    name      TEXT NOT NULL,
+    sort      INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS folders (
+    id        TEXT PRIMARY KEY,
+    kbId      TEXT NOT NULL,
+    parentId  TEXT,
+    name      TEXT NOT NULL,
+    sort      INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(kbId, parentId);
   CREATE TABLE IF NOT EXISTS entries (
     id        TEXT PRIMARY KEY,
     cat       TEXT NOT NULL,
+    kbId      TEXT NOT NULL DEFAULT '',
+    folderId  TEXT,
     title     TEXT NOT NULL,
     py        TEXT NOT NULL DEFAULT '',
     tags      TEXT NOT NULL DEFAULT '[]',
@@ -35,7 +54,7 @@ db.exec(`
   );
 `);
 
-// 迁移旧库：补 sort / idx 列，并把旧 markdown 正文一次性转换为结构化索引
+// 迁移旧库：补 sort / idx / kbId / folderId 列
 const entryColumns = db.prepare('PRAGMA table_info(entries)').all() as { name: string }[];
 if (!entryColumns.some((c) => c.name === 'sort')) {
   db.exec('ALTER TABLE entries ADD COLUMN sort INTEGER NOT NULL DEFAULT 0');
@@ -52,6 +71,66 @@ if (!entryColumns.some((c) => c.name === 'idx')) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   console.log(`[db] 已将 ${rows.length} 条旧正文转换为结构化索引`);
 }
+if (!entryColumns.some((c) => c.name === 'kbId')) {
+  db.exec("ALTER TABLE entries ADD COLUMN kbId TEXT NOT NULL DEFAULT ''");
+}
+if (!entryColumns.some((c) => c.name === 'folderId')) {
+  db.exec('ALTER TABLE entries ADD COLUMN folderId TEXT');
+}
+// kbId / folderId 列就绪后再建索引（旧库的列是后补的，不能在建表块里直接引用）
+db.exec('CREATE INDEX IF NOT EXISTS idx_entries_kbid_folder ON entries(kbId, folderId);');
+
+export const DEFAULT_KB_NAME = '面试知识库';
+
+let idCounter = 0;
+function genId(prefix: string): string {
+  idCounter += 1;
+  return `${prefix}_${Date.now().toString(36)}${idCounter.toString(36)}`;
+}
+
+// 一次性数据迁移：把旧的「按 cat 平铺」结构升级为「知识库 → 文件夹 → 知识点」
+function migrateKbFolder(): void {
+  const applied = new Set(
+    (db.prepare('SELECT version FROM seed_migrations').all() as { version: string }[]).map((r) => r.version)
+  );
+  if (applied.has('kb-folder-v1')) return;
+
+  let defaultKbId: string;
+  const kbCount = (db.prepare('SELECT COUNT(*) AS n FROM knowledge_bases').get() as { n: number }).n;
+  if (kbCount === 0) {
+    defaultKbId = createKb(DEFAULT_KB_NAME).id;
+  } else {
+    const first = db.prepare('SELECT id FROM knowledge_bases ORDER BY sort ASC, createdAt ASC LIMIT 1').get() as { id: string };
+    defaultKbId = first.id;
+  }
+
+  // 为每个 distinct cat 在默认知识库下建根文件夹
+  const cats = db.prepare(
+    "SELECT DISTINCT COALESCE(NULLIF(cat,''),'未分类') AS cat FROM entries WHERE COALESCE(kbId,'')=''"
+  ).all() as { cat: string }[];
+  const catToFolder = new Map<string, string>();
+  for (const { cat } of cats) catToFolder.set(cat, ensureFolder(defaultKbId, cat, null).id);
+
+  const entriesToMigrate = db.prepare(
+    "SELECT id, COALESCE(NULLIF(cat,''),'未分类') AS cat FROM entries WHERE COALESCE(kbId,'')=''"
+  ).all() as { id: string; cat: string }[];
+  const updateEntry = db.prepare('UPDATE entries SET kbId = :kbId, folderId = :folderId WHERE id = :id');
+  db.exec('BEGIN');
+  try {
+    for (const e of entriesToMigrate) {
+      updateEntry.run({ kbId: defaultKbId, folderId: catToFolder.get(e.cat) ?? null, id: e.id });
+    }
+    db.prepare('INSERT INTO seed_migrations (version, appliedAt) VALUES (?, ?)').run('kb-folder-v1', Date.now());
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  if (entriesToMigrate.length) {
+    console.log(`[db] 已将 ${entriesToMigrate.length} 条知识点归入知识库 / 文件夹结构`);
+  }
+}
+migrateKbFolder();
 
 function treeOf(r: EntryRow): IndexTree {
   if (r.idx) {
@@ -60,78 +139,223 @@ function treeOf(r: EntryRow): IndexTree {
   return parseBodyToIndex(r.body || '');
 }
 
-function rowToEntry(r: EntryRow): Entry {
+function rowToKb(r: KbRow): KnowledgeBase {
+  return { id: r.id, name: r.name, sort: r.sort, createdAt: r.createdAt, updatedAt: r.updatedAt };
+}
+
+function rowToFolder(r: FolderRow): Folder {
+  return { id: r.id, kbId: r.kbId, parentId: r.parentId, name: r.name, sort: r.sort, createdAt: r.createdAt, updatedAt: r.updatedAt };
+}
+
+function kbNameOf(kbId: string): string {
+  if (!kbId) return '未分类';
+  const row = db.prepare('SELECT name FROM knowledge_bases WHERE id = ?').get(kbId) as { name: string } | undefined;
+  return row?.name ?? '未分类';
+}
+
+function rowToEntry(r: EntryRow, kbName?: string): Entry {
   let tags: string[] = [];
   try { tags = JSON.parse(r.tags); } catch { tags = []; }
   const tree = treeOf(r);
   return {
-    id: r.id, cat: r.cat, title: r.title, py: r.py,
+    id: r.id,
+    cat: kbName ?? kbNameOf(r.kbId ?? ''),
+    kbId: r.kbId ?? '',
+    folderId: r.folderId ?? null,
+    title: r.title, py: r.py,
     tags, summary: r.summary, intro: tree.intro, nodes: tree.nodes,
     sort: r.sort ?? r.createdAt,
     createdAt: r.createdAt, updatedAt: r.updatedAt,
   };
 }
 
-// 按版本导入知识库；旧种子的 markdown 正文在写入时转换为结构化索引
-export function seedBuiltins(): void {
-  const applied = new Set(
-    (db.prepare('SELECT version FROM seed_migrations').all() as { version: string }[]).map((row) => row.version)
-  );
-  const count = db.prepare('SELECT COUNT(*) AS n FROM entries').get() as { n: number };
-  const insert = db.prepare(
-    `INSERT OR IGNORE INTO entries (id, cat, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
-     VALUES (:id, :cat, :title, :py, :tags, :summary, :body, :idx, :sort, :createdAt, :updatedAt)`
-  );
-  const updateBuiltin = db.prepare(
-    `UPDATE entries SET cat=:cat, title=:title, py=:py, tags=:tags,
-       summary=:summary, body=:body, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
-  );
-  const deleteBuiltin = db.prepare('DELETE FROM entries WHERE id = ?');
-  const markApplied = db.prepare('INSERT INTO seed_migrations (version, appliedAt) VALUES (?, ?)');
-  let added = 0, updated = 0, removed = 0;
+// 取首个知识库 id；无则创建默认库（用于兜底归属）
+function defaultKbId(): string {
+  const first = db.prepare('SELECT id FROM knowledge_bases ORDER BY sort ASC, createdAt ASC LIMIT 1').get() as { id: string } | undefined;
+  if (first) return first.id;
+  return createKb(DEFAULT_KB_NAME).id;
+}
 
+// 解析知识点归属的知识库：优先用 kbId，其次按 cat 名查找/创建，最后落默认库
+function resolveKbId(kbId?: string, cat?: string): string {
+  if (kbId) {
+    const exists = db.prepare('SELECT 1 FROM knowledge_bases WHERE id = ?').get(kbId);
+    if (exists) return kbId;
+  }
+  if (cat && cat.trim()) return ensureKb(cat.trim()).id;
+  return defaultKbId();
+}
+
+// ───────────────────────── 知识库 CRUD ─────────────────────────
+
+export function listKbs(): KnowledgeBase[] {
+  const rows = db.prepare('SELECT * FROM knowledge_bases ORDER BY sort ASC, createdAt ASC').all() as unknown as KbRow[];
+  return rows.map(rowToKb);
+}
+
+export function getKb(id: string): KnowledgeBase | null {
+  const row = db.prepare('SELECT * FROM knowledge_bases WHERE id = ?').get(id) as unknown as KbRow | undefined;
+  return row ? rowToKb(row) : null;
+}
+
+export function createKb(name: string): KnowledgeBase {
+  const now = Date.now();
+  const id = genId('kb');
+  const maxRow = db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM knowledge_bases').get() as { m: number };
+  const kb: KnowledgeBase = { id, name: name.trim() || '未命名知识库', sort: Number(maxRow.m) + 1, createdAt: now, updatedAt: now };
+  db.prepare('INSERT INTO knowledge_bases (id, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)').run(id, kb.name, kb.sort, now, now);
+  return kb;
+}
+
+export function renameKb(id: string, name: string): KnowledgeBase | null {
+  if (!name.trim()) return null;
+  const now = Date.now();
+  db.prepare('UPDATE knowledge_bases SET name = ?, updatedAt = ? WHERE id = ?').run(name.trim(), now, id);
+  return getKb(id);
+}
+
+// 删除知识库：级联删除其下所有文件夹与知识点
+export function deleteKb(id: string): boolean {
   db.exec('BEGIN');
   try {
-    for (const library of SEED_LIBRARIES) {
-      if (applied.has(library.version)) continue;
-      const skipLegacyBase = library.version === 'base-v1' && count.n > 0;
-      if (!skipLegacyBase) {
-        const now = Date.now();
-        for (const e of library.entries) {
-          const idx = JSON.stringify(parseBodyToIndex(e.body));
-          const values = {
-            id: e.id, cat: e.cat, title: e.title, py: e.py,
-            tags: JSON.stringify(e.tags), summary: e.summary, body: e.body, idx,
-            sort: now, createdAt: now, updatedAt: now,
-          };
-          if (library.overwrite) {
-            const info = updateBuiltin.run({
-              id: e.id, cat: e.cat, title: e.title, py: e.py,
-              tags: JSON.stringify(e.tags), summary: e.summary, body: e.body, idx, updatedAt: now,
-            });
-            if (Number(info.changes) > 0) updated += Number(info.changes);
-            else added += Number(insert.run(values).changes);
-          } else {
-            added += Number(insert.run(values).changes);
-          }
-        }
-        for (const id of library.removeIds ?? []) removed += Number(deleteBuiltin.run(id).changes);
-      }
-      markApplied.run(library.version, Date.now());
-    }
+    db.prepare('DELETE FROM entries WHERE kbId = ?').run(id);
+    db.prepare('DELETE FROM folders WHERE kbId = ?').run(id);
+    const info = db.prepare('DELETE FROM knowledge_bases WHERE id = ?').run(id);
+    db.exec('COMMIT');
+    return Number(info.changes) > 0;
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+export function reorderKbs(ids: string[]): void {
+  const stmt = db.prepare('UPDATE knowledge_bases SET sort = :sort WHERE id = :id');
+  db.exec('BEGIN');
+  try {
+    ids.forEach((id, index) => stmt.run({ id, sort: index }));
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
   }
-  if (added || updated || removed) {
-    console.log(`[db] 内置知识点：新增 ${added}，更新 ${updated}，移除 ${removed}`);
+}
+
+// 按名查找知识库；不存在则创建（幂等，供 seed / 迁移 / 导入复用）
+export function ensureKb(name: string): KnowledgeBase {
+  const trimmed = name.trim() || DEFAULT_KB_NAME;
+  const row = db.prepare('SELECT * FROM knowledge_bases WHERE name = ?').get(trimmed) as unknown as KbRow | undefined;
+  if (row) return rowToKb(row);
+  return createKb(trimmed);
+}
+
+// ───────────────────────── 文件夹 CRUD ─────────────────────────
+
+export function listFolders(): Folder[] {
+  const rows = db.prepare('SELECT * FROM folders ORDER BY sort ASC, createdAt ASC').all() as unknown as FolderRow[];
+  return rows.map(rowToFolder);
+}
+
+export function getFolder(id: string): Folder | null {
+  const row = db.prepare('SELECT * FROM folders WHERE id = ?').get(id) as unknown as FolderRow | undefined;
+  return row ? rowToFolder(row) : null;
+}
+
+export function createFolder(input: { kbId: string; parentId?: string | null; name: string }): Folder | null {
+  const kbId = input.kbId;
+  if (!getKb(kbId)) return null;
+  const parentId = input.parentId || null;
+  if (parentId) {
+    const parent = getFolder(parentId);
+    if (!parent || parent.kbId !== kbId) return null; // 父必须存在于同一知识库
+  }
+  const now = Date.now();
+  const id = genId('fd');
+  const maxRow = parentId
+    ? (db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM folders WHERE kbId = ? AND parentId = ?').get(kbId, parentId) as { m: number })
+    : (db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM folders WHERE kbId = ? AND parentId IS NULL').get(kbId) as { m: number });
+  const folder: Folder = { id, kbId, parentId, name: input.name.trim() || '未命名文件夹', sort: Number(maxRow.m) + 1, createdAt: now, updatedAt: now };
+  db.prepare('INSERT INTO folders (id, kbId, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, folder.kbId, folder.parentId, folder.name, folder.sort, now, now);
+  return folder;
+}
+
+export function renameFolder(id: string, name: string): Folder | null {
+  if (!name.trim()) return null;
+  const now = Date.now();
+  db.prepare('UPDATE folders SET name = ?, updatedAt = ? WHERE id = ?').run(name.trim(), now, id);
+  return getFolder(id);
+}
+
+// 收集某文件夹及其全部后代 id（用于级联删除与移动防环）
+function folderSubtreeIds(id: string): Set<string> {
+  const result = new Set<string>([id]);
+  const stack = [id];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    const children = db.prepare('SELECT id FROM folders WHERE parentId = ?').all(cur) as { id: string }[];
+    for (const c of children) {
+      if (!result.has(c.id)) { result.add(c.id); stack.push(c.id); }
+    }
+  }
+  return result;
+}
+
+// 移动文件夹：改父 / 跨库。parentId 为 null 表示移到目标库根级；禁止移入自身或其后代
+export function moveFolder(id: string, opts: { parentId?: string | null; kbId?: string }): boolean {
+  const cur = getFolder(id);
+  if (!cur) return false;
+  const newKbId = opts.kbId ?? cur.kbId;
+  if (!getKb(newKbId)) return false;
+  let newParentId = opts.parentId !== undefined ? opts.parentId : cur.parentId;
+  if (newParentId) {
+    if (folderSubtreeIds(id).has(newParentId)) return false; // 防环
+    const parent = getFolder(newParentId);
+    if (!parent) return false;
+    // 跨库移动时，若目标父不属于新库，则降级挂到新库根
+    newParentId = parent.kbId === newKbId ? newParentId : null;
+  }
+  db.prepare('UPDATE folders SET kbId = ?, parentId = ?, updatedAt = ? WHERE id = ?').run(newKbId, newParentId, Date.now(), id);
+  return true;
+}
+
+// 删除文件夹：级联删除子文件夹与其中知识点
+export function deleteFolder(id: string): boolean {
+  const ids = [...folderSubtreeIds(id)];
+  if (!ids.length) return false;
+  const placeholders = ids.map(() => '?').join(',');
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM entries WHERE folderId IN (${placeholders})`).run(...ids);
+    db.prepare(`DELETE FROM folders WHERE id IN (${placeholders})`).run(...ids);
+    db.exec('COMMIT');
+    return true;
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+export function reorderFolders(ids: string[]): void {
+  const stmt = db.prepare('UPDATE folders SET sort = :sort WHERE id = :id');
+  db.exec('BEGIN');
+  try {
+    ids.forEach((id, index) => stmt.run({ id, sort: index }));
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
   }
 }
 
+// 按名 + 父查找文件夹；不存在则创建（幂等）
+export function ensureFolder(kbId: string, name: string, parentId: string | null = null): Folder {
+  const row = parentId
+    ? (db.prepare('SELECT * FROM folders WHERE kbId = ? AND parentId = ? AND name = ?').get(kbId, parentId, name) as unknown as FolderRow | undefined)
+    : (db.prepare('SELECT * FROM folders WHERE kbId = ? AND parentId IS NULL AND name = ?').get(kbId, name) as unknown as FolderRow | undefined);
+  if (row) return rowToFolder(row);
+  return createFolder({ kbId, parentId, name })!;
+}
+
+// ───────────────────────── 知识点 CRUD ─────────────────────────
+
 export function listEntries(): Entry[] {
+  const kbs = new Map(listKbs().map((k) => [k.id, k.name]));
   const rows = db.prepare('SELECT * FROM entries ORDER BY sort ASC, createdAt ASC').all() as unknown as EntryRow[];
-  return rows.map(rowToEntry);
+  return rows.map((r) => rowToEntry(r, kbs.get(r.kbId ?? '')));
 }
 
 export function getEntry(id: string): Entry | null {
@@ -140,7 +364,9 @@ export function getEntry(id: string): Entry | null {
 }
 
 export interface EntryInput {
-  cat: string;
+  kbId?: string;
+  folderId?: string | null;
+  cat?: string;          // 兼容旧调用 / 旧导入：无 kbId 时按此名查找/创建知识库
   title: string;
   py?: string;
   tags?: string[];
@@ -160,9 +386,13 @@ export function createEntry(input: EntryInput): Entry {
   const id = 'u' + now + Math.floor(Math.random() * 1000);
   const tree = normalizeIndex({ intro: input.intro ?? '', nodes: input.nodes ?? [] });
   const maxRow = db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM entries').get() as { m: number };
+  const kbId = resolveKbId(input.kbId, input.cat);
+  const folderId = input.folderId ?? null;
   const entry: Entry = {
     id,
-    cat: input.cat || '自定义',
+    cat: kbNameOf(kbId),
+    kbId,
+    folderId,
     title: input.title.trim(),
     py: (input.py || input.title).toLowerCase(),
     tags: input.tags || [],
@@ -174,17 +404,18 @@ export function createEntry(input: EntryInput): Entry {
     updatedAt: now,
   };
   db.prepare(
-    `INSERT INTO entries (id, cat, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
-     VALUES (:id, :cat, :title, :py, :tags, :summary, '', :idx, :sort, :createdAt, :updatedAt)`
+    `INSERT INTO entries (id, cat, kbId, folderId, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
+     VALUES (:id, :cat, :kbId, :folderId, :title, :py, :tags, :summary, '', :idx, :sort, :createdAt, :updatedAt)`
   ).run({
-    id: entry.id, cat: entry.cat, title: entry.title, py: entry.py,
+    id: entry.id, cat: entry.cat, kbId: entry.kbId, folderId: entry.folderId,
+    title: entry.title, py: entry.py,
     tags: JSON.stringify(entry.tags), summary: entry.summary,
     idx: JSON.stringify(tree), sort: entry.sort, createdAt: now, updatedAt: now,
   });
   return entry;
 }
 
-// 按给定顺序重排（管理模块拖拽）。ids 为某个知识库内的全部知识点 id。
+// 按给定顺序重排（管理模块拖拽）。ids 为某作用域内的知识点 id 序列。
 export function reorderEntries(ids: string[]): void {
   const stmt = db.prepare('UPDATE entries SET sort = :sort WHERE id = :id');
   db.exec('BEGIN');
@@ -211,9 +442,14 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
     : (input.title != null ? nextTitle.toLowerCase() : cur.py);
   let nextSummary = input.summary ?? cur.summary;
   if (!nextSummary || !nextSummary.trim()) nextSummary = deriveSummary({}, tree);
+  // 归属变更（仅当显式传入 kbId / folderId 时才改）
+  const kbId = input.kbId !== undefined ? resolveKbId(input.kbId, input.cat) : cur.kbId;
+  const folderId = input.folderId !== undefined ? (input.folderId ?? null) : cur.folderId;
   const next: Entry = {
     ...cur,
-    cat: input.cat ?? cur.cat,
+    cat: kbNameOf(kbId),
+    kbId,
+    folderId,
     title: nextTitle,
     py: nextPy,
     tags: input.tags ?? cur.tags,
@@ -223,10 +459,11 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
     updatedAt: Date.now(),
   };
   db.prepare(
-    `UPDATE entries SET cat=:cat, title=:title, py=:py, tags=:tags,
+    `UPDATE entries SET cat=:cat, kbId=:kbId, folderId=:folderId, title=:title, py=:py, tags=:tags,
        summary=:summary, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
   ).run({
-    id: next.id, cat: next.cat, title: next.title, py: next.py,
+    id: next.id, cat: next.cat, kbId: next.kbId, folderId: next.folderId,
+    title: next.title, py: next.py,
     tags: JSON.stringify(next.tags), summary: next.summary,
     idx: JSON.stringify(tree), updatedAt: next.updatedAt,
   });
@@ -238,26 +475,13 @@ export function deleteEntry(id: string): boolean {
   return Number(info.changes) > 0;
 }
 
-// 重命名知识库：把该分类下所有知识点的 cat 改为新名（用于管理模块的「重命名知识库」）
-export function renameCategory(from: string, to: string): number {
-  const target = to.trim();
-  if (!from || !target || from === target) return 0;
-  const now = Date.now();
-  const info = db.prepare('UPDATE entries SET cat = ?, updatedAt = ? WHERE cat = ?').run(target, now, from);
-  return Number(info.changes);
-}
+// ───────────────────────── 导入 / 导出 ─────────────────────────
 
-// 删除知识库：删除该分类下的全部知识点（用于管理模块的「删除知识库」）
-export function deleteCategory(name: string): number {
-  if (!name) return 0;
-  const info = db.prepare('DELETE FROM entries WHERE cat = ?').run(name);
-  return Number(info.changes);
-}
-
-// 批量导入（备份恢复 / 迁移）。replace=true 先清空；按 id upsert，兼容旧 body 字段。
 export interface ImportEntry {
   id?: string;
   cat?: string;
+  kbId?: string;
+  folderId?: string | null;
   title?: string;
   py?: string;
   tags?: string[];
@@ -265,6 +489,33 @@ export interface ImportEntry {
   intro?: string;
   nodes?: IndexNode[];
   body?: string;
+}
+
+export interface ImportKb { id?: string; name: string; sort?: number; }
+export interface ImportFolder { id?: string; kbId?: string; parentId?: string | null; name: string; sort?: number; }
+export interface ImportPayload {
+  kbs?: ImportKb[];
+  folders?: ImportFolder[];
+  entries: ImportEntry[];
+}
+
+// 导出全量（备份）
+export interface ExportPayload {
+  version: string;
+  exportedAt: number;
+  kbs: KnowledgeBase[];
+  folders: Folder[];
+  entries: Entry[];
+}
+
+export function exportData(): ExportPayload {
+  return {
+    version: 'kb-export-2',
+    exportedAt: Date.now(),
+    kbs: listKbs(),
+    folders: listFolders(),
+    entries: listEntries(),
+  };
 }
 
 // 查询给定 id 中已存在于库内的（用于导入预览判定「新增 / 更新」）
@@ -283,11 +534,12 @@ export function existingIds(ids: string[]): Set<string> {
   return result;
 }
 
-// 导入预览：对已 convertEntry 过的列表做归一化展示与统计，但不写库。
-// 解析逻辑与 importEntries 一致（normalizeIndex / parseBodyToIndex / deriveSummary）。
+// 导入预览：解析载荷（与 importEntries 一致的归一化），但不写库。
 export interface PreviewEntry {
   id?: string;
   cat: string;
+  kbId?: string;
+  folderId?: string | null;
   title: string;
   tags: string[];
   summary: string;
@@ -298,11 +550,11 @@ export interface PreviewEntry {
 }
 
 export interface ImportPreview {
-  total: number;       // 解析到的条目总数
-  valid: number;       // 将导入的有效条目数
-  skipped: number;     // 将被跳过的无效条目数
-  newCount: number;    // 新增
-  updateCount: number; // 更新
+  total: number;
+  valid: number;
+  skipped: number;
+  newCount: number;
+  updateCount: number;
   byCat: { cat: string; count: number }[];
   entries: PreviewEntry[];
 }
@@ -319,11 +571,13 @@ export function buildImportPreview(list: ImportEntry[]): ImportPreview {
     const tree = (raw.nodes !== undefined || raw.intro !== undefined)
       ? normalizeIndex({ intro: raw.intro ?? '', nodes: raw.nodes ?? [] })
       : parseBodyToIndex(raw.body ?? '');
-    const cat = (raw.cat && String(raw.cat).trim()) || '自定义';
+    const cat = (raw.cat && String(raw.cat).trim()) || '未分类';
     const exists = typeof raw.id === 'string' && raw.id.length > 0 && existing.has(raw.id);
     entries.push({
       id: typeof raw.id === 'string' && raw.id ? raw.id : undefined,
       cat,
+      kbId: raw.kbId,
+      folderId: raw.folderId ?? null,
       title: title || '（无标题）',
       tags: Array.isArray(raw.tags) ? raw.tags : [],
       summary: (raw.summary && raw.summary.trim()) ? raw.summary.trim() : deriveSummary({}, tree),
@@ -343,20 +597,80 @@ export function buildImportPreview(list: ImportEntry[]): ImportPreview {
   return { total: list.length, valid, skipped, newCount, updateCount, byCat, entries };
 }
 
-export function importEntries(list: ImportEntry[], replace: boolean): { imported: number } {
-  const insert = db.prepare(
-    `INSERT INTO entries (id, cat, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
-     VALUES (:id, :cat, :title, :py, :tags, :summary, '', :idx, :sort, :createdAt, :updatedAt)`
+// 批量导入（备份恢复 / 迁移）。replace=true 先清空；按 id upsert，兼容旧 body / cat 字段。
+export function importEntries(payload: ImportPayload, replace: boolean): { imported: number } {
+  const insertEntry = db.prepare(
+    `INSERT INTO entries (id, cat, kbId, folderId, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
+     VALUES (:id, :cat, :kbId, :folderId, :title, :py, :tags, :summary, '', :idx, :sort, :createdAt, :updatedAt)`
   );
-  const update = db.prepare(
-    `UPDATE entries SET cat=:cat, title=:title, py=:py, tags=:tags, summary=:summary, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
+  const updateEntry = db.prepare(
+    `UPDATE entries SET cat=:cat, kbId=:kbId, folderId=:folderId, title=:title, py=:py, tags=:tags, summary=:summary, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
   );
+  const insertKb = db.prepare(
+    'INSERT OR IGNORE INTO knowledge_bases (id, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)'
+  );
+  const insertFolder = db.prepare(
+    'INSERT OR IGNORE INTO folders (id, kbId, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  );
+  const existsStmt = db.prepare('SELECT 1 FROM entries WHERE id = ?');
+
   let imported = 0;
   db.exec('BEGIN');
   try {
-    if (replace) db.exec('DELETE FROM entries');
+    if (replace) {
+      db.exec('DELETE FROM entries');
+      db.exec('DELETE FROM folders');
+      db.exec('DELETE FROM knowledge_bases');
+    }
+
+    // 1) 知识库
+    const kbIdMap = new Map<string, string>();   // 载荷原 id → 实际入库 id
+    const fallbackKbId = defaultKbId();
+    for (const k of payload.kbs ?? []) {
+      const now = Date.now();
+      if (k.id) {
+        insertKb.run(k.id, k.name, k.sort ?? 0, now, now);
+        kbIdMap.set(k.id, k.id);
+      } else {
+        const kb = ensureKb(k.name);
+        kbIdMap.set(k.name, kb.id);
+      }
+    }
+
+    // 2) 文件夹：按依赖多趟建入（先建父、再建子），未就绪的父降级为根
+    const pending = [...(payload.folders ?? [])];
+    const folderIdMap = new Map<string, string>(); // 载荷原 id → 实际 id
+    let progress = true;
+    while (pending.length && progress) {
+      progress = false;
+      for (let i = pending.length - 1; i >= 0; i--) {
+        const f = pending[i];
+        const kbId = (f.kbId && (kbIdMap.get(f.kbId) ?? f.kbId)) || fallbackKbId;
+        if (f.parentId && !folderIdMap.has(f.parentId)) continue; // 等父先建
+        const parentId = f.parentId ? folderIdMap.get(f.parentId) ?? null : null;
+        const now = Date.now();
+        if (f.id) {
+          insertFolder.run(f.id, kbId, parentId, f.name, f.sort ?? 0, now, now);
+          folderIdMap.set(f.id, f.id);
+        } else {
+          const folder = ensureFolder(kbId, f.name, parentId);
+          folderIdMap.set(f.name + '::' + (parentId ?? ''), folder.id);
+        }
+        pending.splice(i, 1);
+        progress = true;
+      }
+    }
+    for (const f of pending) {
+      // 父缺失，强制挂根
+      const kbId = (f.kbId && (kbIdMap.get(f.kbId) ?? f.kbId)) || fallbackKbId;
+      const now = Date.now();
+      if (f.id) { insertFolder.run(f.id, kbId, null, f.name, f.sort ?? 0, now, now); folderIdMap.set(f.id, f.id); }
+      else { const folder = ensureFolder(kbId, f.name, null); folderIdMap.set(f.name + '::', folder.id); }
+    }
+
+    // 3) 知识点
     let maxSort = Number((db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM entries').get() as { m: number }).m);
-    for (const raw of list) {
+    for (const raw of payload.entries) {
       if (!raw || typeof raw.title !== 'string' || !raw.title.trim()) continue;
       const now = Date.now();
       const id = typeof raw.id === 'string' && raw.id ? raw.id : 'u' + now + Math.floor(Math.random() * 100000);
@@ -364,17 +678,21 @@ export function importEntries(list: ImportEntry[], replace: boolean): { imported
         ? normalizeIndex({ intro: raw.intro ?? '', nodes: raw.nodes ?? [] })
         : parseBodyToIndex(raw.body ?? '');
       const idx = JSON.stringify(tree);
-      const cat = (raw.cat && String(raw.cat).trim()) || '自定义';
+      const cat = (raw.cat && String(raw.cat).trim()) || '未分类';
+      const kbId = raw.kbId ? (kbIdMap.get(raw.kbId) ?? resolveKbId(raw.kbId, cat)) : resolveKbId(undefined, cat);
+      // 优先用载荷 folderId；否则按 cat 在该库建根文件夹
+      let folderId = raw.folderId ? (folderIdMap.get(raw.folderId) ?? raw.folderId) : null;
+      if (!folderId || !getFolder(folderId)) folderId = ensureFolder(kbId, cat, null).id;
       const title = raw.title.trim();
       const py = (raw.py || title).toLowerCase();
       const tags = JSON.stringify(Array.isArray(raw.tags) ? raw.tags : []);
       const summary = (raw.summary && raw.summary.trim()) ? raw.summary.trim() : deriveSummary({}, tree);
-      const exists = db.prepare('SELECT 1 FROM entries WHERE id = ?').get(id);
+      const exists = Boolean(existsStmt.get(id));
       if (exists) {
-        update.run({ id, cat, title, py, tags, summary, idx, updatedAt: now });
+        updateEntry.run({ id, cat: kbNameOf(kbId), kbId, folderId, title, py, tags, summary, idx, updatedAt: now });
       } else {
         maxSort += 1;
-        insert.run({ id, cat, title, py, tags, summary, idx, sort: maxSort, createdAt: now, updatedAt: now });
+        insertEntry.run({ id, cat: kbNameOf(kbId), kbId, folderId, title, py, tags, summary, idx, sort: maxSort, createdAt: now, updatedAt: now });
       }
       imported += 1;
     }
@@ -384,4 +702,69 @@ export function importEntries(list: ImportEntry[], replace: boolean): { imported
     throw err;
   }
   return { imported };
+}
+
+// ───────────────────────── 种子数据 ─────────────────────────
+
+// 按版本导入知识库；旧种子的 markdown 正文在写入时转换为结构化索引。
+// 种子统一归入「面试知识库」，并按 cat 自动建立根文件夹（与一次性迁移保持一致）。
+export function seedBuiltins(): void {
+  const applied = new Set(
+    (db.prepare('SELECT version FROM seed_migrations').all() as { version: string }[]).map((row) => row.version)
+  );
+  const count = db.prepare('SELECT COUNT(*) AS n FROM entries').get() as { n: number };
+  const defaultKb = ensureKb(DEFAULT_KB_NAME);
+  const insert = db.prepare(
+    `INSERT INTO entries (id, cat, kbId, folderId, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
+     VALUES (:id, :cat, :kbId, :folderId, :title, :py, :tags, :summary, :body, :idx, :sort, :createdAt, :updatedAt)`
+  );
+  const updateBuiltin = db.prepare(
+    `UPDATE entries SET cat=:cat, kbId=:kbId, folderId=:folderId, py=:py, tags=:tags,
+       summary=:summary, body=:body, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
+  );
+  const deleteBuiltin = db.prepare('DELETE FROM entries WHERE id = ?');
+  const markApplied = db.prepare('INSERT INTO seed_migrations (version, appliedAt) VALUES (?, ?)');
+  let added = 0, updated = 0, removed = 0;
+
+  db.exec('BEGIN');
+  try {
+    for (const library of SEED_LIBRARIES) {
+      if (applied.has(library.version)) continue;
+      const skipLegacyBase = library.version === 'base-v1' && count.n > 0;
+      if (!skipLegacyBase) {
+        const now = Date.now();
+        for (const e of library.entries) {
+          const idx = JSON.stringify(parseBodyToIndex(e.body));
+          const catName = (e.cat && e.cat.trim()) || '未分类';
+          const folder = ensureFolder(defaultKb.id, catName, null);
+          const kbId = defaultKb.id;
+          const folderId = folder.id;
+          const values = {
+            id: e.id, cat: defaultKb.name, kbId, folderId, title: e.title, py: e.py,
+            tags: JSON.stringify(e.tags), summary: e.summary, body: e.body, idx,
+            sort: now, createdAt: now, updatedAt: now,
+          };
+          if (library.overwrite) {
+            const info = updateBuiltin.run({
+              id: e.id, cat: defaultKb.name, kbId, folderId, py: e.py,
+              tags: JSON.stringify(e.tags), summary: e.summary, body: e.body, idx, updatedAt: now,
+            });
+            if (Number(info.changes) > 0) updated += Number(info.changes);
+            else added += Number(insert.run(values).changes);
+          } else {
+            added += Number(insert.run(values).changes);
+          }
+        }
+        for (const id of library.removeIds ?? []) removed += Number(deleteBuiltin.run(id).changes);
+      }
+      markApplied.run(library.version, Date.now());
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  if (added || updated || removed) {
+    console.log(`[db] 内置知识点：新增 ${added}，更新 ${updated}，移除 ${removed}`);
+  }
 }

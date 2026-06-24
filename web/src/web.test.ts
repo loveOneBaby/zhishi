@@ -4,11 +4,14 @@ import { newNode, addChild, moveNode, removeNode, patchNode } from './outline';
 import { buildNeedles, matchesQuery, toSearchText } from './pinyin-search';
 import { filterEntries } from './search';
 import { buildModel, collectVisible, buildTreeLayout } from './components/canvas/model';
-import type { Entry } from './types';
+import type { Entry, KnowledgeBase, Folder } from './types';
 
 function entry(over: Partial<Entry>): Entry {
-  return { id: 'e', cat: 'AI', title: '示例', py: '', tags: [], summary: '', intro: '', nodes: [], ...over };
+  return { id: 'e', cat: 'AI', kbId: 'kb1', folderId: null, title: '示例', py: '', tags: [], summary: '', intro: '', nodes: [], ...over };
 }
+
+const noFolders: Folder[] = [];
+const kbAi: KnowledgeBase[] = [{ id: 'kb1', name: 'AI', sort: 0 }];
 
 test('outline: 增/改/移/删 树操作', () => {
   let nodes = [newNode('A'), newNode('B')];
@@ -55,7 +58,7 @@ test('canvas model: buildModel / collectVisible / layout', () => {
       { id: 's1', title: '二级A', content: '内容', children: [{ id: 's11', title: '三级', content: 'x', children: [] }] },
     ] }),
   ];
-  const { map, kbs } = buildModel(list);
+  const { map, kbs } = buildModel(list, noFolders, kbAi);
   assert.equal(kbs.length, 1);
   const kbId = kbs[0];
   assert.equal(map.get(kbId)!.type, 'cat');

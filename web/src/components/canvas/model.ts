@@ -1,9 +1,9 @@
-import type { Entry, IndexNode } from '../../types';
+import type { Entry, IndexNode, Folder, KnowledgeBase } from '../../types';
 import { toSearchText, matchesQuery } from '../../pinyin-search';
 
 // 画布的纯逻辑层：图模型构建、可见集合计算、布局、连线路径。无 React 依赖，便于测试与维护。
 
-export type NType = 'cat' | 'entry' | 'section';
+export type NType = 'cat' | 'folder' | 'entry' | 'section';
 
 export interface GNode {
   id: string;
@@ -107,49 +107,94 @@ function xAtDepth(depth: number): number {
   return x;
 }
 
-export function buildModel(entries: Entry[]): { map: Map<string, GNode>; kbs: string[] } {
+export function buildModel(
+  entries: Entry[],
+  folders: Folder[],
+  kbs: KnowledgeBase[]
+): { map: Map<string, GNode>; kbs: string[] } {
   const map = new Map<string, GNode>();
-  const kbs: string[] = [];
+  const kbNodeIds: string[] = [];
+  const kbNameOf = new Map(kbs.map((k) => [k.id, k.name] as const));
+  const builtKbs = new Set<string>();
+
+  // 首次遇到某知识库时，建根节点 + 其下完整文件夹树（按 sort 排序、多级嵌套）
+  const ensureKbBuilt = (kbId: string): string => {
+    if (builtKbs.has(kbId)) return `kb::${kbId}`;
+    builtKbs.add(kbId);
+    const id = `kb::${kbId}`;
+    const name = kbNameOf.get(kbId) ?? kbId;
+    map.set(id, {
+      id,
+      label: name,
+      type: 'cat',
+      depth: 0,
+      sub: name === 'AI'
+        ? '面试地图按专题 → 考查维度 → 高频问题展开，所有知识树直接列在画布中。'
+        : '当前知识库的知识树会直接列在画布中，可拖拽浏览并搜索定位。',
+      parentId: null,
+      children: [],
+      text: toSearchText(name),
+      meta: ['Interview Map'],
+    });
+    kbNodeIds.push(id);
+
+    const childFolders = (folderId: string | null): Folder[] =>
+      folders
+        .filter((f) => f.kbId === kbId && f.parentId === folderId)
+        .sort((a, b) => a.sort - b.sort);
+    // folderId=null 表示知识库根；nodeId 是该层在图中的父节点 id（kb:: 或 fld::）
+    const buildFolderLevel = (folderId: string | null, nodeId: string, depth: number): void => {
+      for (const f of childFolders(folderId)) {
+        const fid = `fld::${f.id}`;
+        map.set(fid, {
+          id: fid,
+          label: f.name,
+          type: 'folder',
+          depth,
+          sub: '',
+          parentId: nodeId,
+          children: [],
+          text: toSearchText(f.name),
+        });
+        map.get(nodeId)!.children.push(fid);
+        buildFolderLevel(f.id, fid, depth + 1);
+      }
+    };
+    buildFolderLevel(null, id, 1);
+    return id;
+  };
 
   for (const entry of entries) {
-    const kbId = `kb::${entry.cat}`;
-    if (!map.has(kbId)) {
-      map.set(kbId, {
-        id: kbId,
-        label: entry.cat,
-        type: 'cat',
-        depth: 0,
-        sub: entry.cat === 'AI'
-          ? '面试地图按专题 → 考查维度 → 高频问题展开，所有知识树直接列在画布中。'
-          : '当前知识库的知识树会直接列在画布中，可拖拽浏览并搜索定位。',
-        parentId: null,
-        children: [],
-        text: toSearchText(entry.cat),
-        meta: ['Interview Map'],
-      });
-      kbs.push(kbId);
+    const kbNodeId = ensureKbBuilt(entry.kbId);
+    // 归属文件夹缺失（已删除但未迁移）时回退到知识库根
+    let parentId = kbNodeId;
+    if (entry.folderId) {
+      const fid = `fld::${entry.folderId}`;
+      if (map.has(fid)) parentId = fid;
     }
+    const parentDepth = map.get(parentId)!.depth;
+    const entryDepth = parentDepth + 1;
 
     const entryId = `ent::${entry.id}`;
     map.set(entryId, {
       id: entryId,
       label: entry.title,
       type: 'entry',
-      depth: 1,
+      depth: entryDepth,
       sub: entry.summary,
       entryId: entry.id,
-      parentId: kbId,
+      parentId,
       children: [],
       text: [
-        toSearchText(entry.cat, entry.title, entry.py, entry.tags.join(' ')),
+        toSearchText(kbNameOf.get(entry.kbId) ?? entry.cat, entry.title, entry.py, entry.tags.join(' ')),
         toSearchText(entry.summary, entry.intro),
       ].join(' '),
       meta: entry.tags,
     });
-    map.get(kbId)!.children.push(entryId);
+    map.get(parentId)!.children.push(entryId);
 
     // 直接用结构化的多级索引节点构建画布层级
-    const addNodes = (nodes: IndexNode[], parentId: string, depth: number): void => {
+    const addNodes = (nodes: IndexNode[], pid: string, depth: number): void => {
       nodes.forEach((node) => {
         const nodeId = `${entryId}#${node.id}`;
         map.set(nodeId, {
@@ -159,18 +204,18 @@ export function buildModel(entries: Entry[]): { map: Map<string, GNode>; kbs: st
           depth,
           sub: node.content,
           entryId: entry.id,
-          parentId,
+          parentId: pid,
           children: [],
           text: toSearchText(node.title, node.content),
         });
-        map.get(parentId)!.children.push(nodeId);
+        map.get(pid)!.children.push(nodeId);
         addNodes(node.children, nodeId, depth + 1);
       });
     };
-    addNodes(entry.nodes, entryId, 2);
+    addNodes(entry.nodes, entryId, entryDepth + 1);
   }
 
-  return { map, kbs };
+  return { map, kbs: kbNodeIds };
 }
 
 export function collectVisible(

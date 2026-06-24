@@ -8,7 +8,7 @@ import type { Entry } from './types.js';
 
 function entry(over: Partial<Entry>): Entry {
   return {
-    id: 'e1', cat: 'AI', title: '示例', py: '', tags: [], summary: '', intro: '',
+    id: 'e1', cat: 'AI', kbId: 'kb1', folderId: null, title: '示例', py: '', tags: [], summary: '', intro: '',
     nodes: [], sort: 0, createdAt: 0, updatedAt: 0, ...over,
   };
 }

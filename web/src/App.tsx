@@ -1,16 +1,23 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import type { Entry, ThemeKey } from './types';
+import type { Entry, EntryInput, Folder, KnowledgeBase, ThemeKey } from './types';
 import { THEMES, themeVars } from './themes';
 import { filterEntries, suggestQueries, type SearchSuggestion } from './search';
 import {
   fetchEntries,
+  fetchKbs,
+  fetchFolders,
   createEntry,
   updateEntry,
   deleteEntry,
   reorderEntries,
-  renameCategory,
-  deleteCategory,
-  type EntryInput,
+  createKb,
+  renameKb,
+  deleteKb,
+  createFolder,
+  renameFolder,
+  moveFolder,
+  deleteFolder,
+  type EntryInput as ApiEntryInput,
 } from './api';
 import TopBar, { type AppMode } from './components/TopBar';
 import SearchMode from './components/SearchMode';
@@ -23,6 +30,8 @@ import Toaster from './components/Toaster';
 
 export default function App() {
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const [mode, setMode] = useState<AppMode>('search');
@@ -31,7 +40,10 @@ export default function App() {
   const [sel, setSel] = useState(0);
   const [sugSel, setSugSel] = useState(-1);   // 联想下拉的键盘选中项（-1 = 无）
   const [theme, setThemeState] = useState<ThemeKey>('mono');
-  const [freeCat, setFreeCat] = useState('全部');
+
+  // 自由模式导航：freeKb 当前进入的知识库；freeFolder 当前浏览的文件夹（null = 知识库根）
+  const [freeKb, setFreeKb] = useState<string | null>(null);
+  const [freeFolder, setFreeFolder] = useState<string | null>(null);
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
@@ -43,9 +55,9 @@ export default function App() {
   useEffect(() => {
     const saved = localStorage.getItem('ik_theme');
     if (saved && (saved in THEMES)) setThemeState(saved as ThemeKey);
-    fetchEntries()
-      .then((e) => setEntries(e))
-      .catch(() => setEntries([]))
+    Promise.all([fetchEntries(), fetchKbs(), fetchFolders()])
+      .then(([e, k, f]) => { setEntries(e); setKbs(k); setFolders(f); })
+      .catch(() => { setEntries([]); setKbs([]); setFolders([]); })
       .finally(() => { setLoaded(true); setTimeout(() => inputRef.current?.focus(), 60); });
   }, []);
 
@@ -142,19 +154,13 @@ export default function App() {
     return () => document.removeEventListener('keydown', handleKey);
   }, [openId, aiOpen, formOpen, isSearchList, mode, viewType, query, sel, results, suggestions, sugSel, closeAll, summonSearch, applySuggestion]);
 
-  // 管理模块的增删改：直接同步到共享 entries，检索/画布即时反映
-  const knownCats = useMemo(() => {
-    const seen: string[] = [];
-    for (const e of entries) if (!seen.includes(e.cat)) seen.push(e.cat);
-    return seen;
-  }, [entries]);
-
-  const handleCreate = useCallback(async (input: EntryInput): Promise<Entry> => {
+  // 知识点的增删改：同步到共享 entries，检索/画布即时反映
+  const handleCreate = useCallback(async (input: ApiEntryInput): Promise<Entry> => {
     const entry = await createEntry(input);
     setEntries((prev) => [...prev, entry]);
     return entry;
   }, []);
-  const handleUpdate = useCallback(async (id: string, input: EntryInput): Promise<Entry> => {
+  const handleUpdate = useCallback(async (id: string, input: ApiEntryInput): Promise<Entry> => {
     const entry = await updateEntry(id, input);
     setEntries((prev) => prev.map((e) => (e.id === id ? entry : e)));
     setOpenId((cur) => (cur === id ? null : cur));
@@ -169,17 +175,57 @@ export default function App() {
     const next = await reorderEntries(ids);
     setEntries(next);
   }, []);
-  const handleImported = useCallback((next: Entry[]) => {
-    setEntries(next);
+  const handleImported = useCallback((nextEntries: Entry[], nextKbs: KnowledgeBase[], nextFolders: Folder[]) => {
+    setEntries(nextEntries);
+    setKbs(nextKbs);
+    setFolders(nextFolders);
   }, []);
-  const handleRenameCat = useCallback(async (from: string, to: string) => {
-    const next = await renameCategory(from, to);
-    setEntries(next);
+
+  // 知识库回调
+  const handleCreateKb = useCallback(async (name: string): Promise<KnowledgeBase> => {
+    const kb = await createKb(name);
+    setKbs((prev) => [...prev, kb]);
+    return kb;
   }, []);
-  const handleDeleteCat = useCallback(async (name: string) => {
-    const next = await deleteCategory(name);
-    setEntries(next);
+  const handleRenameKb = useCallback(async (id: string, name: string): Promise<void> => {
+    const kb = await renameKb(id, name);
+    setKbs((prev) => prev.map((k) => (k.id === id ? kb : k)));
+    // entry.cat 是知识库名派生，需同步刷新本地缓存
+    setEntries((prev) => prev.map((e) => (e.kbId === id ? { ...e, cat: kb.name } : e)));
+  }, []);
+  const handleDeleteKb = useCallback(async (id: string): Promise<void> => {
+    const { kbs: nk, folders: nf, entries: ne } = await deleteKb(id);
+    setKbs(nk);
+    setFolders(nf);
+    setEntries(ne);
     setOpenId(null);
+    setFreeKb((cur) => (cur === id ? null : cur));
+  }, []);
+
+  // 文件夹回调
+  const handleCreateFolder = useCallback(async (input: { kbId: string; parentId?: string | null; name: string }): Promise<Folder> => {
+    const folder = await createFolder(input);
+    setFolders((prev) => [...prev, folder]);
+    return folder;
+  }, []);
+  const handleRenameFolder = useCallback(async (id: string, name: string): Promise<void> => {
+    const folder = await renameFolder(id, name);
+    setFolders((prev) => prev.map((f) => (f.id === id ? folder : f)));
+  }, []);
+  const handleMoveFolder = useCallback(async (id: string, opts: { parentId?: string | null; kbId?: string }): Promise<void> => {
+    const next = await moveFolder(id, opts);
+    setFolders(next);
+  }, []);
+  const handleDeleteFolder = useCallback(async (id: string): Promise<void> => {
+    const { folders: nf, entries: ne } = await deleteFolder(id);
+    setFolders(nf);
+    setEntries(ne);
+    setOpenId(null);
+    setFreeFolder((cur) => {
+      if (!cur) return cur;
+      // 若当前浏览的文件夹被删（或在其子树内），回退到其知识库根
+      return cur === id || nf.every((f) => f.id !== cur) ? null : cur;
+    });
   }, []);
 
   const openEntry = openId ? entries.find((e) => e.id === openId) ?? null : null;
@@ -221,30 +267,48 @@ export default function App() {
             }}
             onOpen={(id, index) => { if (typeof index === 'number') setSel(index); setOpenId(id); }}
             onOpenAI={() => setAiOpen(true)}
+            kbs={kbs}
+            folders={folders}
           />
         )}
 
         {mode === 'free' && (
           <FreeMode
             entries={entries}
-            activeCat={freeCat}
-            setCat={setFreeCat}
+            kbs={kbs}
+            folders={folders}
+            freeKb={freeKb}
+            freeFolder={freeFolder}
+            setFreeKb={setFreeKb}
+            setFreeFolder={setFreeFolder}
             onOpen={(id) => setOpenId(id)}
             onNew={() => setFormOpen(true)}
+            onCreateKb={handleCreateKb}
+            onCreateFolder={handleCreateFolder}
+            onRenameKb={handleRenameKb}
+            onDeleteKb={handleDeleteKb}
+            onRenameFolder={handleRenameFolder}
+            onDeleteFolder={handleDeleteFolder}
           />
         )}
 
         {mode === 'manage' && (
           <ManageMode
             entries={entries}
-            knownCats={knownCats}
+            kbs={kbs}
+            folders={folders}
             onCreate={handleCreate}
             onUpdate={handleUpdate}
             onDelete={handleDelete}
             onReorder={handleReorder}
-            onRenameCat={handleRenameCat}
-            onDeleteCat={handleDeleteCat}
             onImported={handleImported}
+            onCreateKb={handleCreateKb}
+            onRenameKb={handleRenameKb}
+            onDeleteKb={handleDeleteKb}
+            onCreateFolder={handleCreateFolder}
+            onRenameFolder={handleRenameFolder}
+            onMoveFolder={handleMoveFolder}
+            onDeleteFolder={handleDeleteFolder}
           />
         )}
 
@@ -283,7 +347,8 @@ export default function App() {
           >
             <EntryEditor
               initial={null}
-              knownCats={knownCats}
+              kbs={kbs}
+              folders={folders}
               onCancel={closeAll}
               onSave={(input) =>
                 handleCreate(input).then((entry) => {

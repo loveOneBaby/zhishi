@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import type { Entry, EntryInput, IndexNode } from '../types';
+import type { Entry, EntryInput, IndexNode, KnowledgeBase, Folder } from '../types';
+import { forestOfKb } from '../tree';
+import type { FolderNode } from '../tree';
 import {
   MAX_INDEX_DEPTH,
   addChild,
@@ -60,7 +62,8 @@ const iconBtn: CSSProperties = {
 
 function snapshot(d: {
   title: string;
-  cat: string;
+  kbId: string;
+  folderId: string | null;
   tags: string[];
   summary: string;
   intro: string;
@@ -68,7 +71,8 @@ function snapshot(d: {
 }): string {
   return JSON.stringify({
     title: d.title.trim(),
-    cat: d.cat.trim(),
+    kbId: d.kbId,
+    folderId: d.folderId,
     tags: d.tags,
     summary: d.summary.trim(),
     intro: d.intro,
@@ -76,22 +80,39 @@ function snapshot(d: {
   });
 }
 
+// 将知识库内的文件夹森林展平为 <option>，多级用缩进前缀体现层级。
+function folderOptions(roots: FolderNode[], depth = 0): ReactNode[] {
+  return roots.flatMap((n) => {
+    const prefix = depth > 0 ? '　'.repeat(depth) + '└ ' : '';
+    return [
+      <option key={n.folder.id} value={n.folder.id}>
+        {prefix}
+        {n.folder.name}
+      </option>,
+      ...folderOptions(n.children, depth + 1),
+    ];
+  });
+}
+
 interface Props {
   /** null = 新建 */
   initial: Entry | null;
-  knownCats: string[];
-  defaultCat?: string;
+  kbs: KnowledgeBase[];
+  folders: Folder[];
+  defaultKbId?: string;
+  defaultFolderId?: string | null;
   onSave: (input: EntryInput) => Promise<Entry>;
   onCancel?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
 }
 
 export default function EntryEditor(props: Props): ReactNode {
-  const { initial, knownCats, defaultCat, onSave, onCancel, onDirtyChange } = props;
+  const { initial, kbs, folders, defaultKbId, defaultFolderId, onSave, onCancel, onDirtyChange } = props;
   const isEdit = !!initial;
 
   const [title, setTitle] = useState(initial?.title ?? '');
-  const [cat, setCat] = useState(initial?.cat ?? defaultCat ?? '');
+  const [kbId, setKbId] = useState(initial?.kbId ?? defaultKbId ?? kbs[0]?.id ?? '');
+  const [folderId, setFolderId] = useState<string | null>(initial?.folderId ?? defaultFolderId ?? null);
   const [tags, setTags] = useState(initial?.tags.join(', ') ?? '');
   const [summary, setSummary] = useState(initial?.summary ?? '');
   const [intro, setIntro] = useState(initial?.intro ?? '');
@@ -114,7 +135,8 @@ export default function EntryEditor(props: Props): ReactNode {
   if (!baseRef.current) {
     baseRef.current = snapshot({
       title: initial?.title ?? '',
-      cat: initial?.cat ?? defaultCat ?? '',
+      kbId: initial?.kbId ?? defaultKbId ?? kbs[0]?.id ?? '',
+      folderId: initial?.folderId ?? defaultFolderId ?? null,
       tags: initial?.tags ?? [],
       summary: initial?.summary ?? '',
       intro: initial?.intro ?? '',
@@ -122,7 +144,7 @@ export default function EntryEditor(props: Props): ReactNode {
     });
   }
 
-  const dirty = snapshot({ title, cat, tags: tagList, summary, intro, nodes }) !== baseRef.current;
+  const dirty = snapshot({ title, kbId, folderId, tags: tagList, summary, intro, nodes }) !== baseRef.current;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -141,14 +163,15 @@ export default function EntryEditor(props: Props): ReactNode {
       toast('标题不能为空', 'error');
       return;
     }
-    if (!cat.trim()) {
-      toast('请选择或输入知识库', 'error');
+    if (!kbId) {
+      toast('请选择知识库', 'error');
       return;
     }
     setSaving(true);
     onSave({
       title: title.trim(),
-      cat: cat.trim(),
+      kbId,
+      folderId,
       tags: tagList,
       summary: summary.trim(),
       py: title.trim(),
@@ -157,14 +180,16 @@ export default function EntryEditor(props: Props): ReactNode {
     })
       .then((saved) => {
         setTitle(saved.title);
-        setCat(saved.cat);
+        setKbId(saved.kbId);
+        setFolderId(saved.folderId);
         setTags(saved.tags.join(', '));
         setSummary(saved.summary ?? '');
         setIntro(saved.intro ?? '');
         setNodes(saved.nodes ?? []);
         baseRef.current = snapshot({
           title: saved.title,
-          cat: saved.cat,
+          kbId: saved.kbId,
+          folderId: saved.folderId,
           tags: saved.tags,
           summary: saved.summary ?? '',
           intro: saved.intro ?? '',
@@ -190,7 +215,7 @@ export default function EntryEditor(props: Props): ReactNode {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, cat, tags, summary, intro, nodes, saving]);
+  }, [title, kbId, folderId, tags, summary, intro, nodes, saving]);
 
   function addTopNode(): void {
     setNodes((ns) => [...ns, newNode()]);
@@ -218,9 +243,13 @@ export default function EntryEditor(props: Props): ReactNode {
     setDropTarget(null);
   }
 
+  const kbName = kbs.find((k) => k.id === kbId)?.name ?? '未分类';
+
   const draftPreview: Entry = {
     id: initial?.id ?? '__draft__',
-    cat: cat.trim() || '自定义',
+    cat: kbName,
+    kbId,
+    folderId,
     title: title.trim() || '（未命名知识点）',
     py: title.trim() || '',
     tags: tagList,
@@ -474,11 +503,6 @@ export default function EntryEditor(props: Props): ReactNode {
         {/* 左：编辑区 */}
         <div style={{ flex: '1 1 460px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={cardStyle}>
-            <datalist id="kb-list-manage">
-              {knownCats.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={labelStyle}>标题</label>
@@ -486,14 +510,31 @@ export default function EntryEditor(props: Props): ReactNode {
               </div>
               <div>
                 <label style={labelStyle}>知识库</label>
-                <input
-                  value={cat}
-                  onChange={(e) => setCat(e.target.value)}
-                  list="kb-list-manage"
-                  placeholder="如：前端"
+                <select
+                  value={kbId}
+                  onChange={(e) => {
+                    setKbId(e.target.value);
+                    // 切换知识库后归属文件夹失效，回退到根目录
+                    setFolderId(null);
+                  }}
                   style={inputStyle}
-                />
+                >
+                  {kbs.map((k) => (
+                    <option key={k.id} value={k.id}>{k.name}</option>
+                  ))}
+                </select>
               </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={labelStyle}>文件夹</label>
+              <select
+                value={folderId ?? ''}
+                onChange={(e) => setFolderId(e.target.value || null)}
+                style={inputStyle}
+              >
+                <option value="">根目录</option>
+                {folderOptions(forestOfKb(folders, kbId))}
+              </select>
             </div>
             <div style={{ marginTop: 12 }}>
               <label style={labelStyle}>标签（逗号分隔）</label>

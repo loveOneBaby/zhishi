@@ -120,6 +120,8 @@ interface RawIntro {
 interface RawEntry {
   id?: string;
   cat?: string;
+  kbId?: string;
+  folderId?: string | null;
   title?: string;
   py?: string;
   tags?: string[];
@@ -148,6 +150,8 @@ export function convertEntry(raw: unknown, assets: Asset[] = []): ImportEntry {
   return {
     id: e.id,
     cat: e.cat,
+    kbId: e.kbId,
+    folderId: e.folderId,
     title: e.title,
     py: e.py,
     tags: Array.isArray(e.tags) ? e.tags : undefined,

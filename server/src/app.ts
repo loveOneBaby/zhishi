@@ -10,9 +10,22 @@ import {
   deleteEntry,
   reorderEntries,
   importEntries,
-  renameCategory,
-  deleteCategory,
+  exportData,
   buildImportPreview,
+  listKbs,
+  getKb,
+  createKb,
+  renameKb,
+  deleteKb,
+  reorderKbs,
+  listFolders,
+  createFolder,
+  renameFolder,
+  moveFolder,
+  deleteFolder,
+  reorderFolders,
+  type EntryInput,
+  type ImportPayload,
 } from './db.js';
 import { convertEntry } from './blocks-import.js';
 import { searchEntries } from './search.js';
@@ -30,6 +43,91 @@ export function createApp() {
   // 健康检查
   api.get('/health', (_req, res) => res.json({ ok: true }));
 
+  // ───────────── 知识库 ─────────────
+  api.get('/kbs', (_req, res) => {
+    res.json({ kbs: listKbs() });
+  });
+
+  api.post('/kbs', (req, res) => {
+    const name = String(req.body?.name ?? '').trim();
+    if (!name) return res.status(400).json({ error: 'name 不能为空' });
+    const kb = createKb(name);
+    res.status(201).json({ kb });
+  });
+
+  api.put('/kbs/:id', (req, res) => {
+    const name = String(req.body?.name ?? '').trim();
+    if (!name) return res.status(400).json({ error: 'name 不能为空' });
+    const kb = renameKb(req.params.id, name);
+    if (!kb) return res.status(404).json({ error: 'not found' });
+    res.json({ kb });
+  });
+
+  api.delete('/kbs/:id', (req, res) => {
+    const ok = deleteKb(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true, kbs: listKbs(), folders: listFolders(), entries: listEntries() });
+  });
+
+  api.post('/kbs/reorder', (req, res) => {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.some((i: unknown) => typeof i !== 'string')) {
+      return res.status(400).json({ error: 'ids 必须是字符串数组' });
+    }
+    reorderKbs(ids);
+    res.json({ ok: true, kbs: listKbs() });
+  });
+
+  // ───────────── 文件夹 ─────────────
+  api.get('/folders', (_req, res) => {
+    res.json({ folders: listFolders() });
+  });
+
+  api.post('/folders', (req, res) => {
+    const kbId = String(req.body?.kbId ?? '').trim();
+    const name = String(req.body?.name ?? '').trim();
+    if (!name) return res.status(400).json({ error: 'name 不能为空' });
+    const parentId = req.body?.parentId ?? null;
+    const folder = createFolder({ kbId, parentId, name });
+    if (!folder) return res.status(400).json({ error: '知识库不存在或父文件夹无效' });
+    res.status(201).json({ folder });
+  });
+
+  api.put('/folders/:id', (req, res) => {
+    const name = String(req.body?.name ?? '').trim();
+    if (!name) return res.status(400).json({ error: 'name 不能为空' });
+    const folder = renameFolder(req.params.id, name);
+    if (!folder) return res.status(404).json({ error: 'not found' });
+    res.json({ folder });
+  });
+
+  api.post('/folders/move', (req, res) => {
+    const id = String(req.body?.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'id 不能为空' });
+    const ok = moveFolder(id, {
+      parentId: req.body?.parentId ?? null,
+      kbId: req.body?.kbId,
+    });
+    if (!ok) return res.status(400).json({ error: '目标无效或会形成环' });
+    res.json({ ok: true, folders: listFolders() });
+  });
+
+  api.delete('/folders/:id', (req, res) => {
+    const ok = deleteFolder(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true, folders: listFolders(), entries: listEntries() });
+  });
+
+  api.post('/folders/reorder', (req, res) => {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.some((i: unknown) => typeof i !== 'string')) {
+      return res.status(400).json({ error: 'ids 必须是字符串数组' });
+    }
+    reorderFolders(ids);
+    res.json({ ok: true, folders: listFolders() });
+  });
+
+  // ───────────── 知识点 ─────────────
   // 全部知识点
   api.get('/entries', (_req, res) => {
     res.json({ entries: listEntries() });
@@ -51,30 +149,33 @@ export function createApp() {
 
   // 新建
   api.post('/entries', (req, res) => {
-    const { title, cat, tags, py, summary, intro, nodes } = req.body ?? {};
+    const { title, kbId, folderId, cat, tags, py, summary, intro, nodes } = req.body ?? {};
     if (!title || !String(title).trim()) {
       return res.status(400).json({ error: 'title 不能为空' });
     }
-    const entry = createEntry({ title, cat, tags, py, summary, intro, nodes });
+    const entry = createEntry({ title, kbId, folderId, cat, tags, py, summary, intro, nodes } as EntryInput);
     res.status(201).json({ entry });
   });
 
-  // 导出全部知识点（备份）
+  // 导出全部知识库结构（备份）
   api.get('/export', (_req, res) => {
-    res.json({ version: 'kb-export-1', exportedAt: Date.now(), entries: listEntries() });
+    res.json(exportData());
   });
 
-  // 导入：body = { version?, assets?, entries: [...], replace?: boolean }
+  // 导入：body = { version?, kbs?, folders?, assets?, entries: [...], replace?: boolean }
   // kb-import-2 的富块结构（intro/nodes.blocks、assets）在此自动折叠为扁平 markdown
   api.post('/import', (req, res) => {
     const raw = req.body?.entries;
     if (!Array.isArray(raw)) return res.status(400).json({ error: 'entries 必须是数组' });
     if (raw.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
     const assets = Array.isArray(req.body?.assets) ? req.body.assets : [];
+    const kbs = Array.isArray(req.body?.kbs) ? req.body.kbs : undefined;
+    const folders = Array.isArray(req.body?.folders) ? req.body.folders : undefined;
     // convertEntry 对扁平旧条目是直通，v1/v2 可混用
-    const list = raw.map((e) => convertEntry(e, assets));
-    const { imported } = importEntries(list, Boolean(req.body?.replace));
-    res.json({ ok: true, imported, entries: listEntries() });
+    const entries = raw.map((e: unknown) => convertEntry(e, assets));
+    const payload: ImportPayload = { kbs, folders, entries };
+    const { imported } = importEntries(payload, Boolean(req.body?.replace));
+    res.json({ ok: true, imported, kbs: listKbs(), folders: listFolders(), entries: listEntries() });
   });
 
   // 导入预览：解析载荷（与 /import 同样的 convertEntry）但不写库，
@@ -84,7 +185,7 @@ export function createApp() {
     if (!Array.isArray(raw)) return res.status(400).json({ error: 'entries 必须是数组' });
     if (raw.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
     const assets = Array.isArray(req.body?.assets) ? req.body.assets : [];
-    const list = raw.map((e) => convertEntry(e, assets));
+    const list = raw.map((e: unknown) => convertEntry(e, assets));
     const preview = buildImportPreview(list);
     res.json({ preview });
   });
@@ -92,28 +193,11 @@ export function createApp() {
   // 排序（管理模块拖拽）：body = { ids: string[] }
   api.post('/entries/reorder', (req, res) => {
     const ids = req.body?.ids;
-    if (!Array.isArray(ids) || ids.some((i) => typeof i !== 'string')) {
+    if (!Array.isArray(ids) || ids.some((i: unknown) => typeof i !== 'string')) {
       return res.status(400).json({ error: 'ids 必须是字符串数组' });
     }
     reorderEntries(ids);
     res.json({ ok: true, entries: listEntries() });
-  });
-
-  // 重命名知识库：body = { from: string, to: string }
-  api.post('/categories/rename', (req, res) => {
-    const from = String(req.body?.from ?? '').trim();
-    const to = String(req.body?.to ?? '').trim();
-    if (!from || !to) return res.status(400).json({ error: 'from/to 不能为空' });
-    const changed = renameCategory(from, to);
-    res.json({ ok: true, changed, entries: listEntries() });
-  });
-
-  // 删除知识库（及其下全部知识点）
-  api.delete('/categories/:name', (req, res) => {
-    const name = decodeURIComponent(req.params.name || '');
-    if (!name) return res.status(400).json({ error: 'name 不能为空' });
-    const changed = deleteCategory(name);
-    res.json({ ok: true, changed, entries: listEntries() });
   });
 
   // 更新
