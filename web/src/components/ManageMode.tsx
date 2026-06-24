@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent } from 'react';
 import type { Entry, IndexNode } from '../types';
-import { exportAll, type EntryInput } from '../api';
+import { exportAll, type EntryInput, type ImportPayload } from '../api';
 import { filterEntries } from '../search';
 import { chip } from '../ui';
 import { toast } from '../toast';
@@ -14,7 +14,7 @@ interface Props {
   onUpdate: (id: string, input: EntryInput) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onReorder: (ids: string[]) => Promise<void>;
-  onImport: (list: unknown[], replace: boolean) => Promise<void>;
+  onImport: (payload: ImportPayload, replace: boolean) => Promise<void>;
 }
 
 function fmtDate(ms?: number): string {
@@ -119,11 +119,12 @@ export default function ManageMode({ entries, onCreate, onUpdate, onDelete, onRe
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      const list: unknown[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.entries) ? parsed.entries : [];
-      if (!list.length) { toast('文件中没有可导入的知识点', 'error'); return; }
-      const replace = window.confirm(`将导入 ${list.length} 条。\n\n确定 = 覆盖替换（先清空现有，再整体导入）\n取消 = 合并（按 id 更新已有、新增其余）`);
-      await onImport(list, replace);
-      toast(`已${replace ? '替换' : '合并'}导入 ${list.length} 条`, 'success');
+      // 兼容：纯数组、{ entries }、kb-import-2 的 { version, assets, entries }
+      const entries: unknown[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.entries) ? parsed.entries : [];
+      if (!entries.length) { toast('文件中没有可导入的知识点', 'error'); return; }
+      const replace = window.confirm(`将导入 ${entries.length} 条。\n\n确定 = 覆盖替换（先清空现有，再整体导入）\n取消 = 合并（按 id 更新已有、新增其余）`);
+      await onImport({ version: parsed?.version, assets: parsed?.assets, entries }, replace);
+      toast(`已${replace ? '替换' : '合并'}导入 ${entries.length} 条`, 'success');
     } catch (e) {
       toast('导入失败：' + (e instanceof Error ? e.message : String(e)), 'error');
     }

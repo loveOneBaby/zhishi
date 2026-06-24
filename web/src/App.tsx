@@ -2,7 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { Entry, ThemeKey } from './types';
 import { THEMES, themeVars } from './themes';
 import { filterEntries, suggestQueries } from './search';
-import { fetchEntries, createEntry, updateEntry, deleteEntry, reorderEntries, importAll, type NewEntryInput, type EntryInput } from './api';
+import { fetchEntries, createEntry, updateEntry, deleteEntry, reorderEntries, importAll, type NewEntryInput, type EntryInput, type ImportPayload } from './api';
 import TopBar, { type AppMode } from './components/TopBar';
 import SearchMode from './components/SearchMode';
 import FreeMode from './components/FreeMode';
@@ -124,8 +124,8 @@ export default function App() {
     const next = await reorderEntries(ids);
     setEntries(next);
   }, []);
-  const handleImport = useCallback(async (list: unknown[], replace: boolean) => {
-    const next = await importAll(list, replace);
+  const handleImport = useCallback(async (payload: ImportPayload, replace: boolean) => {
+    const next = await importAll(payload, replace);
     setEntries(next);
   }, []);
 

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseBodyToIndex, normalizeIndex, indexText } from './index-tree.js';
+import { blocksToMarkdown, convertEntry } from './blocks-import.js';
 import { score, searchEntries } from './search.js';
 import { toSearchText } from './pinyin-search.js';
 import type { Entry } from './types.js';
@@ -70,4 +71,54 @@ test('score: 标题前缀分高于全文包含', () => {
   assert.ok(score(e, '快速') >= 80);     // 标题包含/前缀
   assert.ok(score(e, '复杂度') >= 50);   // 索引全文包含
   assert.equal(score(e, '无关'), -1);
+});
+
+test('blocksToMarkdown: 段落/代码/引用/列表/折叠', () => {
+  const md = blocksToMarkdown([
+    { id: 'p', type: 'paragraph', data: { text: 'Query 预处理 → **多路召回**' } },
+    { id: 'cd', type: 'code', data: { lang: 'python', text: 'retriever.search(q)' } },
+    { id: 'cl', type: 'callout', data: { tone: 'warn', text: '上下文不是越多越好' } },
+    { id: 'li', type: 'list', data: { ordered: false, items: ['稠密', '稀疏', '规则'] } },
+    { id: 'tg', type: 'toggle', data: { text: '展开:三种召回' },
+      children: [{ id: 'li2', type: 'list', data: { ordered: false, items: ['稠密', '稀疏', '规则'] } }] },
+  ]);
+  assert.ok(md.includes('Query 预处理 → **多路召回**'));
+  assert.ok(md.includes('```python\nretriever.search(q)\n```'));
+  assert.ok(md.includes('⚠️ 上下文不是越多越好'));
+  assert.ok(md.includes('- 稠密'));
+  assert.ok(md.includes('### 展开:三种召回'));
+});
+
+test('convertEntry: image 经 assetId 解析 + searchText 并入 intro', () => {
+  const assets = [{ id: 'img_1', type: 'image', url: 'https://cdn/flow.png' }];
+  const out = convertEntry({
+    id: 'rag', cat: 'AI', title: 'RAG', tags: ['检索'], summary: 's',
+    intro: { blocks: [{ id: 'p0', type: 'paragraph', data: { text: '四段梳理' } }] },
+    nodes: [
+      { id: 'n1', title: '在线检索流程',
+        blocks: [
+          { id: 'p1', type: 'paragraph', data: { text: '融合' } },
+          { id: 'im1', type: 'image', data: { assetId: 'img_1', caption: '检索链路' } },
+        ],
+        children: [] },
+    ],
+    searchText: '检索增强 rag',
+  }, assets);
+  assert.equal(out.id, 'rag');
+  assert.equal(out.intro, '四段梳理\n\n检索增强 rag');
+  assert.ok(out.nodes![0].content.includes('[🖼 检索链路](https://cdn/flow.png)'));
+  // 资源缺失时优雅降级为纯文本 caption
+  const out2 = convertEntry({
+    intro: { blocks: [{ type: 'image', data: { assetId: 'nope', caption: '无图' } }] },
+  }, []);
+  assert.equal(out2.intro, '🖼 无图');
+});
+
+test('convertEntry: 扁平旧条目直通（v1 兼容）', () => {
+  const out = convertEntry({
+    id: 'x', cat: '前端', title: '闭包', intro: '引言',
+    nodes: [{ id: 'n', title: 't', content: 'c', children: [] }],
+  });
+  assert.equal(out.intro, '引言');
+  assert.equal(out.nodes![0].content, 'c');
 });

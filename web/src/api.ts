@@ -76,11 +76,18 @@ export async function exportAll(): Promise<ExportPayload> {
   return j<ExportPayload>(await fetch(`${BASE}/export`));
 }
 
-export async function importAll(entries: unknown[], replace: boolean): Promise<Entry[]> {
+// 导入载荷：兼容 kb-import-2（带 version / assets）与旧的纯 entries 数组
+export interface ImportPayload {
+  version?: string;
+  assets?: unknown[];
+  entries: unknown[];
+}
+
+export async function importAll(payload: ImportPayload, replace: boolean): Promise<Entry[]> {
   const res = await fetch(`${BASE}/import`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ entries, replace }),
+    body: JSON.stringify({ ...payload, replace }),
   });
   const data = await j<{ entries: Entry[] }>(res);
   return data.entries;
