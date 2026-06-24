@@ -58,7 +58,7 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
           )}
           {isCanvas && (
             <span style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--mut)' }}>
-              <span>拖拽平移</span><span>滚轮缩放</span><span>点击展开</span>
+              <span>切换知识库</span><span>点击知识点查看详情</span><span>⤢ 沉浸模式</span>
             </span>
           )}
           <div style={{ display: 'flex', gap: 2, background: 'var(--sel)', padding: 3, borderRadius: 8 }}>
@@ -97,7 +97,7 @@ const SearchMode = forwardRef<HTMLInputElement, Props>(function SearchMode(
         </>
       )}
 
-      {isCanvas && <CanvasView entries={results} theme={theme} onOpen={onOpen} />}
+      {isCanvas && <CanvasView entries={results} theme={theme} onOpen={onOpen} hasQuery={hasQuery} />}
     </div>
   );
 });

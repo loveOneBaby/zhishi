@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { SEED_ENTRIES } from './seed-data.js';
@@ -9,8 +9,9 @@ const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'knowledge.db');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-export const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
+// 使用 Node 内置 SQLite（node:sqlite，Node 22.5+ / 24 可用），无需原生编译
+export const db = new DatabaseSync(DB_PATH);
+db.exec('PRAGMA journal_mode = WAL;');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS entries (
@@ -39,14 +40,15 @@ function rowToEntry(r: EntryRow): Entry {
 
 // 首次启动：若表为空则导入内置种子数据
 export function seedIfEmpty(): void {
-  const count = (db.prepare('SELECT COUNT(*) AS n FROM entries').get() as { n: number }).n;
-  if (count > 0) return;
+  const row = db.prepare('SELECT COUNT(*) AS n FROM entries').get() as { n: number };
+  if (row.n > 0) return;
   const now = Date.now();
   const insert = db.prepare(
     `INSERT INTO entries (id, cat, title, py, tags, summary, body, createdAt, updatedAt)
-     VALUES (@id, @cat, @title, @py, @tags, @summary, @body, @createdAt, @updatedAt)`
+     VALUES (:id, :cat, :title, :py, :tags, :summary, :body, :createdAt, :updatedAt)`
   );
-  const tx = db.transaction(() => {
+  db.exec('BEGIN');
+  try {
     for (const e of SEED_ENTRIES) {
       insert.run({
         id: e.id, cat: e.cat, title: e.title, py: e.py,
@@ -54,18 +56,21 @@ export function seedIfEmpty(): void {
         createdAt: now, updatedAt: now,
       });
     }
-  });
-  tx();
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
   console.log(`[db] 已导入 ${SEED_ENTRIES.length} 条内置知识点`);
 }
 
 export function listEntries(): Entry[] {
-  const rows = db.prepare('SELECT * FROM entries ORDER BY createdAt ASC').all() as EntryRow[];
+  const rows = db.prepare('SELECT * FROM entries ORDER BY createdAt ASC').all() as unknown as EntryRow[];
   return rows.map(rowToEntry);
 }
 
 export function getEntry(id: string): Entry | null {
-  const row = db.prepare('SELECT * FROM entries WHERE id = ?').get(id) as EntryRow | undefined;
+  const row = db.prepare('SELECT * FROM entries WHERE id = ?').get(id) as unknown as EntryRow | undefined;
   return row ? rowToEntry(row) : null;
 }
 
@@ -94,7 +99,7 @@ export function createEntry(input: EntryInput): Entry {
   };
   db.prepare(
     `INSERT INTO entries (id, cat, title, py, tags, summary, body, createdAt, updatedAt)
-     VALUES (@id, @cat, @title, @py, @tags, @summary, @body, @createdAt, @updatedAt)`
+     VALUES (:id, :cat, :title, :py, :tags, :summary, :body, :createdAt, :updatedAt)`
   ).run({ ...entry, tags: JSON.stringify(entry.tags) });
   return entry;
 }
@@ -113,13 +118,17 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
     updatedAt: Date.now(),
   };
   db.prepare(
-    `UPDATE entries SET cat=@cat, title=@title, py=@py, tags=@tags,
-       summary=@summary, body=@body, updatedAt=@updatedAt WHERE id=@id`
-  ).run({ ...next, tags: JSON.stringify(next.tags) });
+    `UPDATE entries SET cat=:cat, title=:title, py=:py, tags=:tags,
+       summary=:summary, body=:body, updatedAt=:updatedAt WHERE id=:id`
+  ).run({
+    id: next.id, cat: next.cat, title: next.title, py: next.py,
+    tags: JSON.stringify(next.tags), summary: next.summary,
+    body: next.body, updatedAt: next.updatedAt,
+  });
   return next;
 }
 
 export function deleteEntry(id: string): boolean {
   const info = db.prepare('DELETE FROM entries WHERE id = ?').run(id);
-  return info.changes > 0;
+  return Number(info.changes) > 0;
 }

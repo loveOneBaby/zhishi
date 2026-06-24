@@ -34,12 +34,12 @@ if [ "${1:-}" = "stop" ]; then
   exit 0
 fi
 
-# 首次运行自动安装依赖
-if [ ! -d "server/node_modules" ]; then
+# 依赖未装好则自动安装（用关键包是否存在判断，避免上次安装中断导致的半成品）
+if [ ! -d "server/node_modules/express" ]; then
   echo "==> 安装后端依赖"
   npm --prefix server install
 fi
-if [ ! -d "web/node_modules" ]; then
+if [ ! -d "web/node_modules/vite" ]; then
   echo "==> 安装前端依赖"
   npm --prefix web install
 fi
