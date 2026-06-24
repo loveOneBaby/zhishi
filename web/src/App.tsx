@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Entry, ThemeKey } from './types';
 import { THEMES, themeVars } from './themes';
-import { filterEntries } from './search';
+import { filterEntries, suggestQueries } from './search';
 import { fetchEntries, createEntry, type NewEntryInput } from './api';
 import TopBar from './components/TopBar';
 import SearchMode from './components/SearchMode';
@@ -47,8 +47,19 @@ export default function App() {
     () => (mode === 'search' ? filterEntries(entries, query) : []),
     [entries, query, mode]
   );
+  const suggestions = useMemo(
+    () => (mode === 'search' ? suggestQueries(entries, query) : []),
+    [entries, query, mode]
+  );
 
   const closeAll = useCallback(() => { setOpenId(null); setAiOpen(false); setFormOpen(false); }, []);
+  const clearSearch = useCallback(() => {
+    setQuery('');
+    setSel(0);
+    setOpenId(null);
+    setAiOpen(false);
+    setTimeout(() => inputRef.current?.focus(), 20);
+  }, []);
   const isSearchList = mode === 'search' && viewType === 'list';
 
   // 键盘交互：方向键选择、回车展开 / 触发 AI、esc 清空
@@ -107,6 +118,7 @@ export default function App() {
             query={query}
             onInput={(v) => { setQuery(v); setSel(0); setOpenId(null); }}
             results={results}
+            suggestions={suggestions}
             sel={sel}
             total={entries.length}
             viewType={viewType}
@@ -114,6 +126,13 @@ export default function App() {
             theme={t}
             selectedEntry={selectedListEntry}
             selectedId={selectedListId}
+            onClear={clearSearch}
+            onSuggest={(suggestion) => {
+              setQuery(suggestion.value);
+              setSel(0);
+              setOpenId(suggestion.entryId ?? null);
+              setTimeout(() => inputRef.current?.focus(), 20);
+            }}
             onOpen={(id, index) => { if (typeof index === 'number') setSel(index); setOpenId(id); }}
             onOpenAI={() => setAiOpen(true)}
           />

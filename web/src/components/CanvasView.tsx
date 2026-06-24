@@ -6,12 +6,14 @@ import type {
 } from 'react';
 import type { Entry, Theme } from '../types';
 import { toSearchText } from '../pinyin-search';
+import { highlightText } from '../highlight';
 
 interface Props {
   entries: Entry[];
   theme: Theme;
   onOpen: (id: string) => void;
   hasQuery: boolean;
+  query: string;
 }
 
 type NType = 'cat' | 'entry' | 'section';
@@ -67,6 +69,7 @@ const ROW_GAP = 24;
 const MIN_SCALE = 0.05;
 const RESET_MIN_SCALE = 0.14;
 const MAX_SCALE = 1.5;
+const KEY_GRID_LABELS = '1234567890QWERTYUIOPASDFGHJKLZXCVBNM'.split('');
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -213,9 +216,8 @@ function buildModel(entries: Entry[]): { map: Map<string, GNode>; kbs: string[] 
       parentId: kbId,
       children: [],
       text: [
-        toSearchText(entry.title, entry.py, entry.tags.join(' ')),
-        (entry.summary || '').toLowerCase(),
-        (entry.body || '').toLowerCase(),
+        toSearchText(entry.cat, entry.title, entry.py, entry.tags.join(' ')),
+        toSearchText(entry.summary, entry.body),
       ].join(' '),
       meta: entry.tags,
     });
@@ -235,8 +237,7 @@ function buildModel(entries: Entry[]): { map: Map<string, GNode>; kbs: string[] 
           parentId,
           children: [],
           text: [
-            toSearchText(heading.title),
-            (heading.content || '').toLowerCase(),
+            toSearchText(heading.title, heading.content),
           ].join(' '),
         });
         map.get(parentId)!.children.push(nodeId);
@@ -253,22 +254,23 @@ function collectVisible(
   map: Map<string, GNode>,
   rootId: string,
   query: string,
-  expandAll: boolean,
-  collapsed: Set<string>
+  searchActive: boolean,
+  collapsed: Set<string>,
+  showFullTree: boolean
 ): Set<string> {
   const visible = new Set<string>();
   const root = map.get(rootId);
   if (!root) return visible;
-  const q = query.trim().toLowerCase();
-  const autoExpand = expandAll || Boolean(q);
-  const limit = autoExpand ? Infinity : MAX_VISIBLE_DEPTH;
+  const q = toSearchText(query.trim());
+  const showKeyPathOnly = searchActive && Boolean(q);
+  const limit = showKeyPathOnly || showFullTree ? Infinity : MAX_VISIBLE_DEPTH;
 
   const includeSubtree = (startId: string, startDepth = 0): void => {
     const stack = [{ id: startId, depth: startDepth }];
     while (stack.length) {
       const current = stack.pop()!;
       visible.add(current.id);
-      const shouldExpandChildren = current.depth < limit && (autoExpand || !collapsed.has(current.id));
+      const shouldExpandChildren = current.depth < limit && !collapsed.has(current.id);
       if (shouldExpandChildren) {
         for (const child of map.get(current.id)?.children ?? []) {
           stack.push({ id: child, depth: current.depth + 1 });
@@ -278,11 +280,6 @@ function collectVisible(
   };
 
   if (!q) {
-    includeSubtree(rootId);
-    return visible;
-  }
-
-  if (root.text.includes(q)) {
     includeSubtree(rootId);
     return visible;
   }
@@ -297,7 +294,6 @@ function collectVisible(
 
   for (const id of descendants) {
     if (!map.get(id)?.text.includes(q)) continue;
-    includeSubtree(id);
     let current: string | null = id;
     while (current) {
       visible.add(current);
@@ -390,7 +386,7 @@ function connectorPath(source: PlacedNode, target: PlacedNode): string {
   ].join(' ');
 }
 
-export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Props) {
+export default function CanvasView({ entries, theme: t, onOpen, hasQuery, query }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number } | null>(null);
@@ -402,6 +398,8 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Prop
   const [dragging, setDragging] = useState(false);
   const [viewport, setViewport] = useState<Viewport>({ x: 48, y: 48, scale: 0.9 });
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [showFullTree, setShowFullTree] = useState(false);
+  const [keyGridOpen, setKeyGridOpen] = useState(false);
 
   useEffect(() => {
     if (!kbId || !model.has(kbId)) {
@@ -414,19 +412,61 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Prop
   const currentKb = model.get(kbId) || (kbs[0] ? model.get(kbs[0]) : undefined);
   const graphRoot = currentKb;
   const searchActive = hasQuery || Boolean(scoped.trim());
+  const activeQuery = scoped.trim() || (hasQuery ? query : '');
 
   useEffect(() => {
     setCollapsed(new Set());
+    setShowFullTree(false);
   }, [graphRoot?.id]);
 
   const visible = useMemo(
-    () => graphRoot ? collectVisible(model, graphRoot.id, scoped, hasQuery, collapsed) : new Set<string>(),
-    [model, graphRoot, scoped, hasQuery, collapsed]
+    () => graphRoot ? collectVisible(model, graphRoot.id, activeQuery, searchActive, collapsed, showFullTree) : new Set<string>(),
+    [model, graphRoot, activeQuery, searchActive, collapsed, showFullTree]
   );
   const layout = useMemo(
     () => graphRoot ? buildTreeLayout(model, graphRoot.id, visible) : null,
     [model, graphRoot, visible]
   );
+  const keyPointItems = useMemo(
+    () => {
+      if (!layout) return [];
+      return layout.nodes
+        .filter((placed) => placed.depth > 0 && placed.node.type !== 'cat')
+        .sort((a, b) => {
+          const depthScore = a.depth - b.depth;
+          if (depthScore !== 0 && (a.depth <= 1 || b.depth <= 1)) return depthScore;
+          return a.x - b.x || a.y - b.y;
+        })
+        .slice(0, 72)
+        .map((placed, index) => ({
+          id: placed.node.id,
+          label: placed.node.label,
+          kind: placed.depth === 1 ? '专题' : placed.depth === 2 ? '维度' : '面试点',
+          key: KEY_GRID_LABELS[index % KEY_GRID_LABELS.length],
+        }));
+    },
+    [layout]
+  );
+  const collapsibleNodeIds = useMemo(
+    () => {
+      if (!graphRoot) return [];
+      const ids: string[] = [];
+      const stack = [...graphRoot.children];
+      while (stack.length) {
+        const id = stack.pop()!;
+        const node = model.get(id);
+        if (!node) continue;
+        if (node.children.length) ids.push(id);
+        for (const child of node.children) stack.push(child);
+      }
+      return ids;
+    },
+    [model, graphRoot]
+  );
+
+  useEffect(() => {
+    setKeyGridOpen(false);
+  }, [graphRoot?.id, activeQuery]);
 
   const resetViewport = (): void => {
     const container = containerRef.current;
@@ -474,6 +514,23 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Prop
       x: Math.min(96, container.clientWidth * 0.34 - (target.x + target.width / 2) * current.scale),
       y: container.clientHeight / 2 - (target.y + target.height / 2) * current.scale,
     }));
+  };
+
+  const focusKeyPoint = (id: string): void => {
+    setKeyGridOpen(false);
+    window.setTimeout(() => focusNode(id), 0);
+  };
+
+  const collapseAllNodes = (): void => {
+    setKeyGridOpen(false);
+    setShowFullTree(false);
+    setCollapsed(new Set(collapsibleNodeIds));
+  };
+
+  const expandAllNodes = (): void => {
+    setKeyGridOpen(false);
+    setShowFullTree(true);
+    setCollapsed(new Set());
   };
 
   const toggleCollapsed = (id: string): void => {
@@ -596,6 +653,10 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Prop
       if (event.key === 'Escape') {
         event.stopPropagation();
         event.preventDefault();
+        if (keyGridOpen) {
+          setKeyGridOpen(false);
+          return;
+        }
         setImmersive(false);
         return;
       }
@@ -617,7 +678,7 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Prop
       document.removeEventListener('keydown', down, true);
       document.removeEventListener('keyup', up, true);
     };
-  }, [immersive]);
+  }, [immersive, keyGridOpen]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (event.button !== 0 || (event.target as HTMLElement).closest('[data-mind-card]')) return;
@@ -710,6 +771,32 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Prop
           <button style={{ ...utilityButton, minWidth: 34, justifyContent: 'center', padding: '8px 10px' }} onClick={() => zoomBy(0.82)} title="缩小画布">−</button>
           <button style={utilityButton} onClick={resetViewport} title="适配画布并回到根节点">⌖ {Math.round(viewport.scale * 100)}%</button>
           <button style={{ ...utilityButton, minWidth: 34, justifyContent: 'center', padding: '8px 10px' }} onClick={() => zoomBy(1.18)} title="放大画布">＋</button>
+          <button style={utilityButton} onClick={collapseAllNodes} title="收起当前知识树的全部下级分支">
+            − 收起全部
+          </button>
+          <button
+            style={{
+              ...utilityButton,
+              background: showFullTree && !searchActive ? 'var(--sel)' : utilityButton.background,
+              color: showFullTree && !searchActive ? 'var(--fg)' : utilityButton.color,
+            }}
+            onClick={expandAllNodes}
+            title="展开当前知识树的全部节点"
+          >
+            ＋ 展开全部
+          </button>
+          <button
+            style={{
+              ...utilityButton,
+              background: keyGridOpen ? 'var(--fg)' : utilityButton.background,
+              color: keyGridOpen ? 'var(--bg)' : utilityButton.color,
+              fontWeight: keyGridOpen ? 650 : 400,
+            }}
+            onClick={() => setKeyGridOpen((value) => !value)}
+            title="查看关键知识点并点击定位"
+          >
+            ⌘ 关键点
+          </button>
           <button style={utilityButton} onClick={() => setImmersive((value) => !value)} title={immersive ? '退出沉浸模式 (Esc)' : '沉浸模式'}>
             {immersive ? '⤡ 退出' : '⤢ 沉浸'}
           </button>
@@ -722,6 +809,8 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Prop
           <span>Shift+滚轮平移</span>
           <span>左 ⌘ 搜索</span>
           <span>右 ⌘ 切换知识库</span>
+          <span>收起/展开全部</span>
+          <span>关键点网格定位</span>
           <span>点击专题卡看详情</span>
           <span>Esc 退出</span>
         </div>
@@ -830,7 +919,7 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Prop
                   <button
                     type="button"
                     data-node-toggle
-                    aria-label={searchActive ? `${placed.node.label}：检索中自动展开` : isCollapsed ? `展开 ${placed.node.label}` : `收起 ${placed.node.label}`}
+                    aria-label={searchActive ? `${placed.node.label}：搜索态只展示关键链路` : isCollapsed ? `展开 ${placed.node.label}` : `收起 ${placed.node.label}`}
                     aria-expanded={searchActive ? true : !isCollapsed}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -854,19 +943,19 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Prop
                       cursor: searchActive ? 'default' : 'pointer',
                       opacity: searchActive ? 0.76 : 1,
                     }}
-                    title={searchActive ? '检索中自动展开' : isCollapsed ? '展开子节点' : '收起子节点'}
+                    title={searchActive ? '搜索态只展示关键链路' : isCollapsed ? '展开子节点' : '收起子节点'}
                   >
-                    <span>{searchActive ? '自动' : isCollapsed ? '＋' : '−'}</span>
+                    <span>{searchActive ? '链路' : isCollapsed ? '＋' : '−'}</span>
                     {!searchActive && <span>{isCollapsed ? actualChildCount : visibleChildCount}</span>}
                   </button>
                 )}
               </div>
               <div style={{ fontSize: root ? 28 : leaf ? 14 : 16, lineHeight: root ? 1.08 : 1.25, fontWeight: root ? 760 : 700, letterSpacing: root ? '-.025em' : '-.01em', marginBottom: placed.node.sub ? (root ? 13 : 7) : 0 }}>
-                {placed.node.label}
+                {highlightText(placed.node.label, activeQuery)}
               </div>
               {placed.node.sub && (
                 <div style={{ fontSize: root ? 13.5 : leaf ? 11.5 : 12.5, lineHeight: root ? 1.55 : 1.5, color: root ? t.bg : t.mut, opacity: root ? 0.76 : 1, overflowWrap: 'anywhere' }}>
-                  {placed.node.sub}
+                  {highlightText(placed.node.sub, activeQuery)}
                 </div>
               )}
             </div>
@@ -875,8 +964,88 @@ export default function CanvasView({ entries, theme: t, onOpen, hasQuery }: Prop
       </div>
 
       <div style={{ position: 'absolute', right: 14, bottom: 12, padding: '6px 9px', borderRadius: 8, background: 'color-mix(in srgb, var(--panel) 88%, transparent)', border: '1px solid var(--bd)', color: 'var(--mut)', fontSize: 10.5, pointerEvents: 'none' }}>
-        {layout.nodes.length} 个节点 · {searchActive ? '检索中自动展开' : '点击节点右上角收起/展开'}
+        {layout.nodes.length} 个节点 · {searchActive ? '只显示命中关键链路' : '点击节点右上角收起/展开'}
       </div>
+
+      {keyGridOpen && (
+        <div
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          style={{
+            position: 'absolute',
+            inset: '22px 22px auto 22px',
+            maxHeight: 'calc(100% - 44px)',
+            zIndex: 8,
+            border: '1px solid color-mix(in srgb, var(--bd) 78%, white)',
+            borderRadius: 24,
+            background: 'color-mix(in srgb, var(--panel) 82%, transparent)',
+            boxShadow: '0 28px 80px rgba(0,0,0,.18)',
+            backdropFilter: 'blur(18px)',
+            WebkitBackdropFilter: 'blur(18px)',
+            padding: 22,
+            animation: 'ik-pop .16s ease',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 18 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 22, fontWeight: 760, letterSpacing: '-.02em' }}>
+                <span style={{ width: 9, height: 9, borderRadius: 99, background: 'var(--accent)' }} />
+                关键知识点
+              </div>
+              <div style={{ marginTop: 5, fontSize: 12.5, color: 'var(--mut)' }}>
+                点击格子定位到画布节点 · 当前显示 {keyPointItems.length} 个
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setKeyGridOpen(false)}
+              style={{ ...utilityButton, padding: '8px 11px', background: 'var(--sel)' }}
+            >
+              关闭
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(118px, 1fr))',
+              gap: 12,
+              maxHeight: 'min(54vh, 520px)',
+              overflow: 'auto',
+              paddingRight: 3,
+            }}
+          >
+            {keyPointItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => focusKeyPoint(item.id)}
+                title={`定位到 ${item.label}`}
+                style={{
+                  position: 'relative',
+                  minHeight: 78,
+                  padding: '13px 14px 22px',
+                  border: '1px solid color-mix(in srgb, var(--bd) 86%, white)',
+                  borderRadius: 15,
+                  background: 'color-mix(in srgb, var(--sel) 68%, transparent)',
+                  color: 'var(--fg)',
+                  fontFamily: 'inherit',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.14), 0 10px 24px rgba(0,0,0,.055)',
+                }}
+              >
+                <span style={{ display: 'block', fontSize: 10.5, color: 'var(--mut)', marginBottom: 7 }}>{item.kind}</span>
+                <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', fontSize: 14.5, lineHeight: 1.25, fontWeight: 720 }}>
+                  {highlightText(item.label, activeQuery)}
+                </span>
+                <span style={{ position: 'absolute', right: 9, bottom: 7, fontSize: 10.5, color: 'var(--mut)', fontWeight: 760 }}>{item.key}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 

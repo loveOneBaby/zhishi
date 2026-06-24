@@ -31,9 +31,22 @@ export default function AskModal({ query, onClose }: Props) {
         </div>
         <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>「{query}」</div>
         <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--fg)', background: 'var(--sel)', borderRadius: 10, padding: 16, minHeight: 60 }}>
-          {loading ? <span style={{ color: 'var(--mut)' }}>正在生成…</span> : renderMd(answer)}
+          {loading
+            ? <span style={{ color: 'var(--mut)' }}>正在生成…</span>
+            : answer
+              ? renderMd(answer)
+              : <span style={{ color: 'var(--mut)' }}>内容已清空</span>}
         </div>
-        <button onClick={onClose} style={{ marginTop: 18, padding: '9px 16px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'var(--fg)', color: 'var(--bg)', border: 'none', borderRadius: 9 }}>好的</button>
+        <div style={{ marginTop: 18, display: 'flex', gap: 10 }}>
+          <button
+            onClick={() => setAnswer('')}
+            disabled={loading || !answer}
+            style={{ padding: '9px 16px', fontSize: 13, fontFamily: 'inherit', cursor: loading || !answer ? 'default' : 'pointer', background: 'transparent', color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 9, opacity: loading || !answer ? 0.55 : 1 }}
+          >
+            清空内容
+          </button>
+          <button onClick={onClose} style={{ padding: '9px 16px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'var(--fg)', color: 'var(--bg)', border: 'none', borderRadius: 9 }}>好的</button>
+        </div>
       </div>
     </div>
   );

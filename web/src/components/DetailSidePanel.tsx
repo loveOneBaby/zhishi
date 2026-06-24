@@ -1,11 +1,13 @@
 import type { Entry } from '../types';
 import { parseSections } from '../markdown';
+import { highlightText } from '../highlight';
 
 interface Props {
   entry: Entry | null;
+  query?: string;
 }
 
-export default function DetailSidePanel({ entry }: Props) {
+export default function DetailSidePanel({ entry, query = '' }: Props) {
   if (!entry) {
     return (
       <aside
@@ -30,7 +32,7 @@ export default function DetailSidePanel({ entry }: Props) {
     );
   }
 
-  const ps = parseSections(entry);
+  const ps = parseSections(entry, query);
 
   return (
     <aside
@@ -49,13 +51,13 @@ export default function DetailSidePanel({ entry }: Props) {
     >
       <div style={{ padding: '22px 24px 18px', borderBottom: '1px solid var(--bd)', flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-          <span style={{ fontSize: 11, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '3px 8px' }}>{entry.cat}</span>
+          <span style={{ fontSize: 11, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '3px 8px' }}>{highlightText(entry.cat, query)}</span>
           {entry.tags.slice(0, 4).map((tag) => (
-            <span key={tag} style={{ fontSize: 11, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '3px 8px' }}>#{tag}</span>
+            <span key={tag} style={{ fontSize: 11, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '3px 8px' }}>#{highlightText(tag, query)}</span>
           ))}
         </div>
-        <div style={{ fontSize: 26, lineHeight: 1.12, letterSpacing: '-.025em', fontWeight: 760, marginBottom: 10 }}>{entry.title}</div>
-        <div style={{ fontSize: 13.5, lineHeight: 1.65, color: 'var(--mut)' }}>{entry.summary}</div>
+        <div style={{ fontSize: 26, lineHeight: 1.12, letterSpacing: '-.025em', fontWeight: 760, marginBottom: 10 }}>{highlightText(entry.title, query)}</div>
+        <div style={{ fontSize: 13.5, lineHeight: 1.65, color: 'var(--mut)' }}>{highlightText(entry.summary, query)}</div>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: '22px 24px 28px' }}>
