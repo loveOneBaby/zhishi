@@ -7,7 +7,6 @@ interface Props {
   entry: Entry | null;
   query?: string;
   contextLabel?: string;
-  contextBadge?: string;
   actions?: ReactNode;
 }
 
@@ -67,11 +66,19 @@ export default function DetailSidePanel({ entry, query = '', contextLabel, actio
       }}
     >
       {(contextLabel || actions) && <ActionBar label={contextLabel} actions={actions} />}
-      <div style={{ padding: '14px 28px 14px', borderBottom: '1px solid var(--bd)', flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 'clamp(19px, 1.6vw, 25px)', lineHeight: 1.2, letterSpacing: '0', fontWeight: 780 }}>{highlightText(entry.title, query)}</div>
-        {entry.tags.slice(0, 4).map((tag) => (
-          <span key={tag} style={{ fontSize: 11, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap' }}>#{highlightText(tag, query)}</span>
-        ))}
+      <div className="ik-detail-head">
+        <div className="ik-detail-title">{highlightText(entry.title, query)}</div>
+        {entry.tags.length > 0 && (
+          <div className="ik-detail-meta">
+            <span>标签</span>
+            {entry.tags.slice(0, 6).map((tag, index) => (
+              <span key={tag} className="ik-detail-meta-item">
+                {index > 0 && <i>/</i>}
+                {highlightText(tag, query)}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: '14px 18px 34px' }}>

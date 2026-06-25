@@ -40,9 +40,31 @@ import { knowledgeTreeToImportPayload } from './knowledge-tree-import.js';
 import { isKbPackage2, kbPackage2ToImportPayload } from './kb-package-2.js';
 import { searchEntries } from './search.js';
 import { askAI } from './ask.js';
+import { AiConfigError } from './ai-client.js';
+import { generateEntryInput, generateEntryInputStream, rewriteEntryInputStream, type GenerateEntryEvent } from './ai-generate.js';
 
 function stableImportId(prefix: string, seed: string): string {
   return `${prefix}_${createHash('sha1').update(seed).digest('hex').slice(0, 18)}`;
+}
+
+function folderPathLabel(folderId: string | null): string {
+  if (!folderId) return '根层级';
+  const folders = listFolders();
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let current = byId.get(folderId);
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    names.unshift(current.name);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  return names.join(' / ') || '根层级';
+}
+
+function sendSse(res: express.Response, event: string, data: unknown): void {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 export function createApp() {
@@ -152,6 +174,116 @@ export function createApp() {
     const q = String(req.query.q ?? '');
     const results = searchEntries(listEntries(), q);
     res.json({ query: q, count: results.length, results });
+  });
+
+  // AI 生成知识点：按当前知识库/文件夹直接创建一条结构化知识点
+  api.post('/entries/generate', async (req, res) => {
+    const topic = String(req.body?.topic ?? '').trim();
+    const kbId = String(req.body?.kbId ?? '').trim();
+    const requestedFolderId = req.body?.folderId == null ? '' : String(req.body.folderId).trim();
+    const folderId = requestedFolderId || null;
+    if (!topic) return res.status(400).json({ error: 'topic 不能为空' });
+    if (!kbId) return res.status(400).json({ error: 'kbId 不能为空' });
+    const kb = getKb(kbId);
+    if (!kb) return res.status(404).json({ error: '知识库不存在' });
+    const folder = folderId ? getFolder(folderId) : null;
+    if (folderId && !folder) return res.status(404).json({ error: '文件夹不存在' });
+    if (folder && folder.kbId !== kbId) return res.status(400).json({ error: '文件夹不属于当前知识库' });
+
+    try {
+      const context = searchEntries(listEntries().filter((entry) => entry.kbId === kbId), topic);
+      const input = await generateEntryInput({
+        topic,
+        kbName: kb.name,
+        folderPath: folderPathLabel(folderId),
+        context,
+      });
+      const entry = createEntry({ ...input, kbId, folderId });
+      res.status(201).json({ configured: true, entry });
+    } catch (err) {
+      if (err instanceof AiConfigError) {
+        return res.json({ configured: false, error: err.message });
+      }
+      res.status(502).json({ configured: true, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // AI 生成知识点：SSE 流式返回真实阶段、上下文、模型输出片段和保存结果。
+  api.post('/entries/generate/stream', async (req, res) => {
+    const topic = String(req.body?.topic ?? '').trim();
+    const kbId = String(req.body?.kbId ?? '').trim();
+    const requestedFolderId = req.body?.folderId == null ? '' : String(req.body.folderId).trim();
+    const folderId = requestedFolderId || null;
+    if (!topic) return res.status(400).json({ error: 'topic 不能为空' });
+    if (!kbId) return res.status(400).json({ error: 'kbId 不能为空' });
+    const kb = getKb(kbId);
+    if (!kb) return res.status(404).json({ error: '知识库不存在' });
+    const folder = folderId ? getFolder(folderId) : null;
+    if (folderId && !folder) return res.status(404).json({ error: '文件夹不存在' });
+    if (folder && folder.kbId !== kbId) return res.status(400).json({ error: '文件夹不属于当前知识库' });
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    sendSse(res, 'stage', { message: '准备生成请求' });
+
+    try {
+      const context = searchEntries(listEntries().filter((entry) => entry.kbId === kbId), topic);
+      const input = await generateEntryInputStream({
+        topic,
+        kbName: kb.name,
+        folderPath: folderPathLabel(folderId),
+        context,
+      }, (event: GenerateEntryEvent) => sendSse(res, event.type, event));
+      sendSse(res, 'stage', { message: '写入当前知识库' });
+      const entry = createEntry({ ...input, kbId, folderId });
+      sendSse(res, 'saved', { entry });
+      sendSse(res, 'done', { entry });
+      res.end();
+    } catch (err) {
+      sendSse(res, 'error', {
+        configured: !(err instanceof AiConfigError),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.end();
+    }
+  });
+
+  // AI 改写知识点：读取当前 doc，流式返回改写说明与新结构，并原地更新当前 entry。
+  api.post('/entries/:id/rewrite/stream', async (req, res) => {
+    const current = getEntry(req.params.id);
+    if (!current) return res.status(404).json({ error: '知识点不存在' });
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    sendSse(res, 'stage', { message: '准备改写请求' });
+
+    try {
+      const input = await rewriteEntryInputStream({ entry: current }, (event: GenerateEntryEvent) => sendSse(res, event.type, event));
+      sendSse(res, 'stage', { message: '写回当前知识点' });
+      const entry = updateEntry(current.id, {
+        ...input,
+        kbId: current.kbId,
+        folderId: current.folderId,
+      });
+      if (!entry) throw new Error('知识点不存在');
+      sendSse(res, 'saved', { entry });
+      sendSse(res, 'done', { entry });
+      res.end();
+    } catch (err) {
+      sendSse(res, 'error', {
+        configured: !(err instanceof AiConfigError),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.end();
+    }
   });
 
   // 单条

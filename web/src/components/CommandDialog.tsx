@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { AlertTriangle, Check, X } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 type DialogTone = 'default' | 'danger';
@@ -17,6 +17,12 @@ interface Props {
   cancelText?: string;
   tone?: DialogTone;
   icon?: ReactNode;
+  progressSteps?: string[];
+  liveLogs?: string[];
+  livePlan?: string;
+  livePlanLabel?: string;
+  liveOutput?: string;
+  liveOutputLabel?: string;
   onOpenChange: (open: boolean) => void;
   onConfirm: (value: string) => Promise<void> | void;
 }
@@ -33,18 +39,35 @@ export default function CommandDialog({
   cancelText = '取消',
   tone = 'default',
   icon,
+  progressSteps,
+  liveLogs,
+  livePlan,
+  livePlanLabel = '公开生成思路',
+  liveOutput,
+  liveOutputLabel = '模型输出',
   onOpenChange,
   onConfirm,
 }: Props): ReactNode {
   const inputId = useId();
+  const outputRef = useRef<HTMLPreElement | null>(null);
   const [draft, setDraft] = useState(initialValue);
   const [submitting, setSubmitting] = useState(false);
   const hasInput = Boolean(inputLabel);
   const disabled = submitting || (hasInput && !draft.trim());
+  const activeProgressSteps = progressSteps?.filter(Boolean) ?? [];
+  const activeLiveLogs = liveLogs?.filter(Boolean) ?? [];
+  const showLive = submitting && (activeLiveLogs.length > 0 || Boolean(livePlan) || Boolean(liveOutput));
+  const showProgress = submitting && !showLive && activeProgressSteps.length > 0;
 
   useEffect(() => {
     if (open) setDraft(initialValue);
   }, [initialValue, open]);
+
+  useEffect(() => {
+    const node = outputRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [liveOutput]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -91,12 +114,49 @@ export default function CommandDialog({
                   value={draft}
                   placeholder={placeholder}
                   autoFocus
+                  disabled={submitting}
                   onChange={(event) => setDraft(event.currentTarget.value)}
                 />
               </label>
             )}
 
             {helper && <div className="ik-command-helper">{helper}</div>}
+
+            {showProgress && (
+              <div className="ik-command-progress" aria-live="polite">
+                <div className="ik-command-progress-head">
+                  <span>{activeProgressSteps[0]}</span>
+                </div>
+                <div className="ik-command-progress-list">
+                  {activeProgressSteps.map((step, index) => (
+                    <span key={step} className={index === 0 ? 'is-active' : ''}>{step}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {showLive && (
+              <div className="ik-command-live" aria-live="polite">
+                <div className="ik-command-live-head">实时生成</div>
+                {activeLiveLogs.length > 0 && (
+                  <div className="ik-command-live-log">
+                    {activeLiveLogs.slice(-7).map((line, index) => (
+                      <span key={`${line}-${index}`}>{line}</span>
+                    ))}
+                  </div>
+                )}
+                {livePlan && (
+                  <div className="ik-command-live-output ik-command-live-plan">
+                    <div>{livePlanLabel}</div>
+                    <pre>{livePlan}</pre>
+                  </div>
+                )}
+                <div className="ik-command-live-output">
+                  <div>{liveOutputLabel}</div>
+                  <pre ref={outputRef}>{liveOutput || '等待 Qwen 输出结构化 JSON...'}</pre>
+                </div>
+              </div>
+            )}
 
             <div className="ik-command-actions">
               <Dialog.Close className="ik-command-btn ik-command-btn-ghost" disabled={submitting}>

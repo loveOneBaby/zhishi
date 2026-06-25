@@ -9,6 +9,7 @@ import { toSearchText } from './pinyin-search.js';
 import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc } from './assets.js';
 import { extractText, blocksToMarkdown as blockNoteToMarkdown } from './blocks.js';
 import { normalizeDocBlocks, splitDocToIndex, markdownToDocBlocks } from './doc.js';
+import { coerceGeneratedDraft, draftToMarkdown, extractJsonObject } from './ai-generate.js';
 import type { Entry } from './types.js';
 
 const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -165,6 +166,18 @@ test('doc.markdownToDocBlocks: markdown → 块(种子/旧数据)', () => {
   assert.ok(types.includes('codeBlock'));
   const img = blocks.find((b) => b.type === 'image')!;
   assert.equal((img.props as any).url, 'https://cdn/a.png');
+});
+
+test('ai-generate: 抽取模型 JSON 并转成知识点 markdown', () => {
+  const json = extractJsonObject('```json\n{"title":"RAG","summary":"检索增强生成","tags":["RAG"],"sections":[{"title":"定义","content":"先检索再生成","bullets":["降低幻觉"]}],"interviewPoints":["召回","重排"],"commonQuestions":["为什么需要 RAG？"],"pitfalls":["上下文不是越多越好"],"answerTemplate":"RAG 是..."}\n```');
+  assert.ok(json);
+  const draft = coerceGeneratedDraft(JSON.parse(json!), 'RAG');
+  assert.equal(draft.title, 'RAG');
+  assert.deepEqual(draft.interviewPoints, ['召回', '重排']);
+  const md = draftToMarkdown(draft);
+  assert.ok(md.includes('## 面试考点'));
+  assert.ok(md.includes('- 召回'));
+  assert.ok(md.includes('## 高频追问'));
 });
 
 test('score: 标题前缀分高于全文包含', () => {

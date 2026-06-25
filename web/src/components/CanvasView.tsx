@@ -6,6 +6,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { Entry, Theme, Folder, KnowledgeBase } from '../types';
+import { Minus, Plus, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
 import { highlightText } from '../highlight';
 import DetailSidePanel from './DetailSidePanel';
 import {
@@ -82,27 +83,6 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
     () => graphRoot ? buildTreeLayout(model, graphRoot.id, visible) : null,
     [model, graphRoot, visible]
   );
-  // 关键点 = 当前知识库下所有知识点的标签（按出现次数排序，点击可筛选画布）
-  const keyPointItems = useMemo(
-    () => {
-      if (!graphRoot) return [];
-      const kbRealId = graphRoot.id.replace(/^kb::/, '');
-      const counts = new Map<string, number>();
-      for (const entry of entries) {
-        if (entry.kbId !== kbRealId) continue;
-        for (const raw of entry.tags) {
-          const tag = raw.trim();
-          if (!tag) continue;
-          counts.set(tag, (counts.get(tag) ?? 0) + 1);
-        }
-      }
-      return Array.from(counts.entries())
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-Hans-CN'))
-        .slice(0, 240)
-        .map(([tag, count]) => ({ tag, count }));
-    },
-    [entries, graphRoot]
-  );
   const collapsibleNodeIds = useMemo(
     () => {
       if (!graphRoot) return [];
@@ -167,13 +147,6 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
   };
 
   const pendingFocusRef = useRef<string | null>(null);
-  // 点击关键点(标签):用该标签筛选当前画布
-  const searchByTag = (tag: string): void => {
-    setKeyGridOpen(false);
-    setScoped(tag);
-    setShowFullTree(true);
-    setCollapsed(new Set());
-  };
 
   // 布局更新后，把待定位的节点居中（保持当前缩放）
   useEffect(() => {
@@ -442,56 +415,49 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
     return <div style={{ padding: 40, textAlign: 'center', color: 'var(--mut)', fontSize: 13 }}>暂无可展示的知识树</div>;
   }
 
-  const toolbar = (
-    <div style={{ marginBottom: 10, flexShrink: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13.5, fontWeight: 740 }}>{graphRoot.label}</span>
-        <span style={{ fontSize: 12, color: 'var(--mut)', marginRight: 4 }}>{layout.nodes.length} 个节点</span>
-        <button style={{ ...utilityButton, minWidth: 34, justifyContent: 'center', padding: '8px 10px' }} onClick={() => zoomBy(0.82)} title="缩小画布">−</button>
-        <button style={utilityButton} onClick={resetViewport} title="适配画布并回到根节点">⌖ {Math.round(viewport.scale * 100)}%</button>
-        <button style={{ ...utilityButton, minWidth: 34, justifyContent: 'center', padding: '8px 10px' }} onClick={() => zoomBy(1.18)} title="放大画布">＋</button>
-        <button style={utilityButton} onClick={collapseAllNodes} title="收起当前知识树的全部下级分支">− 收起全部</button>
-        <button
-          style={{
-            ...utilityButton,
-            background: showFullTree && !searchActive ? 'var(--sel)' : utilityButton.background,
-            color: showFullTree && !searchActive ? 'var(--fg)' : utilityButton.color,
-          }}
-          onClick={expandAllNodes}
-          title="展开当前知识树的全部节点"
-        >
-          ＋ 展开全部
-        </button>
-        <button
-          style={{
-            ...utilityButton,
-            background: keyGridOpen ? 'var(--fg)' : utilityButton.background,
-            color: keyGridOpen ? 'var(--bg)' : utilityButton.color,
-            fontWeight: keyGridOpen ? 650 : 400,
-          }}
-          onClick={() => setKeyGridOpen((value) => !value)}
-          title="查看关键点(标签)"
-        >
-          ⌘ 关键点
-        </button>
-        <span style={{ fontSize: 11.5, color: 'var(--mut)', marginLeft: 'auto', whiteSpace: 'nowrap' }}>按 F 进入沉浸 · 双指滚动平移</span>
-      </div>
-      {immersive && (
-        <div style={{ marginTop: 8, display: 'flex', gap: 16, fontSize: 12, color: 'var(--mut)' }}>
-          <span>拖拽 / 双指滚动平移</span>
-          <span>捏合 / ⌘+滚轮 / −＋ 缩放</span>
-          <span>右 ⌘ 切换知识库</span>
-          <span>关键点筛选</span>
-          <span>知识点根节点看详情</span>
-          <span>F 切换沉浸 · Esc 退出</span>
-        </div>
-      )}
+  const iconBtn: CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+    height: 30, minWidth: 30, padding: '0 8px', borderRadius: 8,
+    border: '1px solid var(--bd)', background: 'var(--panel)', color: 'var(--mut)',
+    cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', whiteSpace: 'nowrap',
+  };
+  const ctrlDivider = <span style={{ width: 1, height: 18, background: 'var(--bd)', margin: '0 2px' }} />;
+  // 悬浮在画布左上角的图标控制条
+  const controls = (
+    <div
+      data-canvas-overlay
+      onPointerDown={(e) => e.stopPropagation()}
+      style={{ position: 'absolute', top: 12, left: 12, zIndex: 8, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 12, border: '1px solid var(--bd)', background: 'color-mix(in srgb, var(--panel) 86%, transparent)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', boxShadow: '0 10px 30px rgba(0,0,0,.08)' }}
+    >
+      <span style={{ fontSize: 12.5, fontWeight: 740, paddingLeft: 2 }}>{graphRoot.label}</span>
+      <span style={{ fontSize: 11, color: 'var(--mut)' }}>{layout.nodes.length}</span>
+      {ctrlDivider}
+      <button style={iconBtn} onClick={() => zoomBy(0.82)} title="缩小"><Minus size={15} strokeWidth={2.1} /></button>
+      <button style={iconBtn} onClick={resetViewport} title="适配并回到根节点">{Math.round(viewport.scale * 100)}%</button>
+      <button style={iconBtn} onClick={() => zoomBy(1.18)} title="放大"><Plus size={15} strokeWidth={2.1} /></button>
+      {ctrlDivider}
+      <button style={iconBtn} onClick={collapseAllNodes} title="收起全部"><ChevronsDownUp size={15} strokeWidth={2.1} /></button>
+      <button style={{ ...iconBtn, ...(showFullTree && !searchActive ? { background: 'var(--sel)', color: 'var(--fg)' } : {}) }} onClick={expandAllNodes} title="展开全部(到知识点为止)"><ChevronsUpDown size={15} strokeWidth={2.1} /></button>
     </div>
   );
+
+  // 点击知识点 → 悬浮在画布右侧的大预览(原生 BlockNote,链接可点)
+  const previewNode = previewId ? model.get(previewId) ?? null : null;
+  const previewEntry = previewNode?.type === 'entry' && previewNode.entryId
+    ? entries.find((e) => e.id === previewNode.entryId) ?? null
+    : null;
+  let previewPath = '';
+  if (previewNode) {
+    const labels: string[] = [];
+    let p = previewNode.parentId;
+    while (p) { const n = model.get(p); if (!n) break; labels.unshift(n.label); p = n.parentId; }
+    previewPath = labels.join(' / ');
+  }
 
   const canvas = (
     <div
       ref={containerRef}
+      className="ik-surface"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -513,6 +479,23 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
         userSelect: 'none',
       }}
     >
+      {controls}
+      {previewEntry && (
+        <div
+          data-canvas-overlay
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{ position: 'absolute', top: 12, right: 12, bottom: 12, width: 'min(560px, 46%)', zIndex: 9, boxShadow: '0 24px 60px rgba(0,0,0,.22)', borderRadius: 12, animation: 'ik-pop .16s ease' }}
+        >
+          <DetailSidePanel
+            entry={previewEntry}
+            query={activeQuery}
+            contextLabel={previewPath || undefined}
+            actions={(
+              <button type="button" onClick={() => setPreviewId(null)} style={{ ...utilityButton, padding: '6px 11px' }}>关闭</button>
+            )}
+          />
+        </div>
+      )}
       <div
         style={{
           position: 'absolute',
@@ -567,8 +550,12 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
                 top: placed.y,
                 width: placed.width,
                 height: placed.height,
-                padding: root ? '22px 24px' : leaf ? '11px 14px' : '13px 16px',
-                border: isPreviewing ? `2px solid ${t.accent}` : root ? `1px solid ${t.fg}` : isEntry ? `1px solid color-mix(in srgb, ${t.accent} 55%, ${t.bd})` : `1px solid ${t.bd}`,
+                boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                padding: root ? '20px 24px' : leaf ? '10px 14px' : '12px 16px',
+                border: `2px solid ${isPreviewing ? t.accent : 'transparent'}`,
                 borderRadius: root ? 20 : leaf ? 12 : 14,
                 background: root ? t.fg : isEntry ? `color-mix(in srgb, ${t.accent} 9%, ${t.panel})` : leaf ? t.sel : t.panel,
                 color: root ? t.bg : t.fg,
@@ -585,11 +572,8 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
                   {placed.node.meta?.join(' · ') || currentKb.label}
                 </div>
               )}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                {isEntry && <span style={{ width: 7, height: 7, borderRadius: '50%', background: t.accent, flexShrink: 0 }} />}
-                <div style={{ fontSize: root ? 26 : leaf ? 13 : 14.5, lineHeight: root ? 1.1 : 1.28, fontWeight: root ? 760 : 700, letterSpacing: root ? '-.025em' : '-.01em', marginBottom: root && placed.node.sub ? 10 : 0 }}>
-                  {highlightText(placed.node.label, activeQuery)}
-                </div>
+              <div style={{ fontSize: root ? 26 : leaf ? 13 : 14.5, lineHeight: root ? 1.1 : 1.32, fontWeight: root ? 760 : 700, letterSpacing: root ? '-.025em' : '-.01em', marginBottom: root && placed.node.sub ? 10 : 0 }}>
+                {highlightText(placed.node.label, activeQuery)}
               </div>
               {root && placed.node.sub && (
                 <div style={{ fontSize: 12.5, lineHeight: 1.55, color: t.bg, opacity: 0.76, overflowWrap: 'anywhere' }}>
@@ -601,91 +585,6 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
         })}
       </div>
 
-      {keyGridOpen && (
-        <div
-          data-canvas-overlay
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-          style={{
-            position: 'absolute',
-            inset: '22px 22px auto 22px',
-            maxHeight: 'calc(100% - 44px)',
-            zIndex: 8,
-            border: '1px solid color-mix(in srgb, var(--bd) 78%, white)',
-            borderRadius: 24,
-            background: 'color-mix(in srgb, var(--panel) 82%, transparent)',
-            boxShadow: '0 28px 80px rgba(0,0,0,.18)',
-            backdropFilter: 'blur(18px)',
-            WebkitBackdropFilter: 'blur(18px)',
-            padding: 22,
-            animation: 'ik-pop .16s ease',
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 18 }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 22, fontWeight: 760, letterSpacing: '-.02em' }}>
-                <span style={{ width: 9, height: 9, borderRadius: 99, background: 'var(--accent)' }} />
-                关键点（标签）
-              </div>
-              <div style={{ marginTop: 5, fontSize: 12.5, color: 'var(--mut)' }}>
-                当前知识库共 {keyPointItems.length} 个标签 · 点击标签筛选画布
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setKeyGridOpen(false)}
-              style={{ ...utilityButton, padding: '8px 11px', background: 'var(--sel)' }}
-            >
-              关闭
-            </button>
-          </div>
-
-          {keyPointItems.length === 0 ? (
-            <div style={{ padding: '28px 8px', textAlign: 'center', color: 'var(--mut)', fontSize: 13 }}>
-              当前知识库的知识点还没有标签。在编辑知识点时添加标签即可在这里聚合。
-            </div>
-          ) : (
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 10,
-                maxHeight: 'min(54vh, 520px)',
-                overflow: 'auto',
-                paddingRight: 3,
-              }}
-            >
-              {keyPointItems.map((item) => (
-                <button
-                  key={item.tag}
-                  type="button"
-                  onClick={() => searchByTag(item.tag)}
-                  title={`用「${item.tag}」筛选画布`}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 7,
-                    padding: '9px 14px',
-                    border: '1px solid color-mix(in srgb, var(--bd) 86%, white)',
-                    borderRadius: 999,
-                    background: 'color-mix(in srgb, var(--sel) 68%, transparent)',
-                    color: 'var(--fg)',
-                    fontFamily: 'inherit',
-                    fontSize: 13.5,
-                    fontWeight: 640,
-                    cursor: 'pointer',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,.14), 0 8px 18px rgba(0,0,0,.05)',
-                  }}
-                >
-                  {highlightText(item.tag, activeQuery)}
-                  <span style={{ fontSize: 11, color: 'var(--mut)', fontWeight: 600 }}>{item.count}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 
@@ -693,37 +592,5 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
     ? { position: 'fixed', inset: 0, zIndex: 45, background: 'var(--bg)', display: 'flex', flexDirection: 'column', padding: '16px 20px' }
     : { height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' };
 
-  // 点击知识点 → 右侧大预览(脱离画布,原生 BlockNote 渲染,链接可点)
-  const previewNode = previewId ? model.get(previewId) ?? null : null;
-  const previewEntry = previewNode?.type === 'entry' && previewNode.entryId
-    ? entries.find((e) => e.id === previewNode.entryId) ?? null
-    : null;
-  let previewPath = '';
-  if (previewNode) {
-    const labels: string[] = [];
-    let p = previewNode.parentId;
-    while (p) { const n = model.get(p); if (!n) break; labels.unshift(n.label); p = n.parentId; }
-    previewPath = labels.join(' / ');
-  }
-
-  return (
-    <div style={wrapStyle}>
-      {toolbar}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 14 }}>
-        {canvas}
-        {previewEntry && (
-          <div style={{ width: 'min(540px, 42%)', flexShrink: 0, minWidth: 0 }}>
-            <DetailSidePanel
-              entry={previewEntry}
-              query={activeQuery}
-              contextLabel={previewPath || undefined}
-              actions={(
-                <button type="button" onClick={() => setPreviewId(null)} style={{ ...utilityButton, padding: '6px 11px' }}>关闭</button>
-              )}
-            />
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <div style={wrapStyle}>{canvas}</div>;
 }

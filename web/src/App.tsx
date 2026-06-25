@@ -20,7 +20,6 @@ import {
   reorderFolders,
   type EntryInput as ApiEntryInput,
 } from './api';
-import { seg2 } from './ui';
 import TopBar, { type AppMode } from './components/TopBar';
 import SearchBox from './components/SearchBox';
 import SearchMode from './components/SearchMode';
@@ -53,13 +52,14 @@ export default function App() {
   const [viewType, setViewType] = useState<'list' | 'canvas'>(initialRoute.viewType);
   const [query, setQuery] = useState('');
   const [searchKb, setSearchKb] = useState<string | null>(null);   // 检索作用域:null=全部知识库
+  const [kpOpen, setKpOpen] = useState(false);   // 关键点(标签)面板是否展开
   const [sel, setSel] = useState(0);
   const [sugSel, setSugSel] = useState(-1);   // 联想下拉的键盘选中项（-1 = 无）
   const [theme, setThemeState] = useState<ThemeKey>('mono');
 
   // 自由模式导航：freeKb 当前进入的知识库；freeFolder 当前浏览的文件夹（null = 知识库根）
-  const [freeKb, setFreeKb] = useState<string | null>(null);
-  const [freeFolder, setFreeFolder] = useState<string | null>(null);
+  const [freeKb, setFreeKb] = useState<string | null>(() => localStorage.getItem('ik_free_kb') || null);
+  const [freeFolder, setFreeFolder] = useState<string | null>(() => localStorage.getItem('ik_free_folder') || null);
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
@@ -97,6 +97,28 @@ export default function App() {
       .catch(() => { setEntries([]); setKbs([]); setFolders([]); })
       .finally(() => { setLoaded(true); setTimeout(() => inputRef.current?.focus(), 60); });
   }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (freeKb && !kbs.some((kb) => kb.id === freeKb)) {
+      setFreeKb(null);
+      setFreeFolder(null);
+      return;
+    }
+    if (freeFolder && !folders.some((folder) => folder.id === freeFolder && folder.kbId === freeKb)) {
+      setFreeFolder(null);
+    }
+  }, [folders, freeFolder, freeKb, kbs, loaded]);
+
+  useEffect(() => {
+    if (freeKb) localStorage.setItem('ik_free_kb', freeKb);
+    else localStorage.removeItem('ik_free_kb');
+  }, [freeKb]);
+
+  useEffect(() => {
+    if (freeFolder) localStorage.setItem('ik_free_folder', freeFolder);
+    else localStorage.removeItem('ik_free_folder');
+  }, [freeFolder]);
 
   const setTheme = (k: ThemeKey) => {
     setThemeState(k);
@@ -172,6 +194,13 @@ export default function App() {
         summonSearch();
         return;
       }
+      // ⌘/ 呼出关键点(标签)面板（检索模式）
+      if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+        e.preventDefault();
+        if (mode === 'search') setKpOpen((v) => !v);
+        else { setMode('search'); setKpOpen(true); }
+        return;
+      }
       const modalOpen = Boolean(openId && !isSearchList);
       if (modalOpen || aiOpen || formOpen) { if (e.key === 'Escape') closeAll(); return; }
       if (mode !== 'search') return;
@@ -226,6 +255,9 @@ export default function App() {
     setEntries(nextEntries);
     setKbs(nextKbs);
     setFolders(nextFolders);
+  }, []);
+  const handleGeneratedEntry = useCallback((entry: Entry) => {
+    setEntries((prev) => [...prev.filter((item) => item.id !== entry.id), entry]);
   }, []);
 
   // 知识库回调
@@ -308,26 +340,24 @@ export default function App() {
       searchKb={searchKb}
       onScopeKb={(id) => { setSearchKb(id); setSel(0); setOpenId(null); setSugSel(-1); }}
       inputRef={inputRef}
+      kpEntries={scopedEntries}
+      kpOpen={kpOpen}
+      setKpOpen={setKpOpen}
+      onPickTag={(tag) => { setQuery(tag); setSel(0); setOpenId(null); setSugSel(-1); setKpOpen(false); }}
+      viewType={viewType}
+      onViewType={(v) => { setViewType(v); setOpenId(null); }}
     />
   ) : undefined;
 
-  // 检索提示 + 列表/画布切换:移到顶栏搜索框后面
-  const searchTools = mode === 'search' ? (
-    <>
-      
-      <div style={{ display: 'flex', gap: 2, background: 'var(--sel)', padding: 3, borderRadius: 8 }}>
-        <button style={seg2(viewType === 'list')} onClick={() => { setViewType('list'); setOpenId(null); }}>列表</button>
-        <button style={seg2(viewType === 'canvas')} onClick={() => { setViewType('canvas'); setOpenId(null); }}>画布</button>
-      </div>
-    </>
-  ) : undefined;
+  // 列表/画布切换已融合进搜索框,顶栏不再单列工具区
+  const searchTools = undefined;
 
   return (
     <div className={`ik-theme-${theme}`} style={{ ...themeVars(t), height: '100vh', overflow: 'hidden', background: 'var(--app-bg, var(--bg))', color: 'var(--fg)', fontFamily: 'var(--font)', WebkitFontSmoothing: 'antialiased' }}>
-      <div style={{ width: '100%', height: '100%', maxWidth: 'none', margin: 0, padding: '0 clamp(16px, 2.4vw, 44px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ width: '100%', height: '100%', maxWidth: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <TopBar mode={mode} setMode={handleTopModeChange} theme={theme} setTheme={setTheme} searchSlot={searchField} searchTools={searchTools} />
 
-        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '0 clamp(16px, 2.4vw, 44px)' }}>
           {mode === 'search' && (
             <SearchMode
               query={query}
@@ -377,6 +407,7 @@ export default function App() {
                 onDelete={handleDelete}
                 onReorderEntries={handleReorder}
                 onImported={handleImported}
+                onGeneratedEntry={handleGeneratedEntry}
                 onCreateKb={handleCreateKb}
                 onCreateFolder={handleCreateFolder}
                 onRenameKb={handleRenameKb}

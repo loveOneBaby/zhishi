@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowRight, BookOpen, Download, FileText, FolderPlus, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
+import { ArrowRight, BookOpen, Download, FileText, FolderPlus, Pencil, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import DetailSidePanel from './DetailSidePanel';
@@ -8,9 +8,8 @@ import EntryEditor from './EntryEditor';
 import ImportPreviewModal from './ImportPreviewModal';
 import KnowledgeTree from './KnowledgeTree';
 import CommandDialog from './CommandDialog';
-import Button from './Button';
 import type { SelectOption } from './SelectField';
-import { exportAll, importAll, previewImport, type ImportPayload, type ImportPreview } from '../api';
+import { exportAll, generateEntryWithAIStream, importAll, previewImport, rewriteEntryWithAIStream, type ImportPayload, type ImportPreview } from '../api';
 import { toast } from '../toast';
 
 interface Props {
@@ -27,6 +26,7 @@ interface Props {
   onDelete: (id: string) => Promise<void>;
   onReorderEntries: (ids: string[]) => Promise<void>;
   onImported: (entries: Entry[], kbs: KnowledgeBase[], folders: Folder[]) => void;
+  onGeneratedEntry: (entry: Entry) => void;
   onCreateKb: (name: string) => Promise<KnowledgeBase>;
   onCreateFolder: (input: { kbId: string; parentId?: string | null; name: string }) => Promise<Folder>;
   onRenameKb: (id: string, name: string) => Promise<void>;
@@ -93,6 +93,8 @@ function RowActions({ onRename, onDelete }: { onRename: () => void; onDelete: ()
 type CommandState =
   | { kind: 'create-kb' }
   | { kind: 'create-folder'; kbId: string; parentId: string | null }
+  | { kind: 'generate-entry'; kbId: string; folderId: string | null }
+  | { kind: 'rewrite-entry'; entry: Entry }
   | { kind: 'rename-kb'; kb: KnowledgeBase }
   | { kind: 'rename-folder'; folder: Folder }
   | { kind: 'delete-kb'; kb: KnowledgeBase }
@@ -109,18 +111,40 @@ interface RestoreSnapshot {
 
 export default function FreeMode(props: Props): ReactNode {
   const { entries, kbs, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
-    onCreate, onUpdate, onDelete, onImported,
+    onCreate, onUpdate, onDelete, onImported, onGeneratedEntry,
     onCreateKb, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries } = props;
 
-  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(() => localStorage.getItem('ik_free_entry') || null);
   const [panelMode, setPanelMode] = useState<'detail' | 'create' | 'edit'>('detail');
   const [importPreview, setImportPreview] = useState<{ payload: ImportPayload; preview: ImportPreview } | null>(null);
   const [importing, setImporting] = useState(false);
   const [previewingImport, setPreviewingImport] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
   const [command, setCommand] = useState<CommandState | null>(null);
+  const [aiLiveLogs, setAiLiveLogs] = useState<string[]>([]);
+  const [aiLivePlan, setAiLivePlan] = useState('');
+  const [aiLiveOutput, setAiLiveOutput] = useState('');
   const dirtyRef = useRef(false);
   const pendingGuardRef = useRef<(() => void) | null>(null);
+  const aiRawOutputRef = useRef('');
+
+  function updateAiVisibleOutput(nextRaw: string): void {
+    aiRawOutputRef.current = nextRaw.slice(-18000);
+    const marker = aiRawOutputRef.current.indexOf('---JSON---');
+    if (marker >= 0) {
+      setAiLivePlan(aiRawOutputRef.current.slice(0, marker).trim());
+      setAiLiveOutput(aiRawOutputRef.current.slice(marker + '---JSON---'.length).trimStart());
+      return;
+    }
+    const jsonStart = aiRawOutputRef.current.indexOf('{');
+    if (jsonStart > 0) {
+      setAiLivePlan(aiRawOutputRef.current.slice(0, jsonStart).trim());
+      setAiLiveOutput(aiRawOutputRef.current.slice(jsonStart).trimStart());
+      return;
+    }
+    setAiLivePlan(aiRawOutputRef.current.trimStart());
+    setAiLiveOutput('');
+  }
 
   const entriesOfKb = useMemo(() => (kbId: string) => orderEntries(entries.filter((e) => e.kbId === kbId)), [entries]);
   const currentKb = kbs.find((k) => k.id === freeKb) ?? null;
@@ -155,8 +179,14 @@ export default function FreeMode(props: Props): ReactNode {
       return;
     }
     if (selectedEntryId && kbEntries.some((entry) => entry.id === selectedEntryId)) return;
+    if (selectedEntryId && kbEntries.length === 0) return;
     setSelectedEntryId(kbEntries[0]?.id ?? null);
   }, [freeKb, kbEntries, panelMode, selectedEntryId]);
+
+  useEffect(() => {
+    if (selectedEntryId) localStorage.setItem('ik_free_entry', selectedEntryId);
+    else localStorage.removeItem('ik_free_entry');
+  }, [selectedEntryId]);
 
   useEffect(() => {
     if (!freeKb || !freeFolder) return;
@@ -464,6 +494,31 @@ export default function FreeMode(props: Props): ReactNode {
     });
   }
 
+  function startGenerateEntry(): void {
+    if (!freeKb) {
+      toast('请先进入一个知识库，再生成知识点', 'info');
+      return;
+    }
+    const folderId = selectedEntry?.folderId ?? freeFolder ?? null;
+    setAiLiveLogs([]);
+    setAiLivePlan('');
+    setAiLiveOutput('');
+    aiRawOutputRef.current = '';
+    setCommand({ kind: 'generate-entry', kbId: freeKb, folderId });
+  }
+
+  function startRewriteEntry(): void {
+    if (!selectedEntry) {
+      toast('请先选择一个知识点', 'info');
+      return;
+    }
+    setAiLiveLogs([]);
+    setAiLivePlan('');
+    setAiLiveOutput('');
+    aiRawOutputRef.current = '';
+    setCommand({ kind: 'rewrite-entry', entry: selectedEntry });
+  }
+
   function startEditEntry(): void {
     if (!selectedEntry) {
       toast('请先选择一个知识点', 'info');
@@ -573,6 +628,10 @@ export default function FreeMode(props: Props): ReactNode {
       case 'create-kb':
       case 'create-folder':
         return '新建失败';
+      case 'generate-entry':
+        return '生成失败';
+      case 'rewrite-entry':
+        return '改写失败';
       case 'rename-kb':
       case 'rename-folder':
         return '重命名失败';
@@ -599,6 +658,56 @@ export default function FreeMode(props: Props): ReactNode {
         case 'create-folder': {
           await onCreateFolder({ kbId: command.kbId, parentId: command.parentId, name: value });
           toast('已新建文件夹', 'success');
+          return;
+        }
+        case 'generate-entry': {
+          setAiLiveLogs(['提交主题到后端']);
+          setAiLivePlan('');
+          setAiLiveOutput('');
+          aiRawOutputRef.current = '';
+          const entry = await generateEntryWithAIStream({ topic: value, kbId: command.kbId, folderId: command.folderId }, {
+            onStage: (message) => setAiLiveLogs((current) => [...current, message]),
+            onContext: (items) => setAiLiveLogs((current) => [
+              ...current,
+              items.length ? `找到 ${items.length} 条相似知识点作为参考` : '没有找到相似知识点，直接生成',
+            ]),
+            onDelta: (content) => updateAiVisibleOutput(`${aiRawOutputRef.current}${content}`),
+            onOutput: (content) => updateAiVisibleOutput(content),
+            onParsed: (payload) => setAiLiveLogs((current) => [
+              ...current,
+              `解析完成：${payload.title || '未命名'} · ${payload.tags.length} 个标签 · ${payload.sections} 个小节`,
+            ]),
+            onSaved: (saved) => setAiLiveLogs((current) => [...current, `已写入：${saved.title}`]),
+          });
+          setPanelMode('detail');
+          dirtyRef.current = false;
+          onGeneratedEntry(entry);
+          setSelectedEntryId(entry.id);
+          setFreeFolder(entry.folderId ?? null);
+          toast('AI 已生成知识点', 'success');
+          return;
+        }
+        case 'rewrite-entry': {
+          setAiLiveLogs(['提交当前 doc 到后端']);
+          setAiLivePlan('');
+          setAiLiveOutput('');
+          aiRawOutputRef.current = '';
+          const entry = await rewriteEntryWithAIStream(command.entry.id, {
+            onStage: (message) => setAiLiveLogs((current) => [...current, message]),
+            onDelta: (content) => updateAiVisibleOutput(`${aiRawOutputRef.current}${content}`),
+            onOutput: (content) => updateAiVisibleOutput(content),
+            onParsed: (payload) => setAiLiveLogs((current) => [
+              ...current,
+              `解析完成：${payload.title || '未命名'} · ${payload.tags.length} 个标签 · ${payload.sections} 个小节`,
+            ]),
+            onSaved: (saved) => setAiLiveLogs((current) => [...current, `已改写：${saved.title}`]),
+          });
+          setPanelMode('detail');
+          dirtyRef.current = false;
+          onGeneratedEntry(entry);
+          setSelectedEntryId(entry.id);
+          setFreeFolder(entry.folderId ?? null);
+          toast('AI 已改写知识点', 'success');
           return;
         }
         case 'rename-kb': {
@@ -673,6 +782,63 @@ export default function FreeMode(props: Props): ReactNode {
           confirmText="创建"
           helper="右键树节点也可以在指定文件夹下快速创建。"
           onOpenChange={(open) => { if (!open) setCommand(null); }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
+    if (command.kind === 'generate-entry') {
+      const targetLabel = command.folderId ? folderPathName(folders, command.folderId) : `${currentKb?.name ?? '当前知识库'} / 根层级`;
+      return (
+        <CommandDialog
+          open
+          title="AI 生成知识点"
+          description={`将生成到 ${targetLabel || '当前位置'}。`}
+          inputLabel="主题或面试题"
+          placeholder="例如：ReAct 工作模式、RAG 多路召回、MCP 协议"
+          helper="会自动生成知识内容、面试考点、常见追问和易错点。"
+          confirmText="生成"
+          icon={<Sparkles size={18} strokeWidth={2.15} />}
+          liveLogs={aiLiveLogs}
+          livePlan={aiLivePlan}
+          livePlanLabel="公开生成思路"
+          liveOutput={aiLiveOutput}
+          liveOutputLabel="结构化 JSON"
+          onOpenChange={(open) => {
+            if (!open) {
+              setCommand(null);
+              setAiLiveLogs([]);
+              setAiLivePlan('');
+              setAiLiveOutput('');
+              aiRawOutputRef.current = '';
+            }
+          }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
+    if (command.kind === 'rewrite-entry') {
+      return (
+        <CommandDialog
+          open
+          title="AI 改写知识点"
+          description={`将基于「${command.entry.title}」当前 doc 内容原地改写。`}
+          helper="会保留当前知识库和文件夹，重写正文结构、面试考点、追问和易错点。"
+          confirmText="开始改写"
+          icon={<Sparkles size={18} strokeWidth={2.15} />}
+          liveLogs={aiLiveLogs}
+          livePlan={aiLivePlan}
+          livePlanLabel="公开改写思路"
+          liveOutput={aiLiveOutput}
+          liveOutputLabel="结构化 JSON"
+          onOpenChange={(open) => {
+            if (!open) {
+              setCommand(null);
+              setAiLiveLogs([]);
+              setAiLivePlan('');
+              setAiLiveOutput('');
+              aiRawOutputRef.current = '';
+            }
+          }}
           onConfirm={confirmCommand}
         />
       );
@@ -867,6 +1033,14 @@ export default function FreeMode(props: Props): ReactNode {
                 <button className="ik-fab-item" onClick={() => { setFabOpen(false); startCreateEntryInFolder(selectedEntry.folderId ?? null); }}>
                   <span className="ik-fab-ico"><FileText size={16} strokeWidth={2.1} /></span>新建同级知识点
                 </button>
+                <div className="ik-fab-sep" />
+                <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startGenerateEntry(); }}>
+                  <span className="ik-fab-ico"><Sparkles size={16} strokeWidth={2.15} /></span>AI 生成知识点
+                </button>
+                <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startRewriteEntry(); }}>
+                  <span className="ik-fab-ico"><Sparkles size={16} strokeWidth={2.15} /></span>AI 改写当前知识点
+                </button>
+                <div className="ik-fab-sep" />
                 <button className="ik-fab-item ik-fab-item-danger" onClick={() => { setFabOpen(false); deleteEntryAction(selectedEntry); }}>
                   <span className="ik-fab-ico"><Trash2 size={16} strokeWidth={2.1} /></span>删除当前知识点
                 </button>
@@ -876,11 +1050,15 @@ export default function FreeMode(props: Props): ReactNode {
                 <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startCreateEntry(); }}>
                   <span className="ik-fab-ico"><Plus size={16} strokeWidth={2.2} /></span>新建知识点
                 </button>
+                <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startGenerateEntry(); }}>
+                  <span className="ik-fab-ico"><Sparkles size={16} strokeWidth={2.15} /></span>AI 生成知识点
+                </button>
                 <button className="ik-fab-item" onClick={() => { setFabOpen(false); newFolder(freeKb, freeFolder); }}>
                   <span className="ik-fab-ico"><FolderPlus size={16} strokeWidth={2.1} /></span>{freeFolder ? '新建子文件夹' : '新建文件夹'}
                 </button>
               </>
             )}
+            <div className="ik-fab-sep" />
             <label
               className={`ik-fab-item ${canImportJson ? '' : 'ik-fab-item-disabled'}`}
               onClick={(e) => {
@@ -995,22 +1173,15 @@ export default function FreeMode(props: Props): ReactNode {
                   contextLabel={viewingPathLabel}
                   actions={selectedEntry ? (
                     <>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        leadingIcon={<Pencil size={15} strokeWidth={2.15} />}
-                        onClick={startEditEntry}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        leadingIcon={<Trash2 size={15} strokeWidth={2.15} />}
-                        onClick={deleteSelectedEntry}
-                      >
-                        删除
-                      </Button>
+                      <button type="button" className="ik-segbtn" onClick={startRewriteEntry}>
+                        <Sparkles size={14} strokeWidth={2.15} />改写
+                      </button>
+                      <button type="button" className="ik-segbtn" onClick={startEditEntry}>
+                        <Pencil size={14} strokeWidth={2.15} />编辑
+                      </button>
+                      <button type="button" className="ik-segbtn ik-segbtn-danger" onClick={deleteSelectedEntry}>
+                        <Trash2 size={14} strokeWidth={2.15} />删除
+                      </button>
                     </>
                   ) : null}
                 />

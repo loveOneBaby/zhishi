@@ -10,17 +10,35 @@ html, body {
 }
 #root { height: 100vh; overflow: hidden; }
 ::selection { background: var(--sel); }
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--bd); border-radius: 6px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--mut) 36%, transparent); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--mut) 58%, transparent); }
 @keyframes ik-pop { from { opacity: 0; transform: translateY(6px) scale(.99); } to { opacity: 1; transform: none; } }
 @keyframes ik-fade { from { opacity: 0; } to { opacity: 1; } }
 input::placeholder { color: var(--mut); opacity: .7; }
 textarea::placeholder { color: var(--mut); opacity: .7; }
 button { font-family: inherit; }
 
-/* 毛玻璃主题:柔和渐变背景 + 半透明面板 + backdrop 模糊 */
+/* 弹窗:遮罩 + 面板(默认用主题面板色,玻璃主题下换成磨砂白) */
+.ik-modal-scrim { background: rgba(0,0,0,.34); }
+.ik-import-modal { background: var(--panel); }
+.ik-theme-glass .ik-modal-scrim {
+  background: rgba(18,26,48,.22);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.ik-theme-glass .ik-import-modal {
+  background: rgba(255,255,255,.74);
+  border-color: rgba(255,255,255,.6);
+  backdrop-filter: blur(28px) saturate(1.7);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  box-shadow: 0 30px 80px rgba(31,45,80,.22);
+}
+
+/* 毛玻璃主题:鲜明渐变背景 + 半透明面板 + backdrop 模糊 + 玻璃高光边 */
 .ik-theme-glass {
-  --app-bg: linear-gradient(135deg, #e7edfb 0%, #f4f6fb 42%, #e6f7f3 100%);
+  --app-bg: linear-gradient(135deg, #d8e4ff 0%, #e9edfb 32%, #dcf2fc 64%, #efe7fb 100%);
 }
 .ik-theme-glass .ik-surface,
 .ik-theme-glass .ik-kb-card,
@@ -30,13 +48,148 @@ button { font-family: inherit; }
 .ik-theme-glass .ik-fab,
 .ik-theme-glass .ik-kt-shell,
 .ik-theme-glass .ik-bn.bn-container {
-  backdrop-filter: blur(16px) saturate(1.5);
-  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  backdrop-filter: blur(22px) saturate(1.9);
+  -webkit-backdrop-filter: blur(22px) saturate(1.9);
 }
+.ik-theme-glass .ik-surface,
 .ik-theme-glass .ik-kb-card,
-.ik-theme-glass .ik-surface {
-  box-shadow: 0 14px 40px rgba(31,45,80,.10);
+.ik-theme-glass .ik-kb-create {
+  border: 1px solid rgba(255,255,255,0.38);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 4px 14px rgba(31,45,80,.06);
 }
+/* 顶栏搜索框:大气、留白充足、聚焦有强调环 */
+.ik-searchbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 8px 0 15px;
+  border: 1px solid var(--bd);
+  border-radius: 13px;
+  background: var(--panel);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.ik-searchbox:hover { border-color: color-mix(in srgb, var(--fg) 14%, var(--bd)); }
+.ik-searchbox:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--bd));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.ik-searchbox-icon { flex-shrink: 0; display: inline-flex; color: var(--mut); }
+.ik-searchbox-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 15px;
+  font-family: inherit;
+}
+.ik-searchbox-input::placeholder { color: var(--mut); opacity: .72; }
+.ik-scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 3px 0 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--bd));
+}
+.ik-scope-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--accent) 72%, var(--fg));
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 660;
+  cursor: pointer;
+}
+.ik-scope-name:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ik-scope-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--accent) 55%, var(--mut));
+  cursor: pointer;
+}
+.ik-scope-x:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.ik-searchbox-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 9px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: transparent;
+  color: var(--mut);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
+}
+.ik-searchbox-btn:hover { background: var(--sel); color: var(--fg); }
+.ik-searchbox-btn.is-active { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.ik-searchbox-kbd {
+  flex-shrink: 0;
+  color: var(--mut);
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--bd);
+  border-radius: 7px;
+  padding: 3px 7px;
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+}
+.ik-searchbox-divider {
+  flex-shrink: 0;
+  width: 1px;
+  height: 22px;
+  margin: 0 3px;
+  background: var(--bd);
+}
+.ik-searchbox-seg {
+  display: inline-flex;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 3px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 6%, var(--panel));
+}
+.ik-searchbox-seg button {
+  height: 26px;
+  padding: 0 13px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--mut);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 620;
+  cursor: pointer;
+  transition: background 130ms ease, color 130ms ease;
+}
+.ik-searchbox-seg button:hover { color: var(--fg); }
+.ik-searchbox-seg button.is-active {
+  background: var(--fg);
+  color: var(--bg);
+}
+
 /* 按钮:柔和胶囊 — 圆角全胶囊、柔和填充、无边、克制微交互 */
 .ik-btn {
   display: inline-flex;
@@ -388,6 +541,117 @@ button { font-family: inherit; }
   font-size: 12px;
   line-height: 1.55;
 }
+.ik-command-progress {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--bd));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--sel) 56%, transparent);
+}
+.ik-command-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 740;
+  line-height: 1.25;
+}
+.ik-command-progress-head b {
+  color: var(--mut);
+  font-size: 11px;
+  font-weight: 760;
+}
+.ik-command-progress-track {
+  height: 5px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bd) 58%, transparent);
+}
+.ik-command-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 320ms ease;
+}
+.ik-command-progress-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.ik-command-progress-list span {
+  opacity: .56;
+  transition: color 160ms ease, opacity 160ms ease;
+}
+.ik-command-progress-list span.is-active {
+  color: var(--fg);
+  opacity: .94;
+}
+.ik-command-live {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--bd));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--sel) 52%, transparent);
+}
+.ik-command-live-head {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 780;
+  line-height: 1.2;
+}
+.ik-command-live-log {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.ik-command-live-log span {
+  position: relative;
+  padding-left: 12px;
+}
+.ik-command-live-log span::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: .55em;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.ik-command-live-output {
+  margin-top: 10px;
+}
+.ik-command-live-output > div {
+  margin-bottom: 6px;
+  color: var(--mut);
+  font-size: 11px;
+  font-weight: 740;
+}
+.ik-command-live-output pre {
+  max-height: 210px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--bd) 72%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 78%, var(--panel));
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .ik-command-actions {
   display: flex;
   justify-content: flex-end;
@@ -523,14 +787,13 @@ button { font-family: inherit; }
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: 14px 0 0;
-  background: var(--bg);
-  padding-bottom: 10px;
+  padding: 14px 0 10px;
+  background: transparent;
 }
 .ik-free-layout {
   display: grid;
-  grid-template-columns: clamp(380px, 24vw, 520px) minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: clamp(300px, 21vw, 420px) minmax(0, 1fr);
+  gap: 16px;
   align-items: stretch;
   height: 100%;
   min-height: 0;
@@ -565,60 +828,60 @@ button { font-family: inherit; }
   gap: 10px;
 }
 .ik-fab {
-  width: 46px;
-  height: 46px;
+  width: 48px;
+  height: 48px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
   border: none;
+  outline: none;
   background: var(--accent);
   color: var(--bg);
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
-  box-shadow: 0 10px 26px rgba(0,0,0,.2);
-  transition: transform 140ms ease, filter 140ms ease;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 40%, rgba(0,0,0,.3));
+  transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease;
 }
 .ik-fab:hover { transform: translateY(-2px); filter: brightness(1.06); }
+.ik-fab:focus-visible { box-shadow: 0 8px 22px rgba(0,0,0,.22), 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent); }
 .ik-fab-menu {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px;
+  gap: 1px;
+  padding: 7px;
+  min-width: 248px;
   border: 1px solid var(--bd);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--panel) 96%, transparent);
-  box-shadow: 0 16px 40px rgba(0,0,0,.16);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  box-shadow: 0 20px 52px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.06);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
   animation: ik-pop .14s ease;
 }
 .ik-fab-item {
   display: flex;
   align-items: center;
-  gap: 9px;
-  width: 210px;
-  padding: 8px 11px;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
   color: var(--fg);
-  font-size: 13px;
-  font-weight: 560;
+  font-size: 13.5px;
+  font-weight: 550;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background 120ms ease, color 120ms ease;
 }
-.ik-fab-item:hover { background: var(--sel); }
-.ik-fab-item-danger {
-  color: var(--danger);
-}
-.ik-fab-item-danger .ik-fab-ico {
-  color: var(--danger);
-}
+.ik-fab-item:hover { background: color-mix(in srgb, var(--fg) 6%, var(--panel)); }
+.ik-fab-item-danger { color: var(--danger); }
+.ik-fab-item-danger:hover { background: color-mix(in srgb, var(--danger) 10%, var(--panel)); }
+.ik-fab-item-danger .ik-fab-ico { color: var(--danger); }
 .ik-fab-item-disabled {
-  opacity: .48;
+  opacity: .45;
   cursor: not-allowed;
 }
 .ik-fab-item-disabled:hover { background: transparent; }
@@ -627,14 +890,17 @@ button { font-family: inherit; }
   align-items: center;
   justify-content: center;
   width: 18px;
+  flex-shrink: 0;
   color: var(--mut);
-  font-size: 13px;
 }
-.ik-fab-ico svg {
-  display: block;
-}
-.ik-fab-item-primary { color: var(--accent); font-weight: 680; }
+.ik-fab-ico svg { display: block; }
+.ik-fab-item-primary { color: var(--accent); }
 .ik-fab-item-primary .ik-fab-ico { color: var(--accent); }
+.ik-fab-sep {
+  height: 1px;
+  margin: 5px 10px;
+  background: var(--bd);
+}
 .ik-kb-card-icon {
   width: 34px;
   height: 34px;
@@ -665,13 +931,13 @@ button { font-family: inherit; }
   background: var(--panel);
   cursor: pointer;
   overflow: hidden;
-  box-shadow: 0 8px 22px rgba(0,0,0,.04);
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
   transition: transform 180ms cubic-bezier(.2,.7,.3,1), box-shadow 180ms ease, border-color 180ms ease;
 }
 .ik-kb-card:hover {
-  transform: translateY(-3px);
+  transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--fg) 22%, var(--bd));
-  box-shadow: 0 24px 48px rgba(0,0,0,.10);
+  box-shadow: 0 8px 20px rgba(0,0,0,.07);
 }
 .ik-kb-tile {
   width: 46px;
@@ -852,7 +1118,7 @@ button { font-family: inherit; }
   gap: 8px;
   padding: 9px 12px 9px 16px;
   border-bottom: 1px solid var(--bd);
-  background: color-mix(in srgb, var(--panel) 92%, var(--bg));
+  background: transparent;
 }
 .ik-action-spacer {
   margin-right: auto;
@@ -880,6 +1146,35 @@ button { font-family: inherit; }
 }
 .ik-action-dot.is-dirty { background: var(--accent); }
 .ik-action-dot.is-saved { background: color-mix(in srgb, var(--accent) 70%, var(--mut)); }
+.ik-detail-head {
+  flex-shrink: 0;
+  padding: 14px 28px 6px;
+}
+.ik-detail-title {
+  color: var(--fg);
+  font-size: clamp(19px, 1.6vw, 25px);
+  line-height: 1.2;
+  letter-spacing: 0;
+  font-weight: 780;
+}
+.ik-detail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.ik-detail-meta > span:first-child {
+  font-weight: 720;
+}
+.ik-detail-meta-item i {
+  padding: 0 4px 0 1px;
+  color: color-mix(in srgb, var(--mut) 56%, transparent);
+  font-style: normal;
+}
 .ik-detail-location {
   min-width: 0;
   display: flex;
@@ -929,6 +1224,33 @@ button { font-family: inherit; }
   flex-direction: column;
   gap: 8px;
 }
+/* 通用「分格」工具按钮:和左侧树工具栏一致(编辑/删除/预览等复用) */
+.ik-segbtn {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: background 130ms ease, border-color 130ms ease, color 130ms ease;
+}
+.ik-segbtn:hover:not(:disabled) { background: var(--sel); border-color: color-mix(in srgb, var(--fg) 16%, var(--bd)); }
+.ik-segbtn:disabled { opacity: .5; cursor: not-allowed; }
+.ik-segbtn-danger { color: var(--danger); }
+.ik-segbtn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, var(--panel)); border-color: color-mix(in srgb, var(--danger) 40%, var(--bd)); }
+.ik-segbtn-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.ik-segbtn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 88%, var(--panel)); border-color: color-mix(in srgb, var(--fg) 88%, var(--panel)); }
+
 .ik-kt-toolbar {
   display: flex;
   align-items: center;

@@ -4,7 +4,6 @@ import { ArrowLeft, Check, Eye, PencilLine } from 'lucide-react';
 import type { Entry, EntryInput, IndexNode, KnowledgeBase, Folder, Block } from '../types';
 import { toast } from '../toast';
 import BlockEditor from './BlockEditor';
-import Button from './Button';
 
 let idSeed = 0;
 function newIndexNode(title: string): IndexNode {
@@ -235,33 +234,18 @@ export default function EntryEditor(props: Props): ReactNode {
             <span className={`ik-action-dot ${dirty ? 'is-dirty' : savedAt ? 'is-saved' : ''}`} />
             {dirty ? '未保存' : savedAt ? '已保存' : '编辑中'}
           </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            leadingIcon={showPreview ? <PencilLine size={15} strokeWidth={2.15} /> : <Eye size={15} strokeWidth={2.15} />}
-            onClick={() => setShowPreview((v) => !v)}
-          >
+          <button type="button" className="ik-segbtn" onClick={() => setShowPreview((v) => !v)}>
+            {showPreview ? <PencilLine size={14} strokeWidth={2.15} /> : <Eye size={14} strokeWidth={2.15} />}
             {showPreview ? '继续编辑' : '预览'}
-          </Button>
+          </button>
           {onCancel && (
-            <Button
-              variant="ghost"
-              size="sm"
-              leadingIcon={<ArrowLeft size={15} strokeWidth={2.15} />}
-              onClick={onCancel}
-            >
-              {isEdit ? '返回' : '取消'}
-            </Button>
+            <button type="button" className="ik-segbtn" onClick={onCancel}>
+              <ArrowLeft size={14} strokeWidth={2.15} />{isEdit ? '返回' : '取消'}
+            </button>
           )}
-          <Button
-            variant="default"
-            size="sm"
-            leadingIcon={<Check size={15} strokeWidth={2.4} />}
-            onClick={handleSave}
-            disabled={saving || !dirty}
-          >
-            {saving ? '保存中…' : '保存 ⌘S'}
-          </Button>
+          <button type="button" className="ik-segbtn ik-segbtn-primary" onClick={handleSave} disabled={saving || !dirty}>
+            <Check size={14} strokeWidth={2.4} />{saving ? '保存中…' : '保存 ⌘S'}
+          </button>
         </div>
 
         {/* 属性栏:只做标签管理 — 输入回车/逗号新建,点 × 删除 */}

@@ -119,6 +119,169 @@ export async function createEntry(input: EntryInput): Promise<Entry> {
   return data.entry;
 }
 
+export interface GenerateEntryInput {
+  topic: string;
+  kbId: string;
+  folderId?: string | null;
+}
+
+export async function generateEntryWithAI(input: GenerateEntryInput): Promise<Entry> {
+  const res = await fetch(`${BASE}/entries/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const data = await j<{ configured: boolean; entry?: Entry; error?: string }>(res);
+  if (!data.configured || !data.entry) throw new Error(data.error || 'AI 未配置，请先配置 server/.env');
+  return data.entry;
+}
+
+export interface GenerateEntryStreamHandlers {
+  onStage?: (message: string) => void;
+  onContext?: (items: Array<{ title: string; summary: string }>) => void;
+  onDelta?: (content: string) => void;
+  onOutput?: (content: string) => void;
+  onParsed?: (payload: { title: string; tags: string[]; sections: number }) => void;
+  onSaved?: (entry: Entry) => void;
+}
+
+function readSseBlock(block: string): { event: string; data: unknown } | null {
+  let event = 'message';
+  const dataLines: string[] = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+  }
+  if (!dataLines.length) return null;
+  try {
+    return { event, data: JSON.parse(dataLines.join('\n')) };
+  } catch {
+    return { event, data: dataLines.join('\n') };
+  }
+}
+
+export async function generateEntryWithAIStream(input: GenerateEntryInput, handlers: GenerateEntryStreamHandlers = {}): Promise<Entry> {
+  const res = await fetch(`${BASE}/entries/generate/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok || !res.body) {
+    let msg = `请求失败 ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data?.error) msg = data.error;
+    } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let saved: Entry | null = null;
+  let thrown: Error | null = null;
+
+  const handle = (block: string): void => {
+    const parsed = readSseBlock(block);
+    if (!parsed) return;
+    const data = parsed.data as Record<string, unknown>;
+    if (parsed.event === 'stage' && typeof data.message === 'string') handlers.onStage?.(data.message);
+    if (parsed.event === 'context' && Array.isArray(data.items)) {
+      handlers.onContext?.(data.items as Array<{ title: string; summary: string }>);
+    }
+    if (parsed.event === 'model-delta' && typeof data.content === 'string') handlers.onDelta?.(data.content);
+    if (parsed.event === 'model-output' && typeof data.content === 'string') handlers.onOutput?.(data.content);
+    if (parsed.event === 'parsed') {
+      handlers.onParsed?.({
+        title: String(data.title ?? ''),
+        tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
+        sections: Number(data.sections ?? 0),
+      });
+    }
+    if ((parsed.event === 'saved' || parsed.event === 'done') && data.entry && typeof data.entry === 'object') {
+      saved = data.entry as Entry;
+      handlers.onSaved?.(saved);
+    }
+    if (parsed.event === 'error') {
+      thrown = new Error(String(data.error ?? 'AI 生成失败'));
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split(/\n\n/);
+    buffer = blocks.pop() ?? '';
+    for (const block of blocks) handle(block);
+    if (thrown) throw thrown;
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) handle(buffer);
+  if (thrown) throw thrown;
+  if (!saved) throw new Error('AI 生成未返回知识点');
+  return saved;
+}
+
+export async function rewriteEntryWithAIStream(entryId: string, handlers: GenerateEntryStreamHandlers = {}): Promise<Entry> {
+  const res = await fetch(`${BASE}/entries/${encodeURIComponent(entryId)}/rewrite/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok || !res.body) {
+    let msg = `请求失败 ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data?.error) msg = data.error;
+    } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let saved: Entry | null = null;
+  let thrown: Error | null = null;
+
+  const handle = (block: string): void => {
+    const parsed = readSseBlock(block);
+    if (!parsed) return;
+    const data = parsed.data as Record<string, unknown>;
+    if (parsed.event === 'stage' && typeof data.message === 'string') handlers.onStage?.(data.message);
+    if (parsed.event === 'model-delta' && typeof data.content === 'string') handlers.onDelta?.(data.content);
+    if (parsed.event === 'model-output' && typeof data.content === 'string') handlers.onOutput?.(data.content);
+    if (parsed.event === 'parsed') {
+      handlers.onParsed?.({
+        title: String(data.title ?? ''),
+        tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
+        sections: Number(data.sections ?? 0),
+      });
+    }
+    if ((parsed.event === 'saved' || parsed.event === 'done') && data.entry && typeof data.entry === 'object') {
+      saved = data.entry as Entry;
+      handlers.onSaved?.(saved);
+    }
+    if (parsed.event === 'error') {
+      thrown = new Error(String(data.error ?? 'AI 改写失败'));
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split(/\n\n/);
+    buffer = blocks.pop() ?? '';
+    for (const block of blocks) handle(block);
+    if (thrown) throw thrown;
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) handle(buffer);
+  if (thrown) throw thrown;
+  if (!saved) throw new Error('AI 改写未返回知识点');
+  return saved;
+}
+
 export async function updateEntry(id: string, input: EntryInput): Promise<Entry> {
   const res = await fetch(`${BASE}/entries/${encodeURIComponent(id)}`, {
     method: 'PUT',

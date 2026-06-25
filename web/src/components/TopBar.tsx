@@ -28,7 +28,7 @@ const THEME_SWATCH: Record<ThemeKey, string> = {
 
 export default function TopBar({ mode, setMode, theme, setTheme, searchSlot, searchTools }: Props) {
   return (
-    <div style={{ position: 'sticky', top: 0, zIndex: 20, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 64, gap: 18, borderBottom: '1px solid var(--bd)', background: 'color-mix(in srgb, var(--bg) 92%, transparent)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+    <div style={{ position: 'sticky', top: 0, zIndex: 20, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 64, gap: 18, padding: '0 clamp(16px, 2.4vw, 44px)', borderBottom: '1px solid var(--bd)', background: 'color-mix(in srgb, var(--bg) 92%, transparent)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 2, background: 'var(--sel)', padding: 3, borderRadius: 9 }}>
           {MODES.map((m) => (
@@ -40,7 +40,7 @@ export default function TopBar({ mode, setMode, theme, setTheme, searchSlot, sea
           <span style={{ fontSize: 16, fontWeight: 760, letterSpacing: '0', whiteSpace: 'nowrap' }}>知识检索</span>
         </div>
       </div>
-      {searchSlot && <div style={{ flex: 1, minWidth: 0, maxWidth: 640 }}>{searchSlot}</div>}
+      {searchSlot && <div style={{ flex: 1, minWidth: 0, maxWidth: 880 }}>{searchSlot}</div>}
       {searchTools && <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 14 }}>{searchTools}</div>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 4, border: '1px solid var(--bd)', borderRadius: 999, background: 'color-mix(in srgb, var(--panel) 74%, transparent)', flexShrink: 0 }}>
         {(Object.keys(THEMES) as ThemeKey[]).map((k) => {

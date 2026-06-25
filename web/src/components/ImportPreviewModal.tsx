@@ -139,8 +139,8 @@ export default function ImportPreviewModal({
   const selectValue = targetFolderId === null ? ROOT_FOLDER_VALUE : targetFolderId;
 
   return (
-    <div onClick={locked ? undefined : onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.34)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '48px 20px', overflowY: 'auto', zIndex: 60, animation: 'ik-fade .15s' }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 920, background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 16, padding: 24, animation: 'ik-pop .18s ease' }}>
+    <div className="ik-modal-scrim" onClick={locked ? undefined : onClose} style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '48px 20px', overflowY: 'auto', zIndex: 60, animation: 'ik-fade .15s' }}>
+      <div className="ik-import-modal" onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 920, border: '1px solid var(--bd)', borderRadius: 16, padding: 24, animation: 'ik-pop .18s ease' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <div>
             <div style={{ fontSize: 17, fontWeight: 700 }}>导入预览</div>
