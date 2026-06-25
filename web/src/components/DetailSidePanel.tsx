@@ -25,14 +25,11 @@ export default function DetailSidePanel({ entry, query = '', contextLabel, actio
   if (!entry) {
     return (
       <aside
-        className="ik-surface"
+        className="ik-surface ik-detail-panel ik-detail-panel-empty"
         style={{
           position: 'relative',
           height: '100%',
           minHeight: 0,
-          border: '1px dashed var(--bd)',
-          borderRadius: 12,
-          background: 'color-mix(in srgb, var(--panel) 62%, transparent)',
           display: 'flex',
           flexDirection: 'column',
           color: 'var(--mut)',
@@ -51,16 +48,12 @@ export default function DetailSidePanel({ entry, query = '', contextLabel, actio
 
   return (
     <aside
-      className="ik-surface"
+      className="ik-surface ik-detail-panel"
       style={{
         position: 'relative',
         height: '100%',
         minHeight: 0,
         overflow: 'hidden',
-        border: '1px solid var(--bd)',
-        borderRadius: 12,
-        background: 'var(--panel)',
-        boxShadow: '0 10px 28px rgba(0,0,0,.045)',
         display: 'flex',
         flexDirection: 'column',
       }}
@@ -81,7 +74,7 @@ export default function DetailSidePanel({ entry, query = '', contextLabel, actio
         )}
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '14px 18px 34px' }}>
+      <div className="ik-detail-body">
         {/* 原生 BlockNote 只读渲染:图片/表格/代码/标题等都按块原样显示 */}
         <BlockEditor key={entry.id} editable={false} initialBlocks={entry.doc} />
       </div>

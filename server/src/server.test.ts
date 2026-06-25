@@ -9,7 +9,7 @@ import { toSearchText } from './pinyin-search.js';
 import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc } from './assets.js';
 import { extractText, blocksToMarkdown as blockNoteToMarkdown } from './blocks.js';
 import { normalizeDocBlocks, splitDocToIndex, markdownToDocBlocks } from './doc.js';
-import { coerceGeneratedDraft, draftToMarkdown, extractJsonObject } from './ai-generate.js';
+import { coerceGeneratedDraft, coerceGeneratedFolderTreeDraft, coerceGeneratedKbDraft, draftToMarkdown, extractJsonObject, kbQuestionToMarkdown } from './ai-generate.js';
 import type { Entry } from './types.js';
 
 const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -178,6 +178,49 @@ test('ai-generate: 抽取模型 JSON 并转成知识点 markdown', () => {
   assert.ok(md.includes('## 面试考点'));
   assert.ok(md.includes('- 召回'));
   assert.ok(md.includes('## 高频追问'));
+});
+
+test('ai-generate: 知识库 JSON 转目录与 Q&A markdown', () => {
+  const draft = coerceGeneratedKbDraft({
+    kbName: 'Redis 面试知识库',
+    folders: [{ path: ['数据结构'] }],
+    questions: [{
+      folderPath: ['数据结构', 'String'],
+      title: 'Redis String 如何实现计数器？',
+      question: 'Redis String 如何实现计数器？',
+      summary: '围绕 String 原子自增和使用边界。',
+      tags: ['Redis'],
+      shortAnswer: '使用 INCR/DECR 这类原子命令，避免应用层读改写竞争。',
+      keyPoints: ['单线程执行命令', '注意溢出和过期时间'],
+      followUps: ['如何保证过期时间不被覆盖？'],
+      pitfalls: ['不要用 GET 后 SET 模拟自增'],
+    }],
+  }, 'Redis');
+  assert.equal(draft.kbName, 'Redis 面试知识库');
+  assert.deepEqual(draft.folders.map((folder) => folder.path), [['数据结构'], ['数据结构', 'String']]);
+  const md = kbQuestionToMarkdown(draft.questions[0]);
+  assert.ok(md.includes('## Q'));
+  assert.ok(md.includes('## A'));
+  assert.ok(md.includes('## 高频追问'));
+});
+
+test('ai-generate: 目录初始化 JSON 只转文件夹路径', () => {
+  const draft = coerceGeneratedFolderTreeDraft({
+    title: 'Kafka 目录',
+    folders: [
+      { path: ['基础概念'] },
+      { name: '核心原理', children: [{ name: '副本机制' }, { name: '消费组' }] },
+      { path: ['核心原理', '副本机制'] },
+    ],
+    questions: [{ title: '不应进入目录初始化结果' }],
+  }, 'Kafka');
+  assert.equal(draft.title, 'Kafka 目录');
+  assert.deepEqual(draft.folders.map((folder) => folder.path), [
+    ['基础概念'],
+    ['核心原理'],
+    ['核心原理', '副本机制'],
+    ['核心原理', '消费组'],
+  ]);
 });
 
 test('score: 标题前缀分高于全文包含', () => {

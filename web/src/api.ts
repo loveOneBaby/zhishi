@@ -145,6 +145,85 @@ export interface GenerateEntryStreamHandlers {
   onSaved?: (entry: Entry) => void;
 }
 
+export interface GenerateKnowledgeBaseInput {
+  domain: string;
+  questionCount?: number;
+}
+
+export interface GenerateKnowledgeBaseResult {
+  kb: KnowledgeBase;
+  folders: Folder[];
+  entries: Entry[];
+}
+
+export interface GenerateKnowledgeBaseStreamHandlers {
+  onStage?: (message: string) => void;
+  onDelta?: (content: string) => void;
+  onOutput?: (content: string) => void;
+  onParsed?: (payload: { kbName: string; folders: number; questions: number }) => void;
+  onSaved?: (result: GenerateKnowledgeBaseResult) => void;
+}
+
+export type AiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export interface AiKnowledgeBaseJob {
+  id: string;
+  kind: 'kb-generate' | 'folder-init';
+  domain: string;
+  questionCount: number;
+  kbId?: string;
+  kbName?: string;
+  parentId?: string | null;
+  targetPath?: string;
+  status: AiJobStatus;
+  logs: string[];
+  modelOutput: string;
+  parsed?: { kbName: string; folders: number; questions: number };
+  result?: GenerateKnowledgeBaseResult;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface InitKnowledgeBaseFoldersInput {
+  kbId: string;
+  parentId?: string | null;
+  domain?: string;
+  folderCount?: number;
+}
+
+export async function startGenerateKnowledgeBaseJob(input: GenerateKnowledgeBaseInput): Promise<AiKnowledgeBaseJob> {
+  const res = await fetch(`${BASE}/kbs/generate/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return j<{ job: AiKnowledgeBaseJob }>(res).then((d) => d.job);
+}
+
+export async function startInitKnowledgeBaseFoldersJob(input: InitKnowledgeBaseFoldersInput): Promise<AiKnowledgeBaseJob> {
+  const res = await fetch(`${BASE}/kbs/${encodeURIComponent(input.kbId)}/folders/init/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      parentId: input.parentId ?? null,
+      domain: input.domain,
+      folderCount: input.folderCount,
+    }),
+  });
+  return j<{ job: AiKnowledgeBaseJob }>(res).then((d) => d.job);
+}
+
+export async function fetchAiJobs(): Promise<AiKnowledgeBaseJob[]> {
+  const data = await j<{ jobs: AiKnowledgeBaseJob[] }>(await fetch(`${BASE}/ai/jobs`));
+  return data.jobs;
+}
+
+export async function fetchAiJob(id: string): Promise<AiKnowledgeBaseJob> {
+  const data = await j<{ job: AiKnowledgeBaseJob }>(await fetch(`${BASE}/ai/jobs/${encodeURIComponent(id)}`));
+  return data.job;
+}
+
 function readSseBlock(block: string): { event: string; data: unknown } | null {
   let event = 'message';
   const dataLines: string[] = [];
@@ -220,6 +299,73 @@ export async function generateEntryWithAIStream(input: GenerateEntryInput, handl
   if (buffer.trim()) handle(buffer);
   if (thrown) throw thrown;
   if (!saved) throw new Error('AI 生成未返回知识点');
+  return saved;
+}
+
+export async function generateKnowledgeBaseWithAIStream(
+  input: GenerateKnowledgeBaseInput,
+  handlers: GenerateKnowledgeBaseStreamHandlers = {},
+): Promise<GenerateKnowledgeBaseResult> {
+  const res = await fetch(`${BASE}/kbs/generate/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok || !res.body) {
+    let msg = `请求失败 ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data?.error) msg = data.error;
+    } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let saved: GenerateKnowledgeBaseResult | null = null;
+  let thrown: Error | null = null;
+
+  const handle = (block: string): void => {
+    const parsed = readSseBlock(block);
+    if (!parsed) return;
+    const data = parsed.data as Record<string, unknown>;
+    if (parsed.event === 'stage' && typeof data.message === 'string') handlers.onStage?.(data.message);
+    if (parsed.event === 'model-delta' && typeof data.content === 'string') handlers.onDelta?.(data.content);
+    if (parsed.event === 'model-output' && typeof data.content === 'string') handlers.onOutput?.(data.content);
+    if (parsed.event === 'parsed-kb') {
+      handlers.onParsed?.({
+        kbName: String(data.kbName ?? ''),
+        folders: Number(data.folders ?? 0),
+        questions: Number(data.questions ?? 0),
+      });
+    }
+    if ((parsed.event === 'saved-kb' || parsed.event === 'done') && data.kb && Array.isArray(data.folders) && Array.isArray(data.entries)) {
+      saved = {
+        kb: data.kb as KnowledgeBase,
+        folders: data.folders as Folder[],
+        entries: data.entries as Entry[],
+      };
+      if (parsed.event === 'saved-kb') handlers.onSaved?.(saved);
+    }
+    if (parsed.event === 'error') {
+      thrown = new Error(String(data.error ?? 'AI 新建知识库失败'));
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split(/\n\n/);
+    buffer = blocks.pop() ?? '';
+    for (const block of blocks) handle(block);
+    if (thrown) throw thrown;
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) handle(buffer);
+  if (thrown) throw thrown;
+  if (!saved) throw new Error('AI 新建知识库未返回保存结果');
   return saved;
 }
 

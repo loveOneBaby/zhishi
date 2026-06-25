@@ -6,6 +6,7 @@ import {
   fetchEntries,
   fetchKbs,
   fetchFolders,
+  fetchAiJobs,
   createEntry,
   updateEntry,
   deleteEntry,
@@ -18,6 +19,9 @@ import {
   deleteFolder,
   moveFolder,
   reorderFolders,
+  startGenerateKnowledgeBaseJob,
+  startInitKnowledgeBaseFoldersJob,
+  type AiKnowledgeBaseJob,
   type EntryInput as ApiEntryInput,
 } from './api';
 import TopBar, { type AppMode } from './components/TopBar';
@@ -27,7 +31,9 @@ import FreeMode from './components/FreeMode';
 import DetailModal from './components/DetailModal';
 import AskModal from './components/AskModal';
 import EntryEditor from './components/EntryEditor';
+import AiTaskCenter from './components/AiTaskCenter';
 import Toaster from './components/Toaster';
+import { toast } from './toast';
 
 // 轻量哈希路由:把「模块 + 视图」写进 URL,刷新/前进后退都能恢复
 type Route = { mode: AppMode; viewType: 'list' | 'canvas' };
@@ -41,12 +47,21 @@ function routeToHash(mode: AppMode, viewType: 'list' | 'canvas'): string {
   return mode === 'free' ? '#/library' : `#/search/${viewType}`;
 }
 
+function mergeById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  if (!incoming.length) return current;
+  const map = new Map(current.map((item) => [item.id, item]));
+  for (const item of incoming) map.set(item.id, item);
+  return [...map.values()];
+}
+
 export default function App() {
   const initialRoute = parseRoute();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [aiJobs, setAiJobs] = useState<AiKnowledgeBaseJob[]>([]);
+  const [aiTaskPanelOpen, setAiTaskPanelOpen] = useState(false);
 
   const [mode, setMode] = useState<AppMode>(initialRoute.mode);
   const [viewType, setViewType] = useState<'list' | 'canvas'>(initialRoute.viewType);
@@ -66,6 +81,8 @@ export default function App() {
   const [formOpen, setFormOpen] = useState(false);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const mergedJobIdsRef = useRef<Set<string>>(new Set());
+  const notifiedJobIdsRef = useRef<Set<string>>(new Set());
 
   // 路由同步:状态变化 → 写 URL(刷新可恢复);浏览器前进后退 → 读 URL
   useEffect(() => {
@@ -97,6 +114,57 @@ export default function App() {
       .catch(() => { setEntries([]); setKbs([]); setFolders([]); })
       .finally(() => { setLoaded(true); setTimeout(() => inputRef.current?.focus(), 60); });
   }, []);
+
+  const applyCompletedJobs = useCallback((jobs: AiKnowledgeBaseJob[]): void => {
+    const completed = jobs.filter((job) => job.status === 'succeeded' && job.result && !mergedJobIdsRef.current.has(job.id));
+    if (completed.length) {
+      const nextKbs = completed.map((job) => job.result!.kb);
+      const nextFolders = completed.flatMap((job) => job.result!.folders);
+      const nextEntries = completed.flatMap((job) => job.result!.entries);
+      setKbs((prev) => mergeById(prev, nextKbs));
+      setFolders((prev) => mergeById(prev, nextFolders));
+      setEntries((prev) => mergeById(prev, nextEntries));
+      for (const job of completed) {
+        mergedJobIdsRef.current.add(job.id);
+        if (!notifiedJobIdsRef.current.has(job.id)) {
+          notifiedJobIdsRef.current.add(job.id);
+          toast(job.kind === 'folder-init'
+            ? `AI 已初始化「${job.result!.kb.name}」目录`
+            : `AI 已新建「${job.result!.kb.name}」`, 'success');
+        }
+      }
+    }
+
+    for (const job of jobs) {
+      if (job.status === 'failed' && !notifiedJobIdsRef.current.has(job.id)) {
+        notifiedJobIdsRef.current.add(job.id);
+        toast(`${job.kind === 'folder-init' ? 'AI 初始化目录失败' : 'AI 建库失败'}：${job.error || job.domain}`, 'error');
+      }
+    }
+  }, []);
+
+  const refreshAiJobs = useCallback(async (): Promise<void> => {
+    const jobs = await fetchAiJobs();
+    setAiJobs(jobs);
+    applyCompletedJobs(jobs);
+  }, [applyCompletedJobs]);
+
+  useEffect(() => {
+    let stopped = false;
+    const tick = (): void => {
+      refreshAiJobs().catch(() => {
+        if (!stopped) {
+          // 后端未启动时不打扰用户，主数据加载会给出状态。
+        }
+      });
+    };
+    tick();
+    const timer = window.setInterval(tick, 1600);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [refreshAiJobs]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -131,7 +199,7 @@ export default function App() {
     for (const [key, value] of Object.entries(vars)) {
       document.documentElement.style.setProperty(key, value);
     }
-    document.body.style.background = t.bg;
+    document.body.style.background = 'var(--app-bg, var(--bg))';
     document.body.style.color = t.fg;
     document.body.style.fontFamily = t.font;
   }, [t]);
@@ -259,6 +327,28 @@ export default function App() {
   const handleGeneratedEntry = useCallback((entry: Entry) => {
     setEntries((prev) => [...prev.filter((item) => item.id !== entry.id), entry]);
   }, []);
+  const handleStartKnowledgeBaseJob = useCallback(async (domain: string): Promise<void> => {
+    const job = await startGenerateKnowledgeBaseJob({ domain });
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    setAiTaskPanelOpen(true);
+    toast(`「${domain}」已在后台生成`, 'success');
+  }, []);
+
+  const handleStartFolderInitJob = useCallback(async (input: { kbId: string; parentId?: string | null; domain?: string }): Promise<void> => {
+    const job = await startInitKnowledgeBaseFoldersJob(input);
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    setAiTaskPanelOpen(true);
+    toast(`「${input.domain || job.kbName || job.domain}」目录已在后台初始化`, 'success');
+  }, []);
+
+  const handleOpenAiJobResult = useCallback((job: AiKnowledgeBaseJob): void => {
+    if (!job.result) return;
+    applyCompletedJobs([job]);
+    setMode('free');
+    setFreeKb(job.result.kb.id);
+    setFreeFolder(job.result.entries[0]?.folderId ?? job.result.folders[0]?.id ?? job.parentId ?? null);
+    setAiTaskPanelOpen(false);
+  }, [applyCompletedJobs]);
 
   // 知识库回调
   const handleCreateKb = useCallback(async (name: string): Promise<KnowledgeBase> => {
@@ -408,6 +498,8 @@ export default function App() {
                 onReorderEntries={handleReorder}
                 onImported={handleImported}
                 onGeneratedEntry={handleGeneratedEntry}
+                onStartKnowledgeBaseJob={handleStartKnowledgeBaseJob}
+                onStartFolderInitJob={handleStartFolderInitJob}
                 onCreateKb={handleCreateKb}
                 onCreateFolder={handleCreateFolder}
                 onRenameKb={handleRenameKb}
@@ -471,6 +563,12 @@ export default function App() {
           </div>
         </div>
       )}
+      <AiTaskCenter
+        jobs={aiJobs}
+        open={aiTaskPanelOpen}
+        onOpenChange={setAiTaskPanelOpen}
+        onOpenResult={handleOpenAiJobResult}
+      />
       <Toaster />
     </div>
   );

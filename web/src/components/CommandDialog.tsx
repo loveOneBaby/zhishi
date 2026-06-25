@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 type DialogTone = 'default' | 'danger';
+type DialogSize = 'default' | 'wide';
 
 interface Props {
   open: boolean;
@@ -16,6 +17,7 @@ interface Props {
   confirmText?: string;
   cancelText?: string;
   tone?: DialogTone;
+  size?: DialogSize;
   icon?: ReactNode;
   progressSteps?: string[];
   liveLogs?: string[];
@@ -38,6 +40,7 @@ export default function CommandDialog({
   confirmText = '确认',
   cancelText = '取消',
   tone = 'default',
+  size = 'default',
   icon,
   progressSteps,
   liveLogs,
@@ -90,7 +93,7 @@ export default function CommandDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="ik-command-overlay" />
         <Dialog.Content
-          className={`ik-command-dialog ${tone === 'danger' ? 'is-danger' : ''}`}
+          className={`ik-command-dialog ${tone === 'danger' ? 'is-danger' : ''} ${size === 'wide' ? 'is-wide' : ''}`}
           onEscapeKeyDown={(event) => { if (submitting) event.preventDefault(); }}
           onPointerDownOutside={(event) => { if (submitting) event.preventDefault(); }}
         >

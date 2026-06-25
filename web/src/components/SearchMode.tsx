@@ -70,23 +70,20 @@ export default function SearchMode(
                   <div
                     key={item.id}
                     ref={active ? activeRowRef : undefined}
+                    className={`ik-result-row ${active ? 'is-active' : ''}`}
                     onClick={() => onOpen(item.id, index)}
-                    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'color-mix(in srgb, var(--sel) 55%, transparent)'; }}
-                    onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', cursor: 'pointer',
                       borderLeft: `3px solid ${active ? 'var(--accent)' : 'transparent'}`,
                       borderBottom: index === results.length - 1 ? 'none' : '1px solid color-mix(in srgb, var(--bd) 60%, transparent)',
-                      background: active ? 'var(--sel)' : 'transparent',
                     }}
                   >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14.5, fontWeight: 640, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{highlightText(item.title, query)}</div>
-                      <div style={{ fontSize: 12.5, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{highlightText(item.summary, query)}</div>
+                    <div className="ik-result-main">
+                      <div className="ik-result-title">{highlightText(item.title, query)}</div>
+                      <div className="ik-result-summary">{highlightText(item.summary, query)}</div>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0, maxWidth: 150 }}>
-                      <span style={{ fontSize: 11, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap' }}>{kbNameOf.get(item.kbId) ?? item.cat}</span>
-                      {path && <span style={{ fontSize: 11, color: 'var(--mut)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }} title={path}>{path}</span>}
+                    <div className="ik-result-meta">
+                      <span className="ik-result-kb">{kbNameOf.get(item.kbId) ?? item.cat}</span>
+                      {path && <span className="ik-result-path" title={path}>{path}</span>}
                     </div>
                   </div>
                 );

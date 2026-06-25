@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowRight, BookOpen, Download, FileText, FolderPlus, Pencil, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { BookOpen, Download, FileText, FolderPlus, Pencil, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import DetailSidePanel from './DetailSidePanel';
@@ -9,7 +9,15 @@ import ImportPreviewModal from './ImportPreviewModal';
 import KnowledgeTree from './KnowledgeTree';
 import CommandDialog from './CommandDialog';
 import type { SelectOption } from './SelectField';
-import { exportAll, generateEntryWithAIStream, importAll, previewImport, rewriteEntryWithAIStream, type ImportPayload, type ImportPreview } from '../api';
+import {
+  exportAll,
+  generateEntryWithAIStream,
+  importAll,
+  previewImport,
+  rewriteEntryWithAIStream,
+  type ImportPayload,
+  type ImportPreview,
+} from '../api';
 import { toast } from '../toast';
 
 interface Props {
@@ -27,6 +35,8 @@ interface Props {
   onReorderEntries: (ids: string[]) => Promise<void>;
   onImported: (entries: Entry[], kbs: KnowledgeBase[], folders: Folder[]) => void;
   onGeneratedEntry: (entry: Entry) => void;
+  onStartKnowledgeBaseJob: (domain: string) => Promise<void>;
+  onStartFolderInitJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
   onCreateKb: (name: string) => Promise<KnowledgeBase>;
   onCreateFolder: (input: { kbId: string; parentId?: string | null; name: string }) => Promise<Folder>;
   onRenameKb: (id: string, name: string) => Promise<void>;
@@ -54,10 +64,6 @@ const treePanelStyle: CSSProperties = {
   height: '100%',
   minHeight: 0,
   overflow: 'hidden',
-  border: '1px solid var(--bd)',
-  borderRadius: 12,
-  background: 'var(--panel)',
-  boxShadow: '0 10px 28px rgba(0,0,0,.04)',
   display: 'flex',
   flexDirection: 'column',
 };
@@ -92,6 +98,8 @@ function RowActions({ onRename, onDelete }: { onRename: () => void; onDelete: ()
 
 type CommandState =
   | { kind: 'create-kb' }
+  | { kind: 'generate-kb' }
+  | { kind: 'init-folders'; kbId: string; parentId: string | null; kbName: string; targetLabel: string }
   | { kind: 'create-folder'; kbId: string; parentId: string | null }
   | { kind: 'generate-entry'; kbId: string; folderId: string | null }
   | { kind: 'rewrite-entry'; entry: Entry }
@@ -111,7 +119,7 @@ interface RestoreSnapshot {
 
 export default function FreeMode(props: Props): ReactNode {
   const { entries, kbs, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
-    onCreate, onUpdate, onDelete, onImported, onGeneratedEntry,
+    onCreate, onUpdate, onDelete, onImported, onGeneratedEntry, onStartKnowledgeBaseJob, onStartFolderInitJob,
     onCreateKb, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries } = props;
 
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(() => localStorage.getItem('ik_free_entry') || null);
@@ -214,6 +222,28 @@ export default function FreeMode(props: Props): ReactNode {
   // ── 新建操作 ──
   function newKb(): void {
     setCommand({ kind: 'create-kb' });
+  }
+  function startGenerateKnowledgeBase(): void {
+    setAiLiveLogs([]);
+    setAiLivePlan('');
+    setAiLiveOutput('');
+    aiRawOutputRef.current = '';
+    setCommand({ kind: 'generate-kb' });
+  }
+  function startInitFolders(parentId?: string | null): void {
+    if (!currentKb) {
+      toast('请先进入一个知识库，再初始化目录', 'info');
+      return;
+    }
+    const targetParentId = parentId !== undefined ? parentId : (selectedEntry?.folderId ?? freeFolder ?? null);
+    const targetLabel = targetParentId ? folderPathName(folders, targetParentId) : `${currentKb.name} / 根层级`;
+    setCommand({
+      kind: 'init-folders',
+      kbId: currentKb.id,
+      parentId: targetParentId,
+      kbName: currentKb.name,
+      targetLabel: targetLabel || '当前位置',
+    });
   }
   function newFolder(kbId: string, parentId: string | null): void {
     setCommand({ kind: 'create-folder', kbId, parentId });
@@ -628,6 +658,10 @@ export default function FreeMode(props: Props): ReactNode {
       case 'create-kb':
       case 'create-folder':
         return '新建失败';
+      case 'generate-kb':
+        return 'AI 新建知识库失败';
+      case 'init-folders':
+        return 'AI 初始化目录失败';
       case 'generate-entry':
         return '生成失败';
       case 'rewrite-entry':
@@ -653,6 +687,18 @@ export default function FreeMode(props: Props): ReactNode {
         case 'create-kb': {
           await onCreateKb(value);
           toast('已新建知识库', 'success');
+          return;
+        }
+        case 'generate-kb': {
+          await onStartKnowledgeBaseJob(value);
+          return;
+        }
+        case 'init-folders': {
+          await onStartFolderInitJob({
+            kbId: command.kbId,
+            parentId: command.parentId,
+            domain: value || command.kbName,
+          });
           return;
         }
         case 'create-folder': {
@@ -765,6 +811,49 @@ export default function FreeMode(props: Props): ReactNode {
           inputLabel="知识库名称"
           placeholder="例如：AI Agent"
           confirmText="创建"
+          onOpenChange={(open) => { if (!open) setCommand(null); }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
+    if (command.kind === 'generate-kb') {
+      return (
+        <CommandDialog
+          open
+          title="AI 新建知识库"
+          description="提交后会在后台生成，任务面板会持续显示目录规划、高频题和写入结果。"
+          inputLabel="领域名称"
+          placeholder="例如：Java 后端、前端工程化、Redis、AI Agent"
+          helper="会创建新的知识库，不会覆盖现有数据。你可以继续检索、编辑或浏览已有知识点。"
+          confirmText="后台生成"
+          size="wide"
+          icon={<Sparkles size={18} strokeWidth={2.15} />}
+          onOpenChange={(open) => {
+            if (!open) {
+              setCommand(null);
+              setAiLiveLogs([]);
+              setAiLivePlan('');
+              setAiLiveOutput('');
+              aiRawOutputRef.current = '';
+            }
+          }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
+    if (command.kind === 'init-folders') {
+      return (
+        <CommandDialog
+          open
+          title="AI 初始化目录"
+          description={`将在 ${command.targetLabel} 下初始化文件夹结构，只创建目录，不生成知识点。`}
+          inputLabel="目录领域"
+          initialValue={command.kbName}
+          placeholder="例如：Kafka、Java 并发、前端工程化"
+          helper="提交后在后台运行，你可以继续检索、编辑或浏览已有知识点。已有同名同层级目录会复用。"
+          confirmText="后台初始化"
+          size="wide"
+          icon={<Sparkles size={18} strokeWidth={2.15} />}
           onOpenChange={(open) => { if (!open) setCommand(null); }}
           onConfirm={confirmCommand}
         />
@@ -971,12 +1060,21 @@ export default function FreeMode(props: Props): ReactNode {
               <span style={{ fontSize: 13, color: 'var(--mut)' }}>{kbs.length} 个知识库 · {entries.length} 条知识点</span>
             </div>
           </div>
-          <button className="ik-btn ik-btn-default ik-btn-size-md" onClick={newKb}>
-            <span className="ik-btn-leading-icon"><Plus size={15} strokeWidth={2.4} /></span>新建知识库
-          </button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button className="ik-btn ik-btn-secondary ik-btn-size-md" onClick={startGenerateKnowledgeBase}>
+              <span className="ik-btn-leading-icon"><Sparkles size={15} strokeWidth={2.15} /></span>AI 新建知识库
+            </button>
+            <button className="ik-btn ik-btn-default ik-btn-size-md" onClick={newKb}>
+              <span className="ik-btn-leading-icon"><Plus size={15} strokeWidth={2.4} /></span>新建知识库
+            </button>
+          </div>
         </div>
 
         <div className="ik-kb-grid">
+          <div className="ik-kb-create" onClick={startGenerateKnowledgeBase} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startGenerateKnowledgeBase(); } }}>
+            <span className="ik-kb-create-ico"><Sparkles size={20} strokeWidth={2.15} /></span>
+            AI 新建领域知识库
+          </div>
           {kbs.map((kb) => {
             const n = entriesOfKb(kb.id).length;
             const fn = folders.filter((f) => f.kbId === kb.id).length;
@@ -984,7 +1082,15 @@ export default function FreeMode(props: Props): ReactNode {
               <div
                 className="ik-kb-card"
                 key={kb.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => openKb(kb)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openKb(kb);
+                  }
+                }}
               >
                 <RowActions onRename={() => renameKbAction(kb)} onDelete={() => deleteKbAction(kb)} />
                 <div className="ik-kb-tile"><BookOpen size={24} strokeWidth={2.05} /></div>
@@ -993,7 +1099,6 @@ export default function FreeMode(props: Props): ReactNode {
                   <span className="ik-kb-stat"><b>{fn}</b> 文件夹</span>
                   <span className="ik-kb-stat"><b>{n}</b> 知识点</span>
                 </div>
-                <span className="ik-kb-enter">进入<ArrowRight size={14} strokeWidth={2.3} /></span>
               </div>
             );
           })}
@@ -1037,6 +1142,9 @@ export default function FreeMode(props: Props): ReactNode {
                 <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startGenerateEntry(); }}>
                   <span className="ik-fab-ico"><Sparkles size={16} strokeWidth={2.15} /></span>AI 生成知识点
                 </button>
+                <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startInitFolders(selectedEntry.folderId ?? null); }}>
+                  <span className="ik-fab-ico"><FolderPlus size={16} strokeWidth={2.1} /></span>AI 初始化目录
+                </button>
                 <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startRewriteEntry(); }}>
                   <span className="ik-fab-ico"><Sparkles size={16} strokeWidth={2.15} /></span>AI 改写当前知识点
                 </button>
@@ -1052,6 +1160,9 @@ export default function FreeMode(props: Props): ReactNode {
                 </button>
                 <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startGenerateEntry(); }}>
                   <span className="ik-fab-ico"><Sparkles size={16} strokeWidth={2.15} /></span>AI 生成知识点
+                </button>
+                <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startInitFolders(freeFolder ?? null); }}>
+                  <span className="ik-fab-ico"><FolderPlus size={16} strokeWidth={2.1} /></span>AI 初始化目录
                 </button>
                 <button className="ik-fab-item" onClick={() => { setFabOpen(false); newFolder(freeKb, freeFolder); }}>
                   <span className="ik-fab-ico"><FolderPlus size={16} strokeWidth={2.1} /></span>{freeFolder ? '新建子文件夹' : '新建文件夹'}
@@ -1081,8 +1192,8 @@ export default function FreeMode(props: Props): ReactNode {
       </div>
 
       <div className="ik-free-layout">
-        <aside className="ik-surface" style={treePanelStyle}>
-          <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid var(--bd)' }}>
+        <aside className="ik-surface ik-tree-panel" style={treePanelStyle}>
+          <div className="ik-tree-panel-head">
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
               <button
                 type="button"
@@ -1092,13 +1203,13 @@ export default function FreeMode(props: Props): ReactNode {
               >
                 {operationPathLabel}
               </button>
-              <div style={{ fontSize: 11.5, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '4px 8px', whiteSpace: 'nowrap' }}>
+              <div className="ik-tree-panel-counter">
                 {folders.filter((folder) => folder.kbId === freeKb).length} / {kbEntries.length}
               </div>
             </div>
           </div>
 
-          <div style={{ padding: 10, overflow: 'hidden', flex: 1, minHeight: 0 }}>
+          <div className="ik-tree-panel-body">
             <KnowledgeTree
               kbId={freeKb}
               folders={folders.filter((folder) => folder.kbId === freeKb)}

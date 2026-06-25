@@ -22,6 +22,7 @@ import {
   listFolders,
   getFolder,
   createFolder,
+  ensureFolder,
   renameFolder,
   moveFolder,
   deleteFolder,
@@ -41,7 +42,19 @@ import { isKbPackage2, kbPackage2ToImportPayload } from './kb-package-2.js';
 import { searchEntries } from './search.js';
 import { askAI } from './ask.js';
 import { AiConfigError } from './ai-client.js';
-import { generateEntryInput, generateEntryInputStream, rewriteEntryInputStream, type GenerateEntryEvent } from './ai-generate.js';
+import {
+  generateEntryInput,
+  generateEntryInputStream,
+  generateFolderTreeDraftStream,
+  generateKnowledgeBaseDraftStream,
+  type GeneratedFolderTreeDraft,
+  type GeneratedKbDraft,
+  kbQuestionToEntryInput,
+  rewriteEntryInputStream,
+  type GenerateEntryEvent,
+  type GenerateFolderTreeEvent,
+  type GenerateKnowledgeBaseEvent,
+} from './ai-generate.js';
 
 function stableImportId(prefix: string, seed: string): string {
   return `${prefix}_${createHash('sha1').update(seed).digest('hex').slice(0, 18)}`;
@@ -67,6 +80,297 @@ function sendSse(res: express.Response, event: string, data: unknown): void {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+function pathKey(parts: string[]): string {
+  return parts.join('\u0000');
+}
+
+type AiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+interface GeneratedKnowledgeBaseResult {
+  kb: ReturnType<typeof createKb>;
+  folders: NonNullable<ReturnType<typeof createFolder>>[];
+  entries: ReturnType<typeof createEntry>[];
+}
+
+interface AiKnowledgeBaseJob {
+  id: string;
+  kind: 'kb-generate' | 'folder-init';
+  domain: string;
+  questionCount: number;
+  kbId?: string;
+  kbName?: string;
+  parentId?: string | null;
+  targetPath?: string;
+  status: AiJobStatus;
+  logs: string[];
+  modelOutput: string;
+  parsed?: { kbName: string; folders: number; questions: number };
+  result?: GeneratedKnowledgeBaseResult;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+const aiJobs = new Map<string, AiKnowledgeBaseJob>();
+const MAX_JOB_OUTPUT = 160_000;
+const MAX_JOBS = 30;
+
+function trimJobOutput(value: string): string {
+  return value.length > MAX_JOB_OUTPUT ? value.slice(-MAX_JOB_OUTPUT) : value;
+}
+
+function touchJob(job: AiKnowledgeBaseJob): void {
+  job.updatedAt = Date.now();
+}
+
+function pushJobLog(job: AiKnowledgeBaseJob, message: string): void {
+  const next = message.trim();
+  if (!next) return;
+  if (job.logs[job.logs.length - 1] !== next) job.logs.push(next);
+  if (job.logs.length > 60) job.logs = job.logs.slice(-60);
+  touchJob(job);
+}
+
+function jobSnapshot(job: AiKnowledgeBaseJob): AiKnowledgeBaseJob {
+  return {
+    ...job,
+    logs: [...job.logs],
+    result: job.result ? {
+      kb: job.result.kb,
+      folders: [...job.result.folders],
+      entries: [...job.result.entries],
+    } : undefined,
+  };
+}
+
+function listJobSnapshots(): AiKnowledgeBaseJob[] {
+  return [...aiJobs.values()]
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map(jobSnapshot);
+}
+
+function pruneJobs(): void {
+  const jobs = [...aiJobs.values()].sort((a, b) => b.createdAt - a.createdAt);
+  const removable = jobs.slice(MAX_JOBS).filter((job) => job.status !== 'running' && job.status !== 'queued');
+  for (const job of removable) aiJobs.delete(job.id);
+}
+
+function createKnowledgeBaseFromDraft(domain: string, draft: GeneratedKbDraft): GeneratedKnowledgeBaseResult {
+  const kb = createKb(draft.kbName);
+  const folderByPath = new Map<string, NonNullable<ReturnType<typeof createFolder>>>();
+  const createdFolders: NonNullable<ReturnType<typeof createFolder>>[] = [];
+
+  const ensurePath = (parts: string[]): string | null => {
+    let parentId: string | null = null;
+    const current: string[] = [];
+    for (const raw of parts) {
+      const name = raw.trim();
+      if (!name) continue;
+      current.push(name);
+      const key = pathKey(current);
+      const existing = folderByPath.get(key);
+      if (existing) {
+        parentId = existing.id;
+        continue;
+      }
+      const folder = createFolder({ kbId: kb.id, parentId, name });
+      if (!folder) throw new Error('目录创建失败');
+      folderByPath.set(key, folder);
+      createdFolders.push(folder);
+      parentId = folder.id;
+    }
+    return parentId;
+  };
+
+  for (const folder of draft.folders) ensurePath(folder.path);
+  const entries = draft.questions.map((question) => {
+    const folderId = ensurePath(question.folderPath);
+    return createEntry({
+      ...kbQuestionToEntryInput(question, domain),
+      kbId: kb.id,
+      folderId,
+    });
+  });
+
+  return { kb, folders: createdFolders, entries };
+}
+
+function createFoldersFromDraft(
+  kb: ReturnType<typeof createKb>,
+  parentId: string | null,
+  draft: GeneratedFolderTreeDraft,
+): GeneratedKnowledgeBaseResult {
+  const folderByPath = new Map<string, NonNullable<ReturnType<typeof createFolder>>>();
+  const touchedFolders: NonNullable<ReturnType<typeof createFolder>>[] = [];
+  const touchedIds = new Set<string>();
+
+  const ensurePath = (parts: string[]): void => {
+    let currentParentId = parentId;
+    const current: string[] = [];
+    for (const raw of parts) {
+      const name = raw.trim();
+      if (!name) continue;
+      current.push(name);
+      const key = pathKey([parentId ?? 'root', ...current]);
+      const existing = folderByPath.get(key);
+      if (existing) {
+        currentParentId = existing.id;
+        continue;
+      }
+      const folder = ensureFolder(kb.id, name, currentParentId);
+      folderByPath.set(key, folder);
+      if (!touchedIds.has(folder.id)) {
+        touchedIds.add(folder.id);
+        touchedFolders.push(folder);
+      }
+      currentParentId = folder.id;
+    }
+  };
+
+  for (const folder of draft.folders) ensurePath(folder.path);
+  return { kb, folders: touchedFolders, entries: [] };
+}
+
+function startKnowledgeBaseJob(domain: string, questionCount: number): AiKnowledgeBaseJob {
+  const now = Date.now();
+  const job: AiKnowledgeBaseJob = {
+    id: `job_${now.toString(36)}_${randomUUID().slice(0, 8)}`,
+    kind: 'kb-generate',
+    domain,
+    questionCount,
+    status: 'queued',
+    logs: ['任务已创建，等待后台执行'],
+    modelOutput: '',
+    createdAt: now,
+    updatedAt: now,
+  };
+  aiJobs.set(job.id, job);
+  pruneJobs();
+  setTimeout(() => { void runKnowledgeBaseJob(job.id); }, 0);
+  return job;
+}
+
+function startFolderInitJob(input: {
+  kbId: string;
+  kbName: string;
+  parentId: string | null;
+  targetPath: string;
+  domain: string;
+  folderCount: number;
+}): AiKnowledgeBaseJob {
+  const now = Date.now();
+  const job: AiKnowledgeBaseJob = {
+    id: `job_${now.toString(36)}_${randomUUID().slice(0, 8)}`,
+    kind: 'folder-init',
+    domain: input.domain,
+    questionCount: 0,
+    kbId: input.kbId,
+    kbName: input.kbName,
+    parentId: input.parentId,
+    targetPath: input.targetPath,
+    status: 'queued',
+    logs: ['目录初始化任务已创建，等待后台执行'],
+    modelOutput: '',
+    createdAt: now,
+    updatedAt: now,
+  };
+  aiJobs.set(job.id, job);
+  pruneJobs();
+  setTimeout(() => { void runFolderInitJob(job.id, input.folderCount); }, 0);
+  return job;
+}
+
+async function runKnowledgeBaseJob(jobId: string): Promise<void> {
+  const job = aiJobs.get(jobId);
+  if (!job) return;
+  job.status = 'running';
+  pushJobLog(job, '后台任务已启动');
+  try {
+    const draft = await generateKnowledgeBaseDraftStream({
+      domain: job.domain,
+      questionCount: job.questionCount,
+    }, (event: GenerateKnowledgeBaseEvent) => {
+      const current = aiJobs.get(jobId);
+      if (!current) return;
+      if (event.type === 'stage') pushJobLog(current, event.message);
+      if (event.type === 'model-delta') {
+        current.modelOutput = trimJobOutput(`${current.modelOutput}${event.content}`);
+        touchJob(current);
+      }
+      if (event.type === 'model-output') {
+        current.modelOutput = trimJobOutput(event.content);
+        touchJob(current);
+      }
+      if (event.type === 'parsed-kb') {
+        current.parsed = { kbName: event.kbName, folders: event.folders, questions: event.questions };
+        pushJobLog(current, `解析完成：${event.kbName} · ${event.folders} 个目录 · ${event.questions} 道题`);
+      }
+    });
+
+    pushJobLog(job, '开始写入知识库');
+    const result = createKnowledgeBaseFromDraft(job.domain, draft);
+    job.result = result;
+    job.status = 'succeeded';
+    pushJobLog(job, `已完成：${result.kb.name} · ${result.folders.length} 个目录 · ${result.entries.length} 条知识点`);
+    touchJob(job);
+  } catch (err) {
+    job.status = 'failed';
+    job.error = err instanceof Error ? err.message : String(err);
+    pushJobLog(job, job.error);
+    touchJob(job);
+  }
+}
+
+async function runFolderInitJob(jobId: string, folderCount: number): Promise<void> {
+  const job = aiJobs.get(jobId);
+  if (!job) return;
+  job.status = 'running';
+  pushJobLog(job, '后台目录初始化已启动');
+  try {
+    if (!job.kbId) throw new Error('知识库不存在');
+    const kb = getKb(job.kbId);
+    if (!kb) throw new Error('知识库不存在');
+    const existingFolders = listFolders()
+      .filter((folder) => folder.kbId === kb.id)
+      .map((folder) => folderPathLabel(folder.id));
+    const draft = await generateFolderTreeDraftStream({
+      domain: job.domain,
+      kbName: kb.name,
+      targetPath: job.targetPath,
+      existingFolders,
+      folderCount,
+    }, (event: GenerateFolderTreeEvent) => {
+      const current = aiJobs.get(jobId);
+      if (!current) return;
+      if (event.type === 'stage') pushJobLog(current, event.message);
+      if (event.type === 'model-delta') {
+        current.modelOutput = trimJobOutput(`${current.modelOutput}${event.content}`);
+        touchJob(current);
+      }
+      if (event.type === 'model-output') {
+        current.modelOutput = trimJobOutput(event.content);
+        touchJob(current);
+      }
+      if (event.type === 'parsed-folders') {
+        current.parsed = { kbName: kb.name, folders: event.folders, questions: 0 };
+        pushJobLog(current, `解析完成：${event.title} · ${event.folders} 个目录路径`);
+      }
+    });
+
+    pushJobLog(job, '开始写入文件目录');
+    const result = createFoldersFromDraft(kb, job.parentId ?? null, draft);
+    job.result = result;
+    job.status = 'succeeded';
+    pushJobLog(job, `已完成：${kb.name} · ${result.folders.length} 个目录`);
+    touchJob(job);
+  } catch (err) {
+    job.status = 'failed';
+    job.error = err instanceof Error ? err.message : String(err);
+    pushJobLog(job, job.error);
+    touchJob(job);
+  }
+}
+
 export function createApp() {
   seedBuiltins();
 
@@ -79,6 +383,16 @@ export function createApp() {
   // 健康检查
   api.get('/health', (_req, res) => res.json({ ok: true }));
 
+  api.get('/ai/jobs', (_req, res) => {
+    res.json({ jobs: listJobSnapshots() });
+  });
+
+  api.get('/ai/jobs/:id', (req, res) => {
+    const job = aiJobs.get(req.params.id);
+    if (!job) return res.status(404).json({ error: '任务不存在' });
+    res.json({ job: jobSnapshot(job) });
+  });
+
   // ───────────── 知识库 ─────────────
   api.get('/kbs', (_req, res) => {
     res.json({ kbs: listKbs() });
@@ -89,6 +403,71 @@ export function createApp() {
     if (!name) return res.status(400).json({ error: 'name 不能为空' });
     const kb = createKb(name);
     res.status(201).json({ kb });
+  });
+
+  // AI 新建知识库后台任务：提交后立即返回 jobId，生成过程由服务端继续执行。
+  api.post('/kbs/generate/jobs', (req, res) => {
+    const domain = String(req.body?.domain ?? '').trim();
+    const questionCount = Number(req.body?.questionCount ?? 14);
+    if (!domain) return res.status(400).json({ error: 'domain 不能为空' });
+    const job = startKnowledgeBaseJob(domain, Number.isFinite(questionCount) ? questionCount : 14);
+    res.status(202).json({ job: jobSnapshot(job) });
+  });
+
+  // AI 初始化当前知识库文件目录：只创建文件夹，不生成知识点。
+  api.post('/kbs/:id/folders/init/jobs', (req, res) => {
+    const kb = getKb(req.params.id);
+    if (!kb) return res.status(404).json({ error: '知识库不存在' });
+    const requestedParentId = req.body?.parentId == null ? '' : String(req.body.parentId).trim();
+    const parentId = requestedParentId || null;
+    const parent = parentId ? getFolder(parentId) : null;
+    if (parentId && !parent) return res.status(404).json({ error: '目标文件夹不存在' });
+    if (parent && parent.kbId !== kb.id) return res.status(400).json({ error: '目标文件夹不属于当前知识库' });
+    const domain = String(req.body?.domain ?? '').trim() || kb.name;
+    const folderCount = Number(req.body?.folderCount ?? 18);
+    const job = startFolderInitJob({
+      kbId: kb.id,
+      kbName: kb.name,
+      parentId,
+      targetPath: folderPathLabel(parentId),
+      domain,
+      folderCount: Number.isFinite(folderCount) ? folderCount : 18,
+    });
+    res.status(202).json({ job: jobSnapshot(job) });
+  });
+
+  // AI 新建知识库：按领域自动规划目录，并生成一批 Q&A 面试知识点。
+  api.post('/kbs/generate/stream', async (req, res) => {
+    const domain = String(req.body?.domain ?? '').trim();
+    const questionCount = Number(req.body?.questionCount ?? 14);
+    if (!domain) return res.status(400).json({ error: 'domain 不能为空' });
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    sendSse(res, 'stage', { message: '准备创建知识库生成请求' });
+
+    try {
+      const draft = await generateKnowledgeBaseDraftStream({
+        domain,
+        questionCount: Number.isFinite(questionCount) ? questionCount : 14,
+      }, (event: GenerateKnowledgeBaseEvent) => sendSse(res, event.type, event));
+
+      sendSse(res, 'stage', { message: '写入新知识库、目录和 Q&A 知识点' });
+      const payload = createKnowledgeBaseFromDraft(domain, draft);
+      sendSse(res, 'saved-kb', payload);
+      sendSse(res, 'done', payload);
+      res.end();
+    } catch (err) {
+      sendSse(res, 'error', {
+        configured: !(err instanceof AiConfigError),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.end();
+    }
   });
 
   api.put('/kbs/:id', (req, res) => {
