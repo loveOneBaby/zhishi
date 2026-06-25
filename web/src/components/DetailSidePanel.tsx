@@ -5,29 +5,47 @@ import BlockEditor from './BlockEditor';
 interface Props {
   entry: Entry | null;
   query?: string;
+  contextLabel?: string;
+  contextBadge?: string;
 }
 
-export default function DetailSidePanel({ entry, query = '' }: Props) {
+function DetailLocation({ label, badge }: { label?: string; badge?: string }) {
+  if (!label) return null;
+  return (
+    <div className="ik-detail-location">
+      <div className="ik-detail-location-copy">
+        <span className="ik-detail-location-kicker">当前位置</span>
+        <span className="ik-detail-location-path" title={label}>{label}</span>
+      </div>
+      {badge && <span className="ik-detail-location-badge">{badge}</span>}
+    </div>
+  );
+}
+
+export default function DetailSidePanel({ entry, query = '', contextLabel, contextBadge }: Props) {
   if (!entry) {
     return (
       <aside
         style={{
-          position: 'sticky',
-          top: 92,
-          height: 'calc(100vh - 112px)',
+          position: 'relative',
+          height: '100%',
+          minHeight: 0,
           border: '1px dashed var(--bd)',
           borderRadius: 12,
           background: 'color-mix(in srgb, var(--panel) 62%, transparent)',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          flexDirection: 'column',
           color: 'var(--mut)',
           fontSize: 13,
           textAlign: 'center',
-          padding: 24,
+          padding: '20px 24px 0',
+          overflow: 'hidden',
         }}
       >
-        点击左侧知识点，在这里查看完整内容
+        <DetailLocation label={contextLabel} badge={contextBadge} />
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 0' }}>
+          点击左侧知识点，在这里查看完整内容
+        </div>
       </aside>
     );
   }
@@ -35,19 +53,20 @@ export default function DetailSidePanel({ entry, query = '' }: Props) {
   return (
     <aside
       style={{
-        position: 'sticky',
-        top: 92,
-        height: 'calc(100vh - 112px)',
+        position: 'relative',
+        height: '100%',
+        minHeight: 0,
         overflow: 'hidden',
         border: '1px solid var(--bd)',
         borderRadius: 12,
         background: 'var(--panel)',
-        boxShadow: '0 22px 56px rgba(0,0,0,.075)',
+        boxShadow: '0 10px 28px rgba(0,0,0,.045)',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
-      <div style={{ padding: '28px 32px 22px', borderBottom: '1px solid var(--bd)', flexShrink: 0 }}>
+      <div style={{ padding: '20px 32px 22px', borderBottom: '1px solid var(--bd)', flexShrink: 0 }}>
+        <DetailLocation label={contextLabel} badge={contextBadge} />
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
           <span style={{ fontSize: 11, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '3px 8px' }}>{highlightText(entry.cat, query)}</span>
           {entry.tags.slice(0, 4).map((tag) => (

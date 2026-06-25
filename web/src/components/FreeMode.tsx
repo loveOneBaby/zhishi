@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import { BookOpen, Download, FileText, FolderPlus, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase } from '../types';
-import { folderSubtreeIds, forestOfKb, type FolderNode } from '../tree';
+import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import DetailSidePanel from './DetailSidePanel';
 import EntryEditor from './EntryEditor';
 import ImportPreviewModal from './ImportPreviewModal';
+import KnowledgeTree from './KnowledgeTree';
+import CommandDialog from './CommandDialog';
+import Button from './Button';
+import type { SelectOption } from './SelectField';
 import { exportAll, importAll, previewImport, type ImportPayload, type ImportPreview } from '../api';
 import { toast } from '../toast';
 
@@ -20,6 +25,7 @@ interface Props {
   onCreate: (input: EntryInput) => Promise<Entry>;
   onUpdate: (id: string, input: EntryInput) => Promise<Entry>;
   onDelete: (id: string) => Promise<void>;
+  onReorderEntries: (ids: string[]) => Promise<void>;
   onImported: (entries: Entry[], kbs: KnowledgeBase[], folders: Folder[]) => void;
   onCreateKb: (name: string) => Promise<KnowledgeBase>;
   onCreateFolder: (input: { kbId: string; parentId?: string | null; name: string }) => Promise<Folder>;
@@ -27,6 +33,8 @@ interface Props {
   onDeleteKb: (id: string) => Promise<void>;
   onRenameFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
+  onMoveFolder: (id: string, opts: { parentId?: string | null; kbId?: string }) => Promise<void>;
+  onReorderFolders: (ids: string[]) => Promise<void>;
 }
 
 const cardStyle: CSSProperties = {
@@ -72,33 +80,19 @@ const ghostBtn: CSSProperties = {
 };
 
 const treePanelStyle: CSSProperties = {
-  position: 'sticky',
-  top: 92,
-  height: 'calc(100vh - 112px)',
-  minHeight: 620,
+  position: 'relative',
+  height: '100%',
+  minHeight: 0,
   overflow: 'hidden',
   border: '1px solid var(--bd)',
   borderRadius: 12,
   background: 'var(--panel)',
-  boxShadow: '0 22px 56px rgba(0,0,0,.065)',
+  boxShadow: '0 10px 28px rgba(0,0,0,.04)',
   display: 'flex',
   flexDirection: 'column',
 };
 
-const treeRowBase: CSSProperties = {
-  position: 'relative',
-  display: 'grid',
-  gridTemplateColumns: '18px minmax(0, 1fr) auto',
-  alignItems: 'center',
-  gap: 8,
-  width: '100%',
-  minHeight: 42,
-  padding: '9px 66px 9px 11px',
-  border: '1px solid transparent',
-  borderRadius: 9,
-  cursor: 'pointer',
-  color: 'var(--fg)',
-};
+const ROOT_IMPORT_TARGET = '__ik_root_folder__';
 
 function hoverOn(e: React.MouseEvent<HTMLDivElement>): void { e.currentTarget.style.borderColor = 'var(--mut)'; }
 function hoverOff(e: React.MouseEvent<HTMLDivElement>): void { e.currentTarget.style.borderColor = 'var(--bd)'; }
@@ -111,34 +105,54 @@ function orderEntries(list: Entry[]): Entry[] {
   );
 }
 
-function activateOnKeyboard(e: React.KeyboardEvent<HTMLDivElement>, action: () => void): void {
-  if (e.key !== 'Enter' && e.key !== ' ') return;
-  e.preventDefault();
-  action();
+function newImportBatchId(): string {
+  return `im_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 // 卡片 / 树节点右侧的轻量操作按钮
 function RowActions({ onRename, onDelete }: { onRename: () => void; onDelete: () => void }): ReactNode {
   return (
     <div className="ik-row-actions">
-      <button type="button" title="重命名" className="ik-row-action-btn" onClick={(e) => { e.stopPropagation(); onRename(); }}>✎</button>
-      <button type="button" title="删除" className="ik-row-action-btn ik-row-action-danger" onClick={(e) => { e.stopPropagation(); onDelete(); }}>✕</button>
+      <button type="button" title="重命名" className="ik-row-action-btn" onClick={(e) => { e.stopPropagation(); onRename(); }}>
+        <Pencil size={13} strokeWidth={2.1} />
+      </button>
+      <button type="button" title="删除" className="ik-row-action-btn ik-row-action-danger" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+        <Trash2 size={13} strokeWidth={2.1} />
+      </button>
     </div>
   );
+}
+
+type CommandState =
+  | { kind: 'create-kb' }
+  | { kind: 'create-folder'; kbId: string; parentId: string | null }
+  | { kind: 'rename-kb'; kb: KnowledgeBase }
+  | { kind: 'rename-folder'; folder: Folder }
+  | { kind: 'delete-kb'; kb: KnowledgeBase }
+  | { kind: 'delete-folder'; folder: Folder }
+  | { kind: 'delete-entry'; entry: Entry }
+  | { kind: 'discard-edit' };
+
+interface RestoreSnapshot {
+  kbs?: KnowledgeBase[];
+  folders?: Folder[];
+  entries: Entry[];
 }
 
 export default function FreeMode(props: Props): ReactNode {
   const { entries, kbs, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
     onCreate, onUpdate, onDelete, onImported,
-    onCreateKb, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder } = props;
+    onCreateKb, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries } = props;
 
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [panelMode, setPanelMode] = useState<'detail' | 'create' | 'edit'>('detail');
   const [importPreview, setImportPreview] = useState<{ payload: ImportPayload; preview: ImportPreview } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [previewingImport, setPreviewingImport] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
+  const [command, setCommand] = useState<CommandState | null>(null);
   const dirtyRef = useRef(false);
+  const pendingGuardRef = useRef<(() => void) | null>(null);
 
   const entriesOfKb = useMemo(() => (kbId: string) => orderEntries(entries.filter((e) => e.kbId === kbId)), [entries]);
   const currentKb = kbs.find((k) => k.id === freeKb) ?? null;
@@ -147,16 +161,25 @@ export default function FreeMode(props: Props): ReactNode {
     () => kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
     [kbEntries, selectedEntryId],
   );
-  const folderForest = useMemo(() => (freeKb ? forestOfKb(folders, freeKb) : []), [folders, freeKb]);
-  const entriesByFolder = useMemo(() => {
-    const map = new Map<string | null, Entry[]>();
-    for (const entry of kbEntries) {
-      const key = entry.folderId ?? null;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(entry);
-    }
-    return map;
-  }, [kbEntries]);
+  const currentFolderId = selectedEntry?.folderId ?? freeFolder;
+  const currentFolderChain = useMemo(() => folderChain(folders, currentFolderId), [currentFolderId, folders]);
+  const operationPath = [
+    currentKb?.name ?? '知识库',
+    ...(currentFolderChain.length ? currentFolderChain.map((folder) => folder.name) : ['根层级']),
+  ];
+  const viewingPath = selectedEntry ? [...operationPath, selectedEntry.title] : operationPath;
+  const operationPathLabel = operationPath.join(' / ');
+  const viewingPathLabel = viewingPath.join(' / ');
+  const importFolderOptions = useMemo<SelectOption[]>(() => {
+    if (!freeKb) return [];
+    const currentRoot = currentKb?.name ? `${currentKb.name} / 根层级` : '知识库根层级';
+    const folderOptions = folders
+      .filter((folder) => folder.kbId === freeKb)
+      .map((folder) => ({ value: folder.id, label: folderPathName(folders, folder.id) || folder.name }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
+    return [{ value: ROOT_IMPORT_TARGET, label: currentRoot }, ...folderOptions];
+  }, [currentKb?.name, folders, freeKb]);
+  const canImportJson = Boolean(freeKb);
   useEffect(() => {
     if (!freeKb) {
       if (selectedEntryId) setSelectedEntryId(null);
@@ -183,41 +206,31 @@ export default function FreeMode(props: Props): ReactNode {
 
   function guardPanel(next: () => void): void {
     if (dirtyRef.current) {
-      if (!window.confirm('当前知识点有未保存的修改，放弃修改？')) return;
-      dirtyRef.current = false;
+      pendingGuardRef.current = next;
+      setCommand({ kind: 'discard-edit' });
+      return;
     }
     next();
   }
 
   // ── 新建操作 ──
   function newKb(): void {
-    const name = window.prompt('新建知识库名称：');
-    if (!name?.trim()) return;
-    onCreateKb(name.trim()).catch((err) => toast('新建失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+    setCommand({ kind: 'create-kb' });
   }
   function newFolder(kbId: string, parentId: string | null): void {
-    const name = window.prompt('新建文件夹名称：');
-    if (!name?.trim()) return;
-    onCreateFolder({ kbId, parentId, name: name.trim() }).catch((err) => toast('新建失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+    setCommand({ kind: 'create-folder', kbId, parentId });
   }
   function renameKbAction(kb: KnowledgeBase): void {
-    const next = window.prompt(`重命名知识库「${kb.name}」为：`, kb.name);
-    if (!next?.trim() || next.trim() === kb.name) return;
-    onRenameKb(kb.id, next.trim()).catch((err) => toast('重命名失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+    setCommand({ kind: 'rename-kb', kb });
   }
   function deleteKbAction(kb: KnowledgeBase): void {
-    const n = entriesOfKb(kb.id).length;
-    if (!window.confirm(`确定删除知识库「${kb.name}」及其下 ${n} 条知识点与全部文件夹？此操作不可撤销。`)) return;
-    onDeleteKb(kb.id).catch((err) => toast('删除失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+    setCommand({ kind: 'delete-kb', kb });
   }
   function renameFolderAction(folder: Folder): void {
-    const next = window.prompt(`重命名文件夹「${folder.name}」为：`, folder.name);
-    if (!next?.trim() || next.trim() === folder.name) return;
-    onRenameFolder(folder.id, next.trim()).catch((err) => toast('重命名失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+    setCommand({ kind: 'rename-folder', folder });
   }
   function deleteFolderAction(folder: Folder): void {
-    if (!window.confirm(`确定删除文件夹「${folder.name}」及其下全部子文件夹与知识点？此操作不可撤销。`)) return;
-    onDeleteFolder(folder.id).catch((err) => toast('删除失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+    setCommand({ kind: 'delete-folder', folder });
   }
 
   async function handleExport(): Promise<void> {
@@ -239,6 +252,18 @@ export default function FreeMode(props: Props): ReactNode {
   function handleImport(e: React.ChangeEvent<HTMLInputElement>): void {
     const file = e.target.files?.[0];
     if (!file) return;
+    const currentKb = freeKb ? kbs.find((kb) => kb.id === freeKb) : null;
+    if (!currentKb) {
+      toast('请先进入一个知识库，再导入数据', 'info');
+      e.target.value = '';
+      return;
+    }
+    if (!canImportJson) {
+      toast('请先进入一个知识库，再导入 JSON', 'info');
+      e.target.value = '';
+      return;
+    }
+    const targetFolderId = freeFolder ?? null;
     const reader = new FileReader();
     reader.onload = () => {
       let parsed: unknown;
@@ -248,40 +273,74 @@ export default function FreeMode(props: Props): ReactNode {
         toast('文件解析失败：' + (err instanceof Error ? err.message : String(err)), 'error');
         return;
       }
-      const obj = parsed as { version?: string; meta?: unknown; tree?: unknown[]; entries?: unknown[]; assets?: unknown[] };
+      const obj = parsed as {
+        version?: string;
+        meta?: unknown;
+        package?: unknown;
+        schema?: unknown;
+        containers?: unknown[];
+        extensions?: unknown;
+        kbs?: unknown[];
+        folders?: unknown[];
+        tree?: unknown[];
+        entries?: unknown[];
+        assets?: unknown[];
+      };
       const hasTree = Array.isArray(obj?.tree) && obj.tree.length > 0;
       const hasEntries = Array.isArray(obj?.entries) && obj.entries.length > 0;
       if (!hasTree && !hasEntries) {
-        toast('文件需要 entries 数组（BlockNote 块）或 tree 数组', 'error');
+        toast('文件需要 kb-package-2 的 entries 数组', 'error');
         return;
       }
-      const currentKb = freeKb ? kbs.find((kb) => kb.id === freeKb) : null;
       const payload: ImportPayload = {
         version: obj.version,
         meta: obj.meta,
+        package: obj.package,
+        schema: obj.schema,
+        containers: obj.containers,
+        extensions: obj.extensions,
+        kbs: obj.kbs,
+        folders: obj.folders,
         tree: obj.tree,
         entries: obj.entries,
         assets: obj.assets,
         targetKbId: currentKb?.id,
         targetKbName: currentKb?.name,
+        targetFolderId,
+        importBatchId: newImportBatchId(),
       };
-      previewImport(payload)
-        .then((preview) => setImportPreview({ payload, preview }))
-        .catch((err) => toast('解析失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+      refreshImportPreview(payload);
     };
     reader.readAsText(file);
     e.target.value = '';
   }
 
+  function refreshImportPreview(payload: ImportPayload): void {
+    setPreviewingImport(true);
+    previewImport(payload)
+      .then((preview) => setImportPreview({ payload, preview }))
+      .catch((err) => toast('解析失败：' + (err instanceof Error ? err.message : String(err)), 'error'))
+      .finally(() => setPreviewingImport(false));
+  }
+
   async function handleConfirmImport(replace: boolean): Promise<void> {
     if (!importPreview) return;
     const { payload, preview } = importPreview;
+    const previewFolders = preview.folders ?? [];
+    if (!Object.prototype.hasOwnProperty.call(payload, 'targetFolderId')) {
+      toast('请选择导入位置', 'error');
+      return;
+    }
     setImporting(true);
     try {
       const next = await importAll(payload, replace);
       onImported(next.entries, next.kbs, next.folders);
-      toast(`已${replace ? '替换' : '合并'}导入 ${preview.valid} 条知识点`, 'success');
+      toast(`已导入 ${preview.valid} 条知识点，生成 ${previewFolders.length} 个文件夹`, 'success');
       setImportPreview(null);
+      const importedFolderIds = new Set(previewFolders.map((folder) => folder.id).filter((id): id is string => Boolean(id)));
+      const firstImportedFolder = next.folders.find((folder) => importedFolderIds.has(folder.id) && folder.parentId === payload.targetFolderId)
+        ?? next.folders.find((folder) => importedFolderIds.has(folder.id));
+      setFreeFolder(firstImportedFolder?.id ?? payload.targetFolderId ?? null);
       setPanelMode('detail');
     } catch (err) {
       toast('导入失败：' + (err instanceof Error ? err.message : String(err)), 'error');
@@ -290,12 +349,105 @@ export default function FreeMode(props: Props): ReactNode {
     }
   }
 
+  async function restoreSnapshot(snapshot: RestoreSnapshot, focus?: { kbId?: string; folderId?: string | null; entryId?: string | null }): Promise<void> {
+    try {
+      const next = await importAll({
+        version: 'kb-undo-1',
+        kbs: snapshot.kbs,
+        folders: snapshot.folders,
+        entries: snapshot.entries,
+        importBatchId: newImportBatchId(),
+      }, false);
+      onImported(next.entries, next.kbs, next.folders);
+      if (focus?.kbId) setFreeKb(focus.kbId);
+      if (focus && Object.prototype.hasOwnProperty.call(focus, 'folderId')) setFreeFolder(focus.folderId ?? null);
+      if (focus?.entryId) setSelectedEntryId(focus.entryId);
+      setPanelMode('detail');
+      dirtyRef.current = false;
+      toast('已撤销删除', 'success');
+    } catch (err) {
+      toast('撤销失败：' + (err instanceof Error ? err.message : String(err)), 'error');
+    }
+  }
+
+  function toastUndo(message: string, snapshot: RestoreSnapshot, focus?: { kbId?: string; folderId?: string | null; entryId?: string | null }): void {
+    toast(message, 'success', {
+      durationMs: 7600,
+      action: {
+        label: '撤销',
+        onClick: () => restoreSnapshot(snapshot, focus),
+      },
+    });
+  }
+
+  function folderSnapshot(folder: Folder): RestoreSnapshot {
+    const ids = folderSubtreeIds(folders, folder.id);
+    const snapshotFolders = folders.filter((candidate) => ids.has(candidate.id));
+    const snapshotEntries = entries.filter((entry) => entry.folderId && ids.has(entry.folderId));
+    return { folders: snapshotFolders, entries: snapshotEntries };
+  }
+
+  async function deleteKbWithUndo(kb: KnowledgeBase): Promise<void> {
+    const snapshot: RestoreSnapshot = {
+      kbs: [kb],
+      folders: folders.filter((folder) => folder.kbId === kb.id),
+      entries: entries.filter((entry) => entry.kbId === kb.id),
+    };
+    await onDeleteKb(kb.id);
+    setSelectedEntryId(null);
+    toastUndo(`已删除「${kb.name}」`, snapshot, { kbId: kb.id, folderId: null });
+  }
+
+  async function deleteFolderWithUndo(folder: Folder, toastMessage = `已删除「${folder.name}」`): Promise<void> {
+    const snapshot = folderSnapshot(folder);
+    await onDeleteFolder(folder.id);
+    if (freeFolder && snapshot.folders?.some((candidate) => candidate.id === freeFolder)) setFreeFolder(null);
+    if (selectedEntryId && snapshot.entries.some((entry) => entry.id === selectedEntryId)) setSelectedEntryId(null);
+    toastUndo(toastMessage, snapshot, { kbId: folder.kbId, folderId: folder.id });
+  }
+
+  async function deleteEntryWithUndo(entry: Entry, toastMessage = `已删除「${entry.title}」`): Promise<void> {
+    const snapshot: RestoreSnapshot = { entries: [entry] };
+    await onDelete(entry.id);
+    if (selectedEntryId === entry.id) setSelectedEntryId(null);
+    toastUndo(toastMessage, snapshot, { kbId: entry.kbId, folderId: entry.folderId ?? null, entryId: entry.id });
+  }
+
+  async function deleteSelectionWithUndo(selectedFolders: Folder[], selectedEntries: Entry[]): Promise<void> {
+    const folderIds = new Set<string>();
+    for (const folder of selectedFolders) {
+      for (const id of folderSubtreeIds(folders, folder.id)) folderIds.add(id);
+    }
+    const snapshotFolders = folders.filter((folder) => folderIds.has(folder.id));
+    const selectedEntryIds = new Set(selectedEntries.map((entry) => entry.id));
+    const snapshotEntries = entries.filter((entry) => selectedEntryIds.has(entry.id) || (entry.folderId && folderIds.has(entry.folderId)));
+
+    for (const folder of selectedFolders) await onDeleteFolder(folder.id);
+    for (const entry of selectedEntries) {
+      if (!entry.folderId || !folderIds.has(entry.folderId)) await onDelete(entry.id);
+    }
+    setSelectedEntryId((id) => (id && snapshotEntries.some((entry) => entry.id === id) ? null : id));
+    toastUndo(`已删除 ${selectedFolders.length + selectedEntries.length} 项`, { folders: snapshotFolders, entries: snapshotEntries }, {
+      kbId: currentKb?.id,
+      folderId: freeFolder,
+    });
+  }
+
   function startCreateEntry(): void {
     if (!freeKb) {
       onNew();
       return;
     }
+    startCreateEntryInFolder(freeFolder);
+  }
+
+  function startCreateEntryInFolder(folderId: string | null): void {
+    if (!freeKb) {
+      onNew();
+      return;
+    }
     guardPanel(() => {
+      setFreeFolder(folderId);
       setPanelMode('create');
       dirtyRef.current = false;
     });
@@ -321,19 +473,70 @@ export default function FreeMode(props: Props): ReactNode {
 
   function deleteSelectedEntry(): void {
     if (!selectedEntry) return;
-    if (!window.confirm(`确定删除知识点「${selectedEntry.title}」？此操作不可撤销。`)) return;
-    onDelete(selectedEntry.id)
-      .then(() => {
-        setPanelMode('detail');
-        dirtyRef.current = false;
-      })
-      .catch((err) => toast('删除失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+    deleteEntryAction(selectedEntry);
+  }
+
+  function deleteEntryAction(entry: Entry): void {
+    setCommand({ kind: 'delete-entry', entry });
+  }
+
+  function selectRoot(): void {
+    guardPanel(() => {
+      setFreeFolder(null);
+      setSelectedEntryId(null);
+      setPanelMode('detail');
+      dirtyRef.current = false;
+    });
+  }
+
+  function selectFolder(folder: Folder): void {
+    guardPanel(() => {
+      setFreeFolder(folder.id);
+      setSelectedEntryId(null);
+      setPanelMode('detail');
+      dirtyRef.current = false;
+    });
+  }
+
+  function selectEntry(entry: Entry): void {
+    guardPanel(() => {
+      setSelectedEntryId(entry.id);
+      setFreeFolder(entry.folderId ?? null);
+      setPanelMode('detail');
+      dirtyRef.current = false;
+    });
+  }
+
+  function editEntryAction(entry: Entry): void {
+    guardPanel(() => {
+      setSelectedEntryId(entry.id);
+      setFreeFolder(entry.folderId ?? null);
+      setPanelMode('edit');
+      dirtyRef.current = false;
+    });
+  }
+
+  async function moveEntryAction(entry: Entry, folderId: string | null): Promise<void> {
+    const moved = await onUpdate(entry.id, {
+      title: entry.title,
+      kbId: entry.kbId,
+      folderId,
+      tags: entry.tags,
+      summary: entry.summary,
+      py: entry.py,
+      intro: entry.intro,
+      nodes: entry.nodes,
+      doc: entry.doc,
+    });
+    if (selectedEntryId === entry.id) {
+      setSelectedEntryId(moved.id);
+      setFreeFolder(moved.folderId ?? null);
+    }
   }
 
   function openKb(kb: KnowledgeBase): void {
     setFreeKb(kb.id);
     setFreeFolder(null);
-    setCollapsedFolders(new Set());
     setSelectedEntryId(entriesOfKb(kb.id)[0]?.id ?? null);
     setPanelMode('detail');
     dirtyRef.current = false;
@@ -344,18 +547,8 @@ export default function FreeMode(props: Props): ReactNode {
       setFreeKb(null);
       setFreeFolder(null);
       setSelectedEntryId(null);
-      setCollapsedFolders(new Set());
       setPanelMode('detail');
       dirtyRef.current = false;
-    });
-  }
-
-  function toggleFolder(folderId: string): void {
-    setCollapsedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(folderId)) next.delete(folderId);
-      else next.add(folderId);
-      return next;
     });
   }
 
@@ -364,107 +557,204 @@ export default function FreeMode(props: Props): ReactNode {
     return kbEntries.filter((entry) => entry.folderId && ids.has(entry.folderId)).length;
   }
 
-  function renderEntryRow(entry: Entry, depth: number): ReactNode {
-    const active = entry.id === selectedEntryId;
-    const action = (): void => {
-      guardPanel(() => {
-        setSelectedEntryId(entry.id);
-        setFreeFolder(entry.folderId ?? null);
-        setPanelMode('detail');
-        dirtyRef.current = false;
-      });
-    };
-
-    return (
-      <div
-        className="ik-tree-row"
-        key={entry.id}
-        role="button"
-        tabIndex={0}
-        onClick={action}
-        onKeyDown={(e) => activateOnKeyboard(e, action)}
-        style={{
-          ...treeRowBase,
-          gridTemplateColumns: '18px minmax(0, 1fr) auto',
-          marginTop: 4,
-          marginLeft: depth * 18,
-          width: `calc(100% - ${depth * 18}px)`,
-          background: active ? 'var(--sel)' : 'transparent',
-          borderColor: active ? 'var(--bd)' : 'transparent',
-          paddingRight: 10,
-        }}
-      >
-        <span style={{ width: 6, height: 6, borderRadius: 99, background: active ? 'var(--fg)' : 'var(--mut)', justifySelf: 'center', opacity: active ? 0.9 : 0.45 }} />
-        <span style={{ minWidth: 0 }}>
-          <span style={{ display: 'block', fontSize: 13.5, fontWeight: active ? 760 : 620, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {entry.title}
-          </span>
-          {entry.summary && (
-            <span style={{ display: 'block', marginTop: 2, fontSize: 11.5, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {entry.summary}
-            </span>
-          )}
-        </span>
-        <span style={{ fontSize: 10.5, color: 'var(--mut)' }}>知识点</span>
-      </div>
-    );
+  function commandErrorPrefix(next: CommandState): string {
+    switch (next.kind) {
+      case 'create-kb':
+      case 'create-folder':
+        return '新建失败';
+      case 'rename-kb':
+      case 'rename-folder':
+        return '重命名失败';
+      case 'delete-kb':
+      case 'delete-folder':
+      case 'delete-entry':
+        return '删除失败';
+      case 'discard-edit':
+        return '操作失败';
+    }
   }
 
-  function renderFolderNode(node: FolderNode, depth = 0): ReactNode {
-    const { folder, children } = node;
-    const directEntries = entriesByFolder.get(folder.id) ?? [];
-    const collapsed = collapsedFolders.has(folder.id);
-    const totalEntries = folderEntryCount(folder.id);
-    const subFolderCount = Math.max(folderSubtreeIds(folders, folder.id).size - 1, 0);
-    const metaText = `${subFolderCount} 文件夹 · ${totalEntries} 知识点`;
-    const hasChildren = children.length > 0 || directEntries.length > 0;
-    const selected = freeFolder === folder.id;
-    const action = (): void => {
-      guardPanel(() => {
-        setFreeFolder(folder.id);
-        if (hasChildren) toggleFolder(folder.id);
-      });
-    };
+  async function confirmCommand(value: string): Promise<void> {
+    if (!command) return;
+    try {
+      switch (command.kind) {
+        case 'create-kb': {
+          await onCreateKb(value);
+          toast('已新建知识库', 'success');
+          return;
+        }
+        case 'create-folder': {
+          await onCreateFolder({ kbId: command.kbId, parentId: command.parentId, name: value });
+          toast('已新建文件夹', 'success');
+          return;
+        }
+        case 'rename-kb': {
+          if (value === command.kb.name) return;
+          await onRenameKb(command.kb.id, value);
+          toast('已重命名知识库', 'success');
+          return;
+        }
+        case 'rename-folder': {
+          if (value === command.folder.name) return;
+          await onRenameFolder(command.folder.id, value);
+          toast('已重命名文件夹', 'success');
+          return;
+        }
+        case 'delete-kb': {
+          await deleteKbWithUndo(command.kb);
+          return;
+        }
+        case 'delete-folder': {
+          await deleteFolderWithUndo(command.folder);
+          return;
+        }
+        case 'delete-entry': {
+          await deleteEntryWithUndo(command.entry);
+          setPanelMode('detail');
+          dirtyRef.current = false;
+          return;
+        }
+        case 'discard-edit': {
+          const next = pendingGuardRef.current;
+          pendingGuardRef.current = null;
+          dirtyRef.current = false;
+          next?.();
+          return;
+        }
+      }
+    } catch (err) {
+      toast(`${commandErrorPrefix(command)}：${err instanceof Error ? err.message : String(err)}`, 'error');
+      throw err;
+    }
+  }
 
+  function renderCommandDialog(): ReactNode {
+    if (!command) return null;
+    if (command.kind === 'create-kb') {
+      return (
+        <CommandDialog
+          open
+          title="新建知识库"
+          description="创建一个新的知识库入口，用于承载独立主题的文件夹和知识点。"
+          inputLabel="知识库名称"
+          placeholder="例如：AI Agent"
+          confirmText="创建"
+          onOpenChange={(open) => { if (!open) setCommand(null); }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
+    if (command.kind === 'create-folder') {
+      const parentLabel = command.parentId ? folderPathName(folders, command.parentId) : '知识库根层级';
+      return (
+        <CommandDialog
+          open
+          title="新建文件夹"
+          description={`将创建在 ${parentLabel || '当前文件夹'} 下。`}
+          inputLabel="文件夹名称"
+          placeholder="例如：工作模式"
+          confirmText="创建"
+          helper="右键树节点也可以在指定文件夹下快速创建。"
+          onOpenChange={(open) => { if (!open) setCommand(null); }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
+    if (command.kind === 'rename-kb') {
+      return (
+        <CommandDialog
+          open
+          title="重命名知识库"
+          description="名称会同步到这个知识库下的知识点分类。"
+          inputLabel="知识库名称"
+          initialValue={command.kb.name}
+          confirmText="保存"
+          onOpenChange={(open) => { if (!open) setCommand(null); }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
+    if (command.kind === 'rename-folder') {
+      return (
+        <CommandDialog
+          open
+          title="重命名文件夹"
+          description={folderPathName(folders, command.folder.id) || command.folder.name}
+          inputLabel="文件夹名称"
+          initialValue={command.folder.name}
+          confirmText="保存"
+          onOpenChange={(open) => { if (!open) setCommand(null); }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
+    if (command.kind === 'delete-kb') {
+      const entryCount = entriesOfKb(command.kb.id).length;
+      const folderCount = folders.filter((folder) => folder.kbId === command.kb.id).length;
+      return (
+        <CommandDialog
+          open
+          tone="danger"
+          title="删除知识库"
+          description={`确定删除「${command.kb.name}」？其中包含 ${folderCount} 个文件夹、${entryCount} 条知识点。`}
+          helper="此操作不可撤销，删除后需要重新导入或手动创建。"
+          confirmText="删除"
+          cancelText="保留"
+          onOpenChange={(open) => { if (!open) setCommand(null); }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
+    if (command.kind === 'delete-folder') {
+      const ids = folderSubtreeIds(folders, command.folder.id);
+      const childCount = Math.max(0, ids.size - 1);
+      const entryCount = entries.filter((entry) => entry.folderId && ids.has(entry.folderId)).length;
+      return (
+        <CommandDialog
+          open
+          tone="danger"
+          title="删除文件夹"
+          description={`确定删除「${command.folder.name}」？会同时删除 ${childCount} 个子文件夹、${entryCount} 条知识点。`}
+          helper="删除文件夹会连同下面的内容一起移除。"
+          confirmText="删除"
+          cancelText="保留"
+          onOpenChange={(open) => { if (!open) setCommand(null); }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
+    if (command.kind === 'delete-entry') {
+      return (
+        <CommandDialog
+          open
+          tone="danger"
+          title="删除知识点"
+          description={`确定删除「${command.entry.title}」？`}
+          helper="删除后不会影响同一文件夹下的其他知识点。"
+          confirmText="删除"
+          cancelText="保留"
+          onOpenChange={(open) => { if (!open) setCommand(null); }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
     return (
-      <div key={folder.id}>
-        <div
-          className="ik-tree-row"
-          role="button"
-          tabIndex={0}
-          title={metaText}
-          onClick={action}
-          onKeyDown={(e) => activateOnKeyboard(e, action)}
-          style={{
-            ...treeRowBase,
-            marginTop: 4,
-            marginLeft: depth * 18,
-            width: `calc(100% - ${depth * 18}px)`,
-            background: selected ? 'var(--sel)' : 'transparent',
-            borderColor: selected ? 'var(--bd)' : 'transparent',
-          }}
-        >
-          <span style={{ color: 'var(--mut)', fontSize: 12, transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)', transition: 'transform .14s ease', textAlign: 'center' }}>
-            {hasChildren ? '›' : '·'}
-          </span>
-          <span style={{ minWidth: 0 }}>
-            <span style={{ display: 'block', fontSize: 13.5, fontWeight: 720, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              📁 {folder.name}
-            </span>
-            <span className="ik-tree-meta">
-              {metaText}
-            </span>
-          </span>
-          <RowActions onRename={() => renameFolderAction(folder)} onDelete={() => deleteFolderAction(folder)} />
-        </div>
-
-        {!collapsed && hasChildren && (
-          <div>
-            {children.map((child) => renderFolderNode(child, depth + 1))}
-            {directEntries.map((entry) => renderEntryRow(entry, depth + 1))}
-          </div>
-        )}
-      </div>
+      <CommandDialog
+        open
+        tone="danger"
+        title="放弃未保存修改"
+        description="当前知识点还有未保存的编辑内容。"
+        helper="放弃后会切换到你刚才选择的位置，未保存内容不会保留。"
+        confirmText="放弃修改"
+        cancelText="继续编辑"
+        onOpenChange={(open) => {
+          if (!open) {
+            pendingGuardRef.current = null;
+            setCommand(null);
+          }
+        }}
+        onConfirm={confirmCommand}
+      />
     );
   }
 
@@ -478,13 +768,7 @@ export default function FreeMode(props: Props): ReactNode {
             <span style={{ fontSize: 12.5, color: 'var(--mut)' }}>{kbs.length} 个知识库</span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button style={ghostBtn} onClick={handleExport}>导出</button>
-            <label style={{ ...ghostBtn, display: 'inline-flex', alignItems: 'center' }}>
-              导入
-              <input type="file" accept="application/json" onChange={handleImport} style={{ display: 'none' }} />
-            </label>
-            <button style={ghostBtn} onClick={newKb}>＋ 新建知识库</button>
-            <button style={actBtn} onClick={onNew}>＋ 新建知识点</button>
+            <button style={actBtn} onClick={newKb}>＋ 新建知识库</button>
           </div>
         </div>
 
@@ -507,7 +791,7 @@ export default function FreeMode(props: Props): ReactNode {
                   onClick={() => openKb(kb)}
                 >
                   <RowActions onRename={() => renameKbAction(kb)} onDelete={() => deleteKbAction(kb)} />
-                  <div style={{ fontSize: 23, marginBottom: 16 }}>📚</div>
+                  <div className="ik-kb-card-icon"><BookOpen size={22} strokeWidth={2.05} /></div>
                   <div style={{ fontSize: 18, fontWeight: 780, marginBottom: 8, letterSpacing: '0' }}>{kb.name}</div>
                   <div style={{ fontSize: 12.5, color: 'var(--mut)' }}>
                     {fn} 个文件夹 · {n} 条知识点
@@ -526,156 +810,177 @@ export default function FreeMode(props: Props): ReactNode {
             onConfirm={handleConfirmImport}
           />
         )}
+        {renderCommandDialog()}
       </div>
     );
   }
 
-  const rootEntries = entriesByFolder.get(null) ?? [];
   const editorKey = `${panelMode}:${selectedEntry?.id ?? 'new'}:${freeKb}:${freeFolder ?? 'root'}`;
 
   return (
-    <div style={{ padding: '0 0 64px' }}>
+    <div style={{ height: '100%', minHeight: 0, position: 'relative' }}>
       {/* 右下角悬浮操作：默认只露一个按钮，点开才展开动作 */}
       {fabOpen && <div onClick={() => setFabOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 30 }} />}
       <div className="ik-fab-wrap">
         {fabOpen && (
           <div className="ik-fab-menu">
-            <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startCreateEntry(); }}>
-              <span className="ik-fab-ico">＋</span>新建知识点
-            </button>
-            <button className="ik-fab-item" onClick={() => { setFabOpen(false); newFolder(freeKb, freeFolder); }}>
-              <span className="ik-fab-ico">▸</span>新建文件夹
-            </button>
-            <label className="ik-fab-item">
-              <span className="ik-fab-ico">↥</span>导入 JSON
-              <input type="file" accept="application/json" onChange={(e) => { setFabOpen(false); handleImport(e); }} style={{ display: 'none' }} />
+            {selectedEntry ? (
+              <>
+                <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startEditEntry(); }}>
+                  <span className="ik-fab-ico"><Pencil size={16} strokeWidth={2.15} /></span>编辑当前知识点
+                </button>
+                <button className="ik-fab-item" onClick={() => { setFabOpen(false); startCreateEntryInFolder(selectedEntry.folderId ?? null); }}>
+                  <span className="ik-fab-ico"><FileText size={16} strokeWidth={2.1} /></span>新建同级知识点
+                </button>
+                <button className="ik-fab-item ik-fab-item-danger" onClick={() => { setFabOpen(false); deleteEntryAction(selectedEntry); }}>
+                  <span className="ik-fab-ico"><Trash2 size={16} strokeWidth={2.1} /></span>删除当前知识点
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startCreateEntry(); }}>
+                  <span className="ik-fab-ico"><Plus size={16} strokeWidth={2.2} /></span>新建知识点
+                </button>
+                <button className="ik-fab-item" onClick={() => { setFabOpen(false); newFolder(freeKb, freeFolder); }}>
+                  <span className="ik-fab-ico"><FolderPlus size={16} strokeWidth={2.1} /></span>{freeFolder ? '新建子文件夹' : '新建文件夹'}
+                </button>
+              </>
+            )}
+            <label
+              className={`ik-fab-item ${canImportJson ? '' : 'ik-fab-item-disabled'}`}
+              onClick={(e) => {
+                if (canImportJson) return;
+                e.preventDefault();
+                toast('请先进入一个知识库，再导入 JSON', 'info');
+              }}
+            >
+              <span className="ik-fab-ico"><Upload size={16} strokeWidth={2.1} /></span>导入到当前位置
+              <input disabled={!canImportJson} type="file" accept="application/json" onChange={(e) => { setFabOpen(false); handleImport(e); }} style={{ display: 'none' }} />
             </label>
             <button className="ik-fab-item" onClick={() => { setFabOpen(false); handleExport(); }}>
-              <span className="ik-fab-ico">↧</span>导出全部
+              <span className="ik-fab-ico"><Download size={16} strokeWidth={2.1} /></span>导出全部
             </button>
           </div>
         )}
-        <button className="ik-fab" title="操作" onClick={() => setFabOpen((v) => !v)}>{fabOpen ? '✕' : '＋'}</button>
+        <button className="ik-fab" title="操作" onClick={() => setFabOpen((v) => !v)}>
+          {fabOpen ? <X size={22} strokeWidth={2.25} /> : <Plus size={23} strokeWidth={2.25} />}
+        </button>
       </div>
 
       <div className="ik-free-layout">
         <aside style={treePanelStyle}>
-          <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid var(--bd)' }}>
+          <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid var(--bd)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--mut)', letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 760 }}>文件夹 / 知识点</div>
-                <div style={{ marginTop: 5, fontSize: 14.5, fontWeight: 760 }}>{currentKb?.name ?? '知识库'}</div>
-              </div>
+              <button
+                type="button"
+                className={`ik-location-chip ik-location-chip-button ${freeFolder === null && !selectedEntryId ? 'is-active' : ''}`}
+                onClick={selectRoot}
+                title={`${operationPathLabel} · 点击回到知识库根层级`}
+              >
+                {operationPathLabel}
+              </button>
               <div style={{ fontSize: 11.5, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '4px 8px', whiteSpace: 'nowrap' }}>
                 {folders.filter((folder) => folder.kbId === freeKb).length} / {kbEntries.length}
               </div>
             </div>
           </div>
 
-          <div style={{ padding: 10, overflow: 'auto', flex: 1 }}>
-            <div
-              className="ik-tree-row"
-              role="button"
-              tabIndex={0}
-              title={`${folderForest.length} 文件夹 · ${rootEntries.length} 知识点`}
-              onClick={() => setFreeFolder(null)}
-              onKeyDown={(e) => activateOnKeyboard(e, () => setFreeFolder(null))}
-              style={{
-                ...treeRowBase,
-                gridTemplateColumns: '18px minmax(0, 1fr)',
-                background: freeFolder ? 'transparent' : 'var(--sel)',
-                borderColor: freeFolder ? 'transparent' : 'var(--bd)',
-              }}
-            >
-              <span style={{ color: 'var(--mut)', textAlign: 'center' }}>⌂</span>
-              <span style={{ minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: 13.5, fontWeight: 760, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>根目录</span>
-                <span className="ik-tree-meta">
-                  {folderForest.length} 文件夹 · {rootEntries.length} 知识点
-                </span>
-              </span>
-            </div>
-
-            {folderForest.length > 0 && (
-              <div style={{ marginTop: 8 }}>
-                {folderForest.map((node) => renderFolderNode(node))}
-              </div>
-            )}
-
-            {rootEntries.length > 0 && (
-              <div style={{ marginTop: 8 }}>
-                {rootEntries.map((entry) => renderEntryRow(entry, 0))}
-              </div>
-            )}
-
-            {folderForest.length === 0 && rootEntries.length === 0 && (
-              <div style={{ margin: '18px 8px', padding: 18, textAlign: 'center', color: 'var(--mut)', fontSize: 13, border: '1px dashed var(--bd)', borderRadius: 14 }}>
-                当前知识库还没有文件夹或知识点。
-              </div>
-            )}
+          <div style={{ padding: 10, overflow: 'hidden', flex: 1, minHeight: 0 }}>
+            <KnowledgeTree
+              kbId={freeKb}
+              folders={folders.filter((folder) => folder.kbId === freeKb)}
+              entries={kbEntries}
+              selectedFolderId={freeFolder}
+              selectedEntryId={selectedEntryId}
+              folderEntryCount={folderEntryCount}
+              onSelectFolder={selectFolder}
+              onSelectEntry={selectEntry}
+              onCreateFolder={(parentId) => newFolder(freeKb, parentId)}
+              onCreateEntry={startCreateEntryInFolder}
+              onRenameFolder={renameFolderAction}
+              onDeleteFolder={deleteFolderAction}
+              onEditEntry={editEntryAction}
+              onDeleteEntry={deleteEntryAction}
+              onDeleteBatch={deleteSelectionWithUndo}
+              onMoveFolder={onMoveFolder}
+              onReorderFolders={onReorderFolders}
+              onMoveEntry={moveEntryAction}
+              onReorderEntries={onReorderEntries}
+            />
           </div>
         </aside>
 
-        <div style={{ minWidth: 0 }}>
-          {panelMode === 'create' ? (
-            <EntryEditor
-              key={editorKey}
-              initial={null}
-              kbs={kbs}
-              folders={folders}
-              defaultKbId={freeKb}
-              defaultFolderId={freeFolder}
-              onDirtyChange={onDirtyChange}
-              onCancel={backToDetail}
-              onSave={(input) =>
-                onCreate(input).then((entry) => {
-                  setPanelMode('detail');
-                  dirtyRef.current = false;
-                  setSelectedEntryId(entry.id);
-                  setFreeFolder(entry.folderId ?? null);
-                  return entry;
-                })
-              }
-            />
-          ) : panelMode === 'edit' && selectedEntry ? (
-            <EntryEditor
-              key={editorKey}
-              initial={selectedEntry}
-              kbs={kbs}
-              folders={folders}
-              onDirtyChange={onDirtyChange}
-              onCancel={backToDetail}
-              onSave={(input) =>
-                onUpdate(selectedEntry.id, input).then((entry) => {
-                  setPanelMode('detail');
-                  dirtyRef.current = false;
-                  setSelectedEntryId(entry.id);
-                  setFreeFolder(entry.folderId ?? null);
-                  return entry;
-                })
-              }
-            />
-          ) : (
-            <div className="ik-detail-shell">
-              <div className="ik-detail-actions">
-                <button
-                  className="ik-detail-action-btn"
-                  onClick={startEditEntry}
-                  disabled={!selectedEntry}
-                >
-                  编辑
-                </button>
-                <button
-                  className="ik-detail-action-btn ik-detail-action-danger"
-                  onClick={deleteSelectedEntry}
-                  disabled={!selectedEntry}
-                >
-                  删除
-                </button>
+        <div style={{ minWidth: 0, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div className="ik-detail-region">
+            {panelMode === 'create' ? (
+              <EntryEditor
+                key={editorKey}
+                initial={null}
+                kbs={kbs}
+                folders={folders}
+                defaultKbId={freeKb}
+                defaultFolderId={freeFolder}
+                onDirtyChange={onDirtyChange}
+                onCancel={backToDetail}
+                onSave={(input) =>
+                  onCreate(input).then((entry) => {
+                    setPanelMode('detail');
+                    dirtyRef.current = false;
+                    setSelectedEntryId(entry.id);
+                    setFreeFolder(entry.folderId ?? null);
+                    return entry;
+                  })
+                }
+              />
+            ) : panelMode === 'edit' && selectedEntry ? (
+              <EntryEditor
+                key={editorKey}
+                initial={selectedEntry}
+                kbs={kbs}
+                folders={folders}
+                onDirtyChange={onDirtyChange}
+                onCancel={backToDetail}
+                onSave={(input) =>
+                  onUpdate(selectedEntry.id, input).then((entry) => {
+                    setPanelMode('detail');
+                    dirtyRef.current = false;
+                    setSelectedEntryId(entry.id);
+                    setFreeFolder(entry.folderId ?? null);
+                    return entry;
+                  })
+                }
+              />
+            ) : (
+              <div className="ik-detail-shell">
+                <div className="ik-detail-actions">
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    leadingIcon={<Pencil size={16} strokeWidth={2.15} />}
+                    onClick={startEditEntry}
+                    disabled={!selectedEntry}
+                    aria-label="编辑知识点"
+                    title="编辑"
+                  />
+                  <Button
+                    variant="destructive"
+                    size="icon"
+                    leadingIcon={<Trash2 size={16} strokeWidth={2.15} />}
+                    onClick={deleteSelectedEntry}
+                    disabled={!selectedEntry}
+                    aria-label="删除知识点"
+                    title="删除"
+                  />
+                </div>
+                <DetailSidePanel
+                  entry={selectedEntry}
+                  query=""
+                  contextLabel={viewingPathLabel}
+                  contextBadge={selectedEntry ? '查看知识点' : '浏览文件夹'}
+                />
               </div>
-              <DetailSidePanel entry={selectedEntry} query="" />
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
       {importPreview && (
@@ -683,10 +988,16 @@ export default function FreeMode(props: Props): ReactNode {
           payload={importPreview.payload}
           preview={importPreview.preview}
           busy={importing}
-          onClose={() => { if (!importing) setImportPreview(null); }}
+          previewing={previewingImport}
+          targetFolders={importFolderOptions}
+          targetFolderId={importPreview.payload.targetFolderId}
+          allowReplace={false}
+          onTargetFolderChange={(folderId) => refreshImportPreview({ ...importPreview.payload, targetFolderId: folderId === ROOT_IMPORT_TARGET ? null : folderId })}
+          onClose={() => { if (!importing && !previewingImport) setImportPreview(null); }}
           onConfirm={handleConfirmImport}
         />
       )}
+      {renderCommandDialog()}
     </div>
   );
 }

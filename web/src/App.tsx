@@ -16,6 +16,8 @@ import {
   createFolder,
   renameFolder,
   deleteFolder,
+  moveFolder,
+  reorderFolders,
   type EntryInput as ApiEntryInput,
 } from './api';
 import TopBar, { type AppMode } from './components/TopBar';
@@ -65,6 +67,16 @@ export default function App() {
   };
 
   const t = THEMES[theme];
+  useEffect(() => {
+    const vars = themeVars(t) as unknown as Record<string, string>;
+    for (const [key, value] of Object.entries(vars)) {
+      document.documentElement.style.setProperty(key, value);
+    }
+    document.body.style.background = t.bg;
+    document.body.style.color = t.fg;
+    document.body.style.fontFamily = t.font;
+  }, [t]);
+
   // 防抖：输入即时更新，过滤/建议在空闲时计算（避免逐字全量重算）
   const deferredQuery = useDeferredValue(query);
   const results = useMemo(
@@ -221,6 +233,14 @@ export default function App() {
       return cur === id || nf.every((f) => f.id !== cur) ? null : cur;
     });
   }, []);
+  const handleMoveFolder = useCallback(async (id: string, opts: { parentId?: string | null; kbId?: string }): Promise<void> => {
+    const next = await moveFolder(id, opts);
+    setFolders(next);
+  }, []);
+  const handleReorderFolders = useCallback(async (ids: string[]): Promise<void> => {
+    const next = await reorderFolders(ids);
+    setFolders(next);
+  }, []);
 
   const openEntry = openId ? entries.find((e) => e.id === openId) ?? null : null;
   const selectedListEntry = isSearchList
@@ -229,73 +249,90 @@ export default function App() {
   const selectedListId = selectedListEntry?.id ?? null;
   const modalEntry = isSearchList ? null : openEntry;
 
+  const handleTopModeChange = useCallback((nextMode: AppMode) => {
+    setOpenId(null);
+    if (nextMode === 'free' && mode === 'free' && freeKb) {
+      setFreeKb(null);
+      setFreeFolder(null);
+      setMode('free');
+      return;
+    }
+    setMode(nextMode);
+    if (nextMode === 'search') setTimeout(() => inputRef.current?.focus(), 40);
+  }, [freeKb, mode]);
+
   return (
-    <div style={{ ...themeVars(t), minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--font)', WebkitFontSmoothing: 'antialiased' }}>
-      <div style={{ width: '100%', maxWidth: 'none', margin: 0, padding: '0 clamp(16px, 2.4vw, 44px) 44px' }}>
-        <TopBar mode={mode} setMode={(m) => { setMode(m); setOpenId(null); if (m === 'free') { setFreeKb(null); setFreeFolder(null); } if (m === 'search') setTimeout(() => inputRef.current?.focus(), 40); }} theme={theme} setTheme={setTheme} />
+    <div style={{ ...themeVars(t), height: '100vh', overflow: 'hidden', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--font)', WebkitFontSmoothing: 'antialiased' }}>
+      <div style={{ width: '100%', height: '100%', maxWidth: 'none', margin: 0, padding: '0 clamp(16px, 2.4vw, 44px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <TopBar mode={mode} setMode={handleTopModeChange} theme={theme} setTheme={setTheme} />
 
-        {mode === 'search' && (
-          <SearchMode
-            ref={inputRef}
-            query={query}
-            onInput={(v) => { setQuery(v); setSel(0); setOpenId(null); setSugSel(-1); }}
-            results={results}
-            suggestions={suggestions}
-            sugSel={sugSel}
-            onSugHover={(i) => setSugSel(i)}
-            onSugActivate={(i) => { if (suggestions[i]) applySuggestion(suggestions[i]); }}
-            onSummon={summonSearch}
-            sel={sel}
-            total={entries.length}
-            viewType={viewType}
-            setViewType={(v) => { setViewType(v); setOpenId(null); }}
-            theme={t}
-            selectedEntry={selectedListEntry}
-            selectedId={selectedListId}
-            onClear={clearSearch}
-            onSuggest={(suggestion) => {
-              setQuery(suggestion.value);
-              setSel(0);
-              setOpenId(suggestion.entryId ?? null);
-              setTimeout(() => inputRef.current?.focus(), 20);
-            }}
-            onOpen={(id, index) => { if (typeof index === 'number') setSel(index); setOpenId(id); }}
-            onOpenAI={() => setAiOpen(true)}
-            kbs={kbs}
-            folders={folders}
-          />
-        )}
-
-        {mode === 'free' && (
-          <div style={{ paddingTop: 14 }}>
-            <FreeMode
-              entries={entries}
+        <div style={{ flex: 1, minHeight: 0, overflow: mode === 'search' ? 'auto' : 'hidden' }}>
+          {mode === 'search' && (
+            <SearchMode
+              ref={inputRef}
+              query={query}
+              onInput={(v) => { setQuery(v); setSel(0); setOpenId(null); setSugSel(-1); }}
+              results={results}
+              suggestions={suggestions}
+              sugSel={sugSel}
+              onSugHover={(i) => setSugSel(i)}
+              onSugActivate={(i) => { if (suggestions[i]) applySuggestion(suggestions[i]); }}
+              onSummon={summonSearch}
+              sel={sel}
+              total={entries.length}
+              viewType={viewType}
+              setViewType={(v) => { setViewType(v); setOpenId(null); }}
+              theme={t}
+              selectedEntry={selectedListEntry}
+              selectedId={selectedListId}
+              onClear={clearSearch}
+              onSuggest={(suggestion) => {
+                setQuery(suggestion.value);
+                setSel(0);
+                setOpenId(suggestion.entryId ?? null);
+                setTimeout(() => inputRef.current?.focus(), 20);
+              }}
+              onOpen={(id, index) => { if (typeof index === 'number') setSel(index); setOpenId(id); }}
+              onOpenAI={() => setAiOpen(true)}
               kbs={kbs}
               folders={folders}
-              freeKb={freeKb}
-              freeFolder={freeFolder}
-              setFreeKb={setFreeKb}
-              setFreeFolder={setFreeFolder}
-              onNew={() => setFormOpen(true)}
-              onCreate={handleCreate}
-              onUpdate={handleUpdate}
-              onDelete={handleDelete}
-              onImported={handleImported}
-              onCreateKb={handleCreateKb}
-              onCreateFolder={handleCreateFolder}
-              onRenameKb={handleRenameKb}
-              onDeleteKb={handleDeleteKb}
-              onRenameFolder={handleRenameFolder}
-              onDeleteFolder={handleDeleteFolder}
             />
-          </div>
-        )}
+          )}
 
-        {loaded && entries.length === 0 && (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--mut)', fontSize: 13 }}>
-            未能从服务端加载数据，请确认后端已启动（/api/entries）。
-          </div>
-        )}
+          {mode === 'free' && (
+            <div className="ik-free-stage">
+              <FreeMode
+                entries={entries}
+                kbs={kbs}
+                folders={folders}
+                freeKb={freeKb}
+                freeFolder={freeFolder}
+                setFreeKb={setFreeKb}
+                setFreeFolder={setFreeFolder}
+                onNew={() => setFormOpen(true)}
+                onCreate={handleCreate}
+                onUpdate={handleUpdate}
+                onDelete={handleDelete}
+                onReorderEntries={handleReorder}
+                onImported={handleImported}
+                onCreateKb={handleCreateKb}
+                onCreateFolder={handleCreateFolder}
+                onRenameKb={handleRenameKb}
+                onDeleteKb={handleDeleteKb}
+                onRenameFolder={handleRenameFolder}
+                onDeleteFolder={handleDeleteFolder}
+                onMoveFolder={handleMoveFolder}
+                onReorderFolders={handleReorderFolders}
+              />
+            </div>
+          )}
+
+          {loaded && entries.length === 0 && (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--mut)', fontSize: 13 }}>
+              未能从服务端加载数据，请确认后端已启动（/api/entries）。
+            </div>
+          )}
+        </div>
       </div>
 
       {modalEntry && <DetailModal entry={modalEntry} onClose={closeAll} />}

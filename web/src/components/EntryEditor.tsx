@@ -6,6 +6,9 @@ import type { FolderNode } from '../tree';
 import { renderMd } from '../markdown';
 import { toast } from '../toast';
 import BlockEditor from './BlockEditor';
+import SelectField, { type SelectOption } from './SelectField';
+
+const ROOT_FOLDER_VALUE = '__root__';
 
 const inputStyle: CSSProperties = {
   width: '100%',
@@ -53,14 +56,11 @@ function newIndexNode(title: string): IndexNode {
   };
 }
 
-function folderOptions(roots: FolderNode[], depth = 0): ReactNode[] {
+function folderOptions(roots: FolderNode[], depth = 0): SelectOption[] {
   return roots.flatMap((n) => {
     const prefix = depth > 0 ? '　'.repeat(depth) + '└ ' : '';
     return [
-      <option key={n.folder.id} value={n.folder.id}>
-        {prefix}
-        {n.folder.name}
-      </option>,
+      { value: n.folder.id, label: `${prefix}${n.folder.name}` },
       ...folderOptions(n.children, depth + 1),
     ];
   });
@@ -205,6 +205,14 @@ export default function EntryEditor(props: Props): ReactNode {
   const selectedKbName = kbs.find((k) => k.id === kbId)?.name ?? '知识库';
   const selectedFolderName = folderId ? folders.find((f) => f.id === folderId)?.name ?? '文件夹' : '根目录';
   const headingCount = nodes.length;
+  const kbOptions = useMemo<SelectOption[]>(
+    () => kbs.map((k) => ({ value: k.id, label: k.name })),
+    [kbs],
+  );
+  const folderSelectOptions = useMemo<SelectOption[]>(
+    () => [{ value: ROOT_FOLDER_VALUE, label: '根目录' }, ...folderOptions(forestOfKb(folders, kbId))],
+    [folders, kbId],
+  );
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -351,24 +359,24 @@ export default function EntryEditor(props: Props): ReactNode {
               padding: '0 18px 14px',
             }}
           >
-            <select
+            <SelectField
               value={kbId}
-              onChange={(e) => {
-                setKbId(e.target.value);
+              options={kbOptions}
+              title="知识库"
+              placeholder="选择知识库"
+              onChange={(value) => {
+                setKbId(value);
                 setFolderId(null);
               }}
-              style={inputStyle}
-              title="知识库"
-            >
-              {kbs.map((k) => (
-                <option key={k.id} value={k.id}>{k.name}</option>
-              ))}
-            </select>
+            />
 
-            <select value={folderId ?? ''} onChange={(e) => setFolderId(e.target.value || null)} style={inputStyle} title="文件夹">
-              <option value="">根目录</option>
-              {folderOptions(forestOfKb(folders, kbId))}
-            </select>
+            <SelectField
+              value={folderId ?? ROOT_FOLDER_VALUE}
+              options={folderSelectOptions}
+              title="文件夹"
+              placeholder="选择文件夹"
+              onChange={(value) => setFolderId(value === ROOT_FOLDER_VALUE ? null : value)}
+            />
 
             <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="标签，用逗号分隔" style={inputStyle} />
           </div>

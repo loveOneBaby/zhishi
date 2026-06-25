@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { IndexNode } from './index-tree.js';
 import type { ImportEntry, ImportFolder, ImportKb, ImportPayload } from './db.js';
 
@@ -52,6 +52,8 @@ interface KnowledgeTreePayload {
   tree?: unknown;
   targetKbId?: unknown;
   targetKbName?: unknown;
+  targetFolderId?: unknown;
+  importBatchId?: unknown;
 }
 
 function text(v: unknown): string {
@@ -201,9 +203,10 @@ function toKnowledgeEntry(raw: KnowledgeTreeNode, opts: {
   folderId: string | null;
   path: string[];
   meta: KnowledgeTreeMeta;
+  importBatchId: string;
 }): ImportEntry {
   const title = text(raw.title) || '未命名知识点';
-  const seed = `${opts.kbId}/${opts.path.concat(title).join('/')}`;
+  const seed = `${opts.kbId}/${opts.importBatchId}/${opts.path.concat(title).join('/')}`;
   const aliases = textArray(raw.aliases);
   const importance = text(raw.importance);
   const tags = unique([
@@ -262,7 +265,10 @@ export function knowledgeTreeToImportPayload(input: unknown): ImportPayload {
   const meta = (payload.meta ?? {}) as KnowledgeTreeMeta;
   const kbName = text(payload.targetKbName) || text(meta.title) || '知识树';
   const targetKbId = text(payload.targetKbId);
+  const targetFolderId = text(payload.targetFolderId) || null;
+  const importBatchId = text(payload.importBatchId) || randomUUID();
   const kbId = targetKbId || stableId('kb', kbName);
+  const folderSeedRoot = targetFolderId ? `${importBatchId}/target:${targetFolderId}` : importBatchId;
   const kbs: ImportKb[] = [{ id: kbId, name: kbName, sort: 0 }];
   const folders: ImportFolder[] = [];
   const entries: ImportEntry[] = [];
@@ -277,17 +283,17 @@ export function knowledgeTreeToImportPayload(input: unknown): ImportPayload {
       const isKnowledge = type === 'knowledge' || (!children.length && hasKnowledgeShape(node));
 
       if (isKnowledge) {
-        entries.push(toKnowledgeEntry(node, { kbId, kbName, folderId: parentId, path, meta }));
+        entries.push(toKnowledgeEntry(node, { kbId, kbName, folderId: parentId, path, meta, importBatchId }));
         return;
       }
 
-      const folderId = stableId('fld', `${kbId}/${nodePath.join('/')}`);
+      const folderId = stableId('fld', `${kbId}/${folderSeedRoot}/${nodePath.join('/')}`);
       folders.push({ id: folderId, kbId, parentId, name: title, sort: index });
       if (children.length) walk(children, folderId, nodePath);
     });
   };
 
-  walk(payload.tree, null, []);
+  walk(payload.tree, targetFolderId, []);
   if (!entries.length) throw new Error('tree 中没有 type=knowledge 的知识点');
   return { kbs, folders, entries };
 }

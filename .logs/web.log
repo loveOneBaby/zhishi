@@ -3,11 +3,21 @@
 > vite
 
 
-  VITE v5.4.21  ready in 151 ms
+  VITE v5.4.21  ready in 159 ms
 
   ➜  Local:   http://localhost:3000/
   ➜  Network: use --host to expose
-10:53:34 PM [vite] hmr update /src/components/FreeMode.tsx
-10:53:34 PM [vite] hmr update /src/components/FreeMode.tsx
-10:56:28 PM [vite] hmr update /src/components/FreeMode.tsx
-10:56:44 PM [vite] hmr update /src/styles.css
+11:28:52 AM [vite] hmr update /src/styles.css
+1:34:45 PM [vite] hmr update /src/components/KnowledgeTree.tsx
+1:35:27 PM [vite] hmr update /src/styles.css
+1:39:50 PM [vite] hmr update /src/components/KnowledgeTree.tsx
+1:40:07 PM [vite] hmr update /src/styles.css
+1:40:26 PM [vite] hmr update /src/styles.css
+1:41:41 PM [vite] hmr update /src/components/FreeMode.tsx
+1:41:54 PM [vite] hmr update /src/styles.css
+1:43:45 PM [vite] hmr update /src/components/DetailSidePanel.tsx
+1:44:00 PM [vite] hmr update /src/components/FreeMode.tsx
+1:44:25 PM [vite] hmr update /src/components/DetailSidePanel.tsx
+1:44:40 PM [vite] hmr update /src/styles.css
+1:46:42 PM [vite] hmr update /src/components/KnowledgeTree.tsx
+1:46:42 PM [vite] hmr update /src/styles.css

@@ -642,6 +642,10 @@ export interface ImportPayload {
   kbs?: ImportKb[];
   folders?: ImportFolder[];
   entries: ImportEntry[];
+  targetKbId?: string;
+  targetKbName?: string;
+  targetFolderId?: string | null;
+  importBatchId?: string;
 }
 
 // 导出全量（备份）
@@ -701,10 +705,46 @@ export interface ImportPreview {
   newCount: number;
   updateCount: number;
   byCat: { cat: string; count: number }[];
+  folders: PreviewFolder[];
   entries: PreviewEntry[];
 }
 
-export function buildImportPreview(list: ImportEntry[]): ImportPreview {
+export interface PreviewFolder {
+  id?: string;
+  kbId?: string;
+  parentId?: string | null;
+  name: string;
+  path: string;
+}
+
+function buildPreviewFolders(folders: ImportFolder[] = []): PreviewFolder[] {
+  const validFolders = folders.filter((folder) => folder.name && folder.name.trim());
+  const byId = new Map(validFolders.filter((folder) => folder.id).map((folder) => [folder.id!, folder]));
+  const pathCache = new Map<string, string>();
+
+  const folderPath = (folder: ImportFolder, seen = new Set<string>()): string => {
+    if (folder.id && pathCache.has(folder.id)) return pathCache.get(folder.id)!;
+    const name = folder.name.trim();
+    if (folder.id) {
+      if (seen.has(folder.id)) return name;
+      seen.add(folder.id);
+    }
+    const parent = folder.parentId ? byId.get(folder.parentId) : null;
+    const path = parent ? `${folderPath(parent, seen)} / ${name}` : name;
+    if (folder.id) pathCache.set(folder.id, path);
+    return path;
+  };
+
+  return validFolders.map((folder) => ({
+    id: folder.id,
+    kbId: folder.kbId,
+    parentId: folder.parentId ?? null,
+    name: folder.name.trim(),
+    path: folderPath(folder),
+  }));
+}
+
+export function buildImportPreview(list: ImportEntry[], folders: ImportFolder[] = []): ImportPreview {
   const ids = list.map((e) => e.id).filter((x): x is string => typeof x === 'string' && x.length > 0);
   const existing = existingIds(ids);
   const entries: PreviewEntry[] = [];
@@ -738,7 +778,7 @@ export function buildImportPreview(list: ImportEntry[]): ImportPreview {
   const byCat = [...catMap.entries()]
     .map(([cat, count]) => ({ cat, count }))
     .sort((a, b) => b.count - a.count);
-  return { total: list.length, valid, skipped, newCount, updateCount, byCat, entries };
+  return { total: list.length, valid, skipped, newCount, updateCount, byCat, folders: buildPreviewFolders(folders), entries };
 }
 
 // 把 markdown 里内联的 data:base64 图片落库为 assets,内容只保留站内引用 url(去重,避免 JSON 膨胀)
@@ -786,7 +826,6 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
 
     // 1) 知识库
     const kbIdMap = new Map<string, string>();   // 载荷原 id → 实际入库 id
-    const fallbackKbId = defaultKbId();
     for (const k of payload.kbs ?? []) {
       const now = Date.now();
       if (k.id) {
@@ -797,6 +836,8 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
         kbIdMap.set(k.name, kb.id);
       }
     }
+    // 兜底知识库：在导入的知识库就绪后再取，避免 replace 清空后凭空多建一个默认库
+    const fallbackKbId = defaultKbId();
 
     // 2) 文件夹：按依赖多趟建入（先建父、再建子），未就绪的父降级为根
     const pending = [...(payload.folders ?? [])];
@@ -807,8 +848,8 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
       for (let i = pending.length - 1; i >= 0; i--) {
         const f = pending[i];
         const kbId = f.kbId ? (kbIdMap.get(f.kbId) ?? resolveKbId(f.kbId, undefined)) : fallbackKbId;
-        if (f.parentId && !folderIdMap.has(f.parentId)) continue; // 等父先建
-        const parentId = f.parentId ? folderIdMap.get(f.parentId) ?? null : null;
+        if (f.parentId && !folderIdMap.has(f.parentId) && !getFolder(f.parentId)) continue; // 等父先建，或挂到已有文件夹
+        const parentId = f.parentId ? (folderIdMap.get(f.parentId) ?? (getFolder(f.parentId) ? f.parentId : null)) : null;
         const now = Date.now();
         if (f.id) {
           insertFolder.run(f.id, kbId, parentId, f.name, f.sort ?? 0, now, now);
@@ -839,9 +880,15 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
       const { tree, idx } = buildDocIdx({ doc: raw.doc, intro: raw.intro, nodes: raw.nodes, body: raw.body });
       const cat = (raw.cat && String(raw.cat).trim()) || '未分类';
       const kbId = raw.kbId ? (kbIdMap.get(raw.kbId) ?? resolveKbId(raw.kbId, cat)) : resolveKbId(undefined, cat);
-      // 优先用载荷 folderId；否则按 cat 在该库建根文件夹
-      let folderId = raw.folderId ? (folderIdMap.get(raw.folderId) ?? raw.folderId) : null;
-      if (!folderId || !getFolder(folderId)) folderId = ensureFolder(kbId, cat, null).id;
+      // 未声明 folderId 的旧载荷按 cat 建根文件夹；明确 folderId:null 表示导入到知识库根级。
+      const hasFolderId = Object.prototype.hasOwnProperty.call(raw, 'folderId');
+      let folderId: string | null;
+      if (hasFolderId) {
+        folderId = raw.folderId ? (folderIdMap.get(raw.folderId) ?? raw.folderId) : null;
+        if (folderId && !getFolder(folderId)) folderId = null;
+      } else {
+        folderId = ensureFolder(kbId, cat, null).id;
+      }
       const title = raw.title.trim();
       const py = (raw.py || title).toLowerCase();
       const tags = JSON.stringify(Array.isArray(raw.tags) ? raw.tags : []);

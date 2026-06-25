@@ -47,7 +47,7 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
   const { map: model, kbs } = useMemo(() => buildModel(entries, folders, kbList), [entries, folders, kbList]);
   const [kbId, setKbId] = useState('');
   const [scoped, setScoped] = useState('');
-  const [immersive, setImmersive] = useState(true);
+  const [immersive, setImmersive] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [viewport, setViewport] = useState<Viewport>({ x: 48, y: 48, scale: 0.9 });
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());

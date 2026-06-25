@@ -1,0 +1,114 @@
+{
+  "version": "kb-package-2",
+  "package": {
+    "sourceId": "ai-agent-interview-demo",
+    "title": "AI Agent 面试知识包",
+    "namespace": "xiaolinnote.agent",
+    "description": "用于导入到当前知识库的 AI Agent 面试知识结构。",
+    "createdAt": "2026-06-25T00:00:00.000+08:00",
+    "generator": "knowledge-tree"
+  },
+  "schema": {
+    "contentFormat": "block-doc-v1",
+    "minAppVersion": "1.0.0"
+  },
+  "containers": [
+    {
+      "sourceId": "c_llm",
+      "kind": "folder",
+      "parentSourceId": null,
+      "name": "LLM",
+      "sort": 1
+    },
+    {
+      "sourceId": "c_llm_explain",
+      "kind": "folder",
+      "parentSourceId": "c_llm",
+      "name": "解释",
+      "sort": 1
+    },
+    {
+      "sourceId": "c_agent",
+      "kind": "folder",
+      "parentSourceId": null,
+      "name": "Agent",
+      "sort": 2
+    }
+  ],
+  "entries": [
+    {
+      "sourceId": "e_llm_001",
+      "containerSourceId": "c_llm_explain",
+      "title": "什么是 LLM",
+      "summary": "LLM 通过学习海量文本掌握语言规律，核心是预测下一个字。",
+      "tags": ["LLM"],
+      "aliases": ["大语言模型", "Large Language Model"],
+      "importance": "high",
+      "difficulty": "basic",
+      "intro": "LLM 通过学习海量文本数据，掌握语言规律和知识。",
+      "doc": [
+        {
+          "type": "heading",
+          "props": { "level": 3 },
+          "content": "定义与原理"
+        },
+        {
+          "type": "paragraph",
+          "content": "LLM 的核心原理是根据输入上下文预测下一个 token，并逐步生成输出。"
+        },
+        {
+          "type": "bulletListItem",
+          "content": "通过海量文本学习语言规律和知识"
+        },
+        {
+          "type": "bulletListItem",
+          "content": "本身不连接外部世界，也没有长期记忆"
+        }
+      ],
+      "sourceRefs": [
+        {
+          "title": "AI Agent 面试题万字图解",
+          "url": "https://xiaolinnote.com/agent/concept/agent.html"
+        }
+      ],
+      "extensions": {
+        "interview": {
+          "question": "什么是 LLM？",
+          "answerLevel": "short"
+        }
+      }
+    },
+    {
+      "sourceId": "e_agent_001",
+      "containerSourceId": "c_agent",
+      "title": "什么是 Agent",
+      "summary": "Agent 是由 LLM 驱动、能在循环中自主使用工具的系统。",
+      "tags": ["Agent"],
+      "importance": "high",
+      "difficulty": "basic",
+      "doc": [
+        {
+          "type": "heading",
+          "props": { "level": 3 },
+          "content": "核心定义"
+        },
+        {
+          "type": "paragraph",
+          "content": "Agent = LLM + 规划 + 记忆 + 工具调用 + 执行循环。"
+        }
+      ],
+      "sourceRefs": [
+        {
+          "title": "AI Agent 面试题万字图解",
+          "url": "https://xiaolinnote.com/agent/concept/agent.html"
+        }
+      ]
+    }
+  ],
+  "assets": [],
+  "extensions": {
+    "importPolicy": {
+      "duplicate": "create-new-on-target-import"
+    }
+  }
+}

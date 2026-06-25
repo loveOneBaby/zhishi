@@ -24,7 +24,7 @@ const THEME_SWATCH: Record<ThemeKey, string> = {
 
 export default function TopBar({ mode, setMode, theme, setTheme }: Props) {
   return (
-    <div style={{ position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 72, gap: 20, borderBottom: '1px solid var(--bd)', background: 'color-mix(in srgb, var(--bg) 92%, transparent)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+    <div style={{ position: 'sticky', top: 0, zIndex: 20, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 72, gap: 20, borderBottom: '1px solid var(--bd)', background: 'color-mix(in srgb, var(--bg) 92%, transparent)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
         <div style={{ display: 'flex', gap: 2, background: 'var(--sel)', padding: 3, borderRadius: 9 }}>
           {MODES.map((m) => (
@@ -34,7 +34,6 @@ export default function TopBar({ mode, setMode, theme, setTheme }: Props) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <div style={{ width: 12, height: 12, background: 'var(--accent)', borderRadius: 3, boxShadow: '0 0 0 4px var(--sel)', flexShrink: 0 }} />
           <span style={{ fontSize: 16, fontWeight: 760, letterSpacing: '0', whiteSpace: 'nowrap' }}>知识检索</span>
-          <span style={{ fontSize: 12.5, color: 'var(--mut)', whiteSpace: 'nowrap' }}>面试速查</span>
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 4, border: '1px solid var(--bd)', borderRadius: 999, background: 'color-mix(in srgb, var(--panel) 74%, transparent)' }}>

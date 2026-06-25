@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interview-knowledge.local/schemas/kb-package-2.schema.json",
+  "title": "Knowledge Base Package v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "package", "entries"],
+  "properties": {
+    "version": {
+      "const": "kb-package-2"
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["sourceId", "title"],
+      "properties": {
+        "sourceId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "namespace": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "generator": { "type": "string" },
+        "source": { "type": "string" },
+        "sourceUrl": { "type": "string" }
+      }
+    },
+    "schema": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "contentFormat": { "const": "block-doc-v1" },
+        "minAppVersion": { "type": "string" }
+      }
+    },
+    "containers": {
+      "type": "array",
+      "description": "当前 kind=folder 会导入为知识库文件夹；以后可扩展其他容器类型。",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["sourceId", "name"],
+        "properties": {
+          "sourceId": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "default": "folder" },
+          "parentSourceId": { "type": ["string", "null"] },
+          "name": { "type": "string", "minLength": 1 },
+          "sort": { "type": "number" },
+          "metadata": { "type": "object" },
+          "extensions": { "type": "object" }
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["sourceId", "title"],
+        "properties": {
+          "sourceId": { "type": "string", "minLength": 1 },
+          "containerSourceId": { "type": ["string", "null"] },
+          "title": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string" },
+          "intro": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "aliases": { "type": "array", "items": { "type": "string" } },
+          "importance": { "type": "string" },
+          "difficulty": { "type": "string" },
+          "doc": {
+            "type": "array",
+            "description": "BlockNote-like block document. The app keeps unknown block fields for forward compatibility.",
+            "items": { "type": "object", "additionalProperties": true }
+          },
+          "sourceRefs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "title": { "type": "string" },
+                "url": { "type": "string" }
+              }
+            }
+          },
+          "metadata": { "type": "object" },
+          "extensions": { "type": "object" }
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["sourceId", "url"],
+        "properties": {
+          "sourceId": { "type": "string", "minLength": 1 },
+          "type": { "type": "string" },
+          "url": { "type": "string" },
+          "alt": { "type": "string" },
+          "width": { "type": "number" },
+          "height": { "type": "number" },
+          "hash": { "type": "string" }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

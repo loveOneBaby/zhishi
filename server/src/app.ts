@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   seedBuiltins,
   listEntries,
@@ -19,6 +20,7 @@ import {
   deleteKb,
   reorderKbs,
   listFolders,
+  getFolder,
   createFolder,
   renameFolder,
   moveFolder,
@@ -30,11 +32,18 @@ import {
   getAssetBytes,
   type EntryInput,
   type ImportPayload,
+  type ImportKb,
+  type ImportFolder,
 } from './db.js';
 import { convertEntry } from './blocks-import.js';
 import { knowledgeTreeToImportPayload } from './knowledge-tree-import.js';
+import { isKbPackage2, kbPackage2ToImportPayload } from './kb-package-2.js';
 import { searchEntries } from './search.js';
 import { askAI } from './ask.js';
+
+function stableImportId(prefix: string, seed: string): string {
+  return `${prefix}_${createHash('sha1').update(seed).digest('hex').slice(0, 18)}`;
+}
 
 export function createApp() {
   seedBuiltins();
@@ -168,16 +177,132 @@ export function createApp() {
   });
 
   function requestToImportPayload(body: unknown): ImportPayload {
-    const b = (body ?? {}) as { tree?: unknown; entries?: unknown; assets?: unknown };
-    if (Array.isArray(b.tree)) return knowledgeTreeToImportPayload(body);
+    const b = (body ?? {}) as {
+      tree?: unknown;
+      entries?: unknown;
+      assets?: unknown;
+      package?: unknown;
+      schema?: unknown;
+      containers?: unknown;
+      extensions?: unknown;
+      kbs?: unknown;
+      folders?: unknown;
+      targetKbId?: unknown;
+      targetKbName?: unknown;
+      targetFolderId?: unknown;
+      importBatchId?: unknown;
+    };
+    const cleanText = (value: unknown): string | undefined => {
+      if (typeof value !== 'string') return undefined;
+      const trimmed = value.trim();
+      return trimmed || undefined;
+    };
+    const targetFolderProvided = Object.prototype.hasOwnProperty.call(b, 'targetFolderId');
+    const requestedFolderId = cleanText(b.targetFolderId);
+    const targetFolder = requestedFolderId ? getFolder(requestedFolderId) : null;
+    if (requestedFolderId && !targetFolder) throw new Error('目标文件夹不存在');
+
+    const requestedKbId = cleanText(b.targetKbId);
+    const targetKbId = requestedKbId || targetFolder?.kbId;
+    const targetKb = targetKbId ? getKb(targetKbId) : null;
+    if (targetKbId && !targetKb) throw new Error('目标知识库不存在');
+    if (targetFolder && targetKbId && targetFolder.kbId !== targetKbId) throw new Error('目标文件夹不属于目标知识库');
+
+    const targetKbName = cleanText(b.targetKbName) || targetKb?.name;
+    const targetFolderId = targetFolderProvided ? (requestedFolderId ?? null) : undefined;
+    const routedBody = {
+      ...(body && typeof body === 'object' ? body as Record<string, unknown> : {}),
+      ...(targetKbId ? { targetKbId } : {}),
+      ...(targetKbName ? { targetKbName } : {}),
+      ...(targetFolderProvided ? { targetFolderId: targetFolderId ?? null } : {}),
+    };
+
+    if (isKbPackage2(routedBody)) {
+      return kbPackage2ToImportPayload(routedBody);
+    }
+
+    if (Array.isArray(b.tree)) {
+      return knowledgeTreeToImportPayload(routedBody);
+    }
     if (Array.isArray(b.entries)) {
       const assets = Array.isArray(b.assets) ? b.assets : [];
-      return { entries: b.entries.map((e: unknown) => convertEntry(e, assets)) };
+      // kb-export-2 备份：原样转发知识库与文件夹（folders 含 parentId 多级嵌套），
+      // 由 importEntries 按依赖拓扑建入，保证文件夹/子文件夹结构能完整还原。
+      const kbs: ImportKb[] | undefined = Array.isArray(b.kbs)
+        ? b.kbs
+            .map((k) => (k && typeof k === 'object' ? (k as Record<string, unknown>) : null))
+            .filter((k): k is Record<string, unknown> => !!k && typeof k.name === 'string')
+            .map((k) => ({
+              id: typeof k.id === 'string' ? k.id : undefined,
+              name: String(k.name),
+              sort: typeof k.sort === 'number' ? k.sort : 0,
+            }))
+        : undefined;
+      const folders: ImportFolder[] | undefined = Array.isArray(b.folders)
+        ? b.folders
+            .map((f) => (f && typeof f === 'object' ? (f as Record<string, unknown>) : null))
+            .filter((f): f is Record<string, unknown> => !!f && typeof f.name === 'string')
+            .map((f) => {
+              const id = cleanText(f.id) || cleanText(f.sourceId);
+              const parentId = cleanText(f.parentId) || cleanText(f.parentSourceId);
+              const hasParentField = Object.prototype.hasOwnProperty.call(f, 'parentId')
+                || Object.prototype.hasOwnProperty.call(f, 'parentSourceId');
+              return {
+                id,
+                kbId: cleanText(f.kbId),
+                parentId: parentId ?? (hasParentField ? null : undefined),
+                name: String(f.name),
+                sort: typeof f.sort === 'number' ? f.sort : 0,
+              };
+            })
+        : undefined;
+      const routed = Boolean(targetKbId || targetFolderProvided);
+      const importBatchId = cleanText(b.importBatchId) || randomUUID();
+      const folderIdMap = new Map<string, string>();
+      const routedFolders: ImportFolder[] | undefined = routed && folders
+        ? folders.map((folder, index) => {
+            const sourceId = folder.id || `${folder.name}:${index}`;
+            const nextId = stableImportId('fld', `${importBatchId}/${targetKbId ?? folder.kbId ?? 'kb'}/${sourceId}`);
+            if (folder.id) folderIdMap.set(folder.id, nextId);
+            return { ...folder, id: nextId };
+          }).map((folder, index) => {
+            const source = folders[index];
+            const mappedParent = source.parentId ? folderIdMap.get(source.parentId) : undefined;
+            return {
+              ...folder,
+              kbId: targetKbId ?? source.kbId,
+              parentId: mappedParent ?? (targetFolderProvided ? targetFolderId ?? null : null),
+            };
+          })
+        : folders;
+      const entries = b.entries.map((e: unknown, index: number) => {
+        const entry = convertEntry(e, assets);
+        const sourceId = entry.id || `${entry.title ?? 'entry'}:${index}`;
+        if (routed) entry.id = stableImportId('ke', `${importBatchId}/${targetKbId ?? entry.kbId ?? 'kb'}/${sourceId}`);
+        if (targetKbId) entry.kbId = targetKbId;
+        if (targetKbName) entry.cat = targetKbName;
+        if (routed) {
+          const mappedFolder = entry.folderId ? folderIdMap.get(entry.folderId) : undefined;
+          if (mappedFolder) entry.folderId = mappedFolder;
+          else if (targetFolderProvided) entry.folderId = targetFolderId ?? null;
+          else if (targetKbId) entry.folderId = null;
+        }
+        return entry;
+      });
+      return {
+        kbs: routed ? undefined : kbs,
+        folders: routedFolders,
+        entries,
+        ...(targetKbId ? { targetKbId } : {}),
+        ...(targetKbName ? { targetKbName } : {}),
+        ...(targetFolderProvided ? { targetFolderId: targetFolderId ?? null } : {}),
+        importBatchId,
+      };
     }
-    throw new Error('tree 必须是数组');
+    throw new Error('导入载荷需包含 kb-package-2 的 entries 数组');
   }
 
-  // 导入：主格式为 { version:"knowledge-tree-v1", meta, tree:[...] }
+  // 导入：主格式为 kb-package-2；内部备份/撤销仍走 entries/folders 结构。
   api.post('/import', (req, res) => {
     try {
       const payload = requestToImportPayload(req.body);
@@ -189,12 +314,12 @@ export function createApp() {
     }
   });
 
-  // 导入预览：解析 knowledge-tree-v1，但不写库。
+  // 导入预览：解析导入载荷，但不写库。
   api.post('/import/preview', (req, res) => {
     try {
       const payload = requestToImportPayload(req.body);
       if (payload.entries.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
-      const preview = buildImportPreview(payload.entries);
+      const preview = buildImportPreview(payload.entries, payload.folders);
       res.json({ preview });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });

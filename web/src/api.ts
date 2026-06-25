@@ -161,11 +161,19 @@ export async function exportAll(): Promise<ExportPayload> {
 export interface ImportPayload {
   version?: string;
   meta?: unknown;
+  package?: unknown;
+  schema?: unknown;
+  containers?: unknown[];
+  extensions?: unknown;
+  kbs?: unknown[];
+  folders?: unknown[];
   tree?: unknown[];
   entries?: unknown[];
   assets?: unknown[];
   targetKbId?: string;
   targetKbName?: string;
+  targetFolderId?: string | null;
+  importBatchId?: string;
 }
 
 export interface ImportResult {
@@ -207,6 +215,13 @@ export interface ImportPreview {
   newCount: number;
   updateCount: number;
   byCat: { cat: string; count: number }[];
+  folders: {
+    id?: string;
+    kbId?: string;
+    parentId?: string | null;
+    name: string;
+    path: string;
+  }[];
   entries: PreviewEntry[];
 }
 

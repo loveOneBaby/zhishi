@@ -119,18 +119,44 @@ interface RawIntro {
 
 interface RawEntry {
   id?: string;
+  sourceId?: string;
+  containerSourceId?: string | null;
   cat?: string;
   kbId?: string;
   folderId?: string | null;
+  folderSourceId?: string | null;
   title?: string;
   py?: string;
   tags?: string[];
+  aliases?: string[];
+  importance?: string;
+  difficulty?: string;
   summary?: string;
   intro?: string | RawIntro;
   nodes?: RawNode[] | null;
   body?: string;
   doc?: unknown;          // 直接给 BlockNote 块文档(优先)
   searchText?: string;
+}
+
+function cleanText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function cleanTextArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(cleanText).filter(Boolean) : [];
+}
+
+function uniqueTexts(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+  }
+  return out;
 }
 
 // 把一条 kb-import-2 条目（或旧的扁平条目）统一转成 ImportEntry。
@@ -143,19 +169,36 @@ export function convertEntry(raw: unknown, assets: Asset[] = []): ImportEntry {
   else intro = '';
 
   // searchText 为可选检索补充词；并入 intro 使其可被检索到（模型无独立隐藏字段）
-  if (typeof e.searchText === 'string' && e.searchText.trim()) {
-    intro = (intro ? intro + '\n\n' : '') + e.searchText.trim();
+  const searchText = cleanText(e.searchText);
+  if (searchText) {
+    intro = (intro ? intro + '\n\n' : '') + searchText;
   }
 
   const nodes = Array.isArray(e.nodes) ? e.nodes.map((n) => convertNode(n, assets)) : undefined;
+  const id = typeof e.id === 'string' && e.id.trim()
+    ? e.id
+    : (typeof e.sourceId === 'string' && e.sourceId.trim() ? e.sourceId : undefined);
+  const folderId = typeof e.folderId === 'string' && e.folderId.trim()
+    ? e.folderId
+    : (typeof e.containerSourceId === 'string' && e.containerSourceId.trim()
+      ? e.containerSourceId
+      : (typeof e.folderSourceId === 'string' && e.folderSourceId.trim() ? e.folderSourceId : e.folderId));
+  const importance = cleanText(e.importance);
+  const difficulty = cleanText(e.difficulty);
+  const tags = uniqueTexts([
+    ...cleanTextArray(e.tags),
+    ...cleanTextArray(e.aliases),
+    importance ? `重要度:${importance}` : '',
+    difficulty ? `难度:${difficulty}` : '',
+  ].filter(Boolean));
   return {
-    id: e.id,
+    id,
     cat: e.cat,
     kbId: e.kbId,
-    folderId: e.folderId,
+    folderId,
     title: e.title,
     py: e.py,
-    tags: Array.isArray(e.tags) ? e.tags : undefined,
+    tags: tags.length ? tags : undefined,
     summary: e.summary,
     intro,
     nodes,

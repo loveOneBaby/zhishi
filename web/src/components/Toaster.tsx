@@ -21,9 +21,32 @@ export default function Toaster() {
             background: it.kind === 'error' ? 'var(--danger)' : it.kind === 'success' ? 'var(--accent)' : 'var(--fg)',
             boxShadow: '0 12px 36px rgba(0,0,0,.22)',
             animation: 'ik-pop .16s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
           }}
         >
-          {it.msg}
+          <span>{it.msg}</span>
+          {it.action && (
+            <button
+              type="button"
+              onClick={() => void it.action?.onClick()}
+              style={{
+                border: '1px solid color-mix(in srgb, var(--bg) 44%, transparent)',
+                borderRadius: 8,
+                background: 'color-mix(in srgb, var(--bg) 12%, transparent)',
+                color: 'var(--bg)',
+                cursor: 'pointer',
+                font: 'inherit',
+                fontSize: 12,
+                fontWeight: 760,
+                padding: '5px 9px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {it.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>
