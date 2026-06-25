@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
-import type { Entry, Folder, KnowledgeBase } from '../../types';
-import { generateEntryWithAIStream, rewriteEntryWithAIStream } from '../../api';
+import type { Entry, EntryInput, Folder, KnowledgeBase } from '../../types';
+import {
+  commitRewriteEntryDraft,
+  fetchEntryVersions,
+  generateEntryDraftWithAIStream,
+  restoreEntryVersion,
+  rewriteEntryDraftWithAIStream,
+} from '../../api';
 import { toast } from '../../toast';
 import type { CommandState } from './types';
 
@@ -23,6 +29,7 @@ interface CommandSystemDeps {
   onStartKnowledgeBaseJob: (domain: string) => Promise<void>;
   onStartFolderInitJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
   onCreateFolder: (input: { kbId: string; parentId?: string | null; name: string }) => Promise<Folder>;
+  onCreate: (input: EntryInput) => Promise<Entry>;
   onRenameKb: (id: string, name: string) => Promise<void>;
   onRenameFolder: (id: string, name: string) => Promise<void>;
   onGeneratedEntry: (entry: Entry) => void;
@@ -39,7 +46,7 @@ export function useCommandSystem(deps: CommandSystemDeps) {
   const {
     aiLive, deletes, onCreateKb, onStartKnowledgeBaseJob, onStartFolderInitJob,
     onCreateFolder, onRenameKb, onRenameFolder, onGeneratedEntry,
-    setSelectedEntryId, setFreeFolder, setPanelMode, dirtyRef, pendingGuardRef,
+    onCreate, setSelectedEntryId, setFreeFolder, setPanelMode, dirtyRef, pendingGuardRef,
   } = deps;
   const { setAiLiveLogs, setAiLivePlan, setAiLiveOutput, aiRawOutputRef, updateAiVisibleOutput } = aiLive;
   const { deleteKbWithUndo, deleteFolderWithUndo, deleteEntryWithUndo, clearFolderWithUndo } = deletes;
@@ -58,6 +65,12 @@ export function useCommandSystem(deps: CommandSystemDeps) {
         return '生成失败';
       case 'rewrite-entry':
         return '改写失败';
+      case 'confirm-generated-entry':
+        return '写入失败';
+      case 'confirm-rewrite-entry':
+        return '保存改写失败';
+      case 'restore-entry-version':
+        return '恢复版本失败';
       case 'rename-kb':
       case 'rename-folder':
         return '重命名失败';
@@ -103,7 +116,7 @@ export function useCommandSystem(deps: CommandSystemDeps) {
           setAiLivePlan('');
           setAiLiveOutput('');
           aiRawOutputRef.current = '';
-          const entry = await generateEntryWithAIStream({ topic: value, kbId: command.kbId, folderId: command.folderId }, {
+          const input = await generateEntryDraftWithAIStream({ topic: value, kbId: command.kbId, folderId: command.folderId }, {
             onStage: (message) => setAiLiveLogs((current) => [...current, message]),
             onContext: (items) => setAiLiveLogs((current) => [
               ...current,
@@ -115,7 +128,17 @@ export function useCommandSystem(deps: CommandSystemDeps) {
               ...current,
               `解析完成：${payload.title || '未命名'} · ${payload.tags.length} 个标签 · ${payload.sections} 个小节`,
             ]),
-            onSaved: (saved) => setAiLiveLogs((current) => [...current, `已写入：${saved.title}`]),
+          });
+          setAiLiveLogs((current) => [...current, `草稿已生成：${input.title}`]);
+          setCommand({ kind: 'confirm-generated-entry', kbId: command.kbId, folderId: command.folderId, input });
+          toast('AI 草稿已生成，请确认写入', 'success');
+          return;
+        }
+        case 'confirm-generated-entry': {
+          const entry = await onCreate({
+            ...command.input,
+            kbId: command.kbId,
+            folderId: command.folderId,
           });
           setPanelMode('detail');
           dirtyRef.current = false;
@@ -130,7 +153,7 @@ export function useCommandSystem(deps: CommandSystemDeps) {
           setAiLivePlan('');
           setAiLiveOutput('');
           aiRawOutputRef.current = '';
-          const entry = await rewriteEntryWithAIStream(command.entry.id, {
+          const input = await rewriteEntryDraftWithAIStream(command.entry.id, {
             onStage: (message) => setAiLiveLogs((current) => [...current, message]),
             onDelta: (content) => updateAiVisibleOutput(`${aiRawOutputRef.current}${content}`),
             onOutput: (content) => updateAiVisibleOutput(content),
@@ -138,14 +161,33 @@ export function useCommandSystem(deps: CommandSystemDeps) {
               ...current,
               `解析完成：${payload.title || '未命名'} · ${payload.tags.length} 个标签 · ${payload.sections} 个小节`,
             ]),
-            onSaved: (saved) => setAiLiveLogs((current) => [...current, `已改写：${saved.title}`]),
           });
+          setAiLiveLogs((current) => [...current, `改写草稿已生成：${input.title}`]);
+          setCommand({ kind: 'confirm-rewrite-entry', entry: command.entry, input });
+          toast('AI 改写草稿已生成，请确认保存', 'success');
+          return;
+        }
+        case 'confirm-rewrite-entry': {
+          const entry = await commitRewriteEntryDraft(command.entry.id, command.input);
           setPanelMode('detail');
           dirtyRef.current = false;
           onGeneratedEntry(entry);
           setSelectedEntryId(entry.id);
           setFreeFolder(entry.folderId ?? null);
           toast('AI 已改写知识点', 'success');
+          return;
+        }
+        case 'restore-entry-version': {
+          const versions = await fetchEntryVersions(command.entry.id);
+          const latest = versions[0];
+          if (!latest) throw new Error('暂无可恢复的历史版本');
+          const entry = await restoreEntryVersion(command.entry.id, latest.id);
+          setPanelMode('detail');
+          dirtyRef.current = false;
+          onGeneratedEntry(entry);
+          setSelectedEntryId(entry.id);
+          setFreeFolder(entry.folderId ?? null);
+          toast(`已恢复到 ${new Date(latest.createdAt).toLocaleString('zh-CN')}`, 'success');
           return;
         }
         case 'rename-kb': {

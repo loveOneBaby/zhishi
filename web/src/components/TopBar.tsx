@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Check, Palette } from 'lucide-react';
+import { Check, SwatchBook } from 'lucide-react';
 import type { ThemeKey } from '../types';
 import { THEMES } from '../themes';
 import { seg } from '../ui';
@@ -20,13 +20,30 @@ const MODES: { key: AppMode; label: string }[] = [
   { key: 'free', label: '知识库' },
 ];
 
-const THEME_SWATCH: Record<ThemeKey, string> = {
-  mono: 'radial-gradient(circle at 50% 50%, #18181b 0 42%, #fbfbfa 44% 100%)',
-  ink: 'radial-gradient(circle at 50% 50%, #f2f2f0 0 38%, #0d0d0f 40% 100%)',
-  paper: 'radial-gradient(circle at 50% 50%, #2b2620 0 36%, #f4f0e7 38% 100%)',
-  glass: 'radial-gradient(circle at 30% 24%, rgba(255,255,255,.95), rgba(217,226,255,.9) 45%, rgba(155,176,255,.7) 100%)',
+type ThemePreview = {
+  bg: string;
+  panel: string;
+  fg: string;
+  accent: string;
+};
+
+const THEME_PREVIEW: Record<ThemeKey, ThemePreview> = {
+  mono: { bg: '#fbfbfa', panel: '#ffffff', fg: '#18181b', accent: '#18181b' },
+  ink: { bg: '#0d0d0f', panel: '#161618', fg: '#f2f2f0', accent: '#f2f2f0' },
+  paper: { bg: '#f4f0e7', panel: '#fcf9f2', fg: '#2b2620', accent: '#8a6f43' },
+  glass: { bg: '#edf3fb', panel: 'rgba(255,255,255,.86)', fg: '#172033', accent: '#6f7ded' },
 };
 const THEME_KEYS = Object.keys(THEMES) as ThemeKey[];
+
+function previewVars(k: ThemeKey): CSSProperties {
+  const preview = THEME_PREVIEW[k];
+  return {
+    '--theme-preview-bg': preview.bg,
+    '--theme-preview-panel': preview.panel,
+    '--theme-preview-fg': preview.fg,
+    '--theme-preview-accent': preview.accent,
+  } as CSSProperties;
+}
 
 export default function TopBar({ mode, setMode, theme, setTheme, searchSlot, searchTools }: Props) {
   const [themeOpen, setThemeOpen] = useState(false);
@@ -72,8 +89,12 @@ export default function TopBar({ mode, setMode, theme, setTheme, searchSlot, sea
           aria-expanded={themeOpen}
           title={`当前主题：${THEMES[theme].name}`}
           onClick={() => setThemeOpen((open) => !open)}
+          style={previewVars(theme)}
         >
-          <Palette size={15} strokeWidth={2.2} />
+          <SwatchBook size={15} strokeWidth={2.05} />
+          <span className="ik-theme-trigger-preview" aria-hidden="true">
+            <i />
+          </span>
         </button>
         {themeOpen && (
           <div className="ik-theme-menu" role="menu" aria-label="切换主题">
@@ -91,9 +112,14 @@ export default function TopBar({ mode, setMode, theme, setTheme, searchSlot, sea
                     setThemeOpen(false);
                   }}
                 >
-                  <span className="ik-theme-menu-swatch" style={{ '--theme-swatch': THEME_SWATCH[k] } as CSSProperties} aria-hidden="true" />
+                  <span className="ik-theme-menu-preview" style={previewVars(k)} aria-hidden="true">
+                    <i />
+                    <i />
+                  </span>
                   <span className="ik-theme-menu-label">{THEMES[k].name}</span>
-                  {active && <Check size={14} strokeWidth={2.4} />}
+                  <span className="ik-theme-menu-check" aria-hidden="true">
+                    {active && <Check size={13} strokeWidth={2.35} />}
+                  </span>
                 </button>
               );
             })}

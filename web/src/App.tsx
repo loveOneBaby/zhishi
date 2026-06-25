@@ -21,6 +21,8 @@ import {
   reorderFolders,
   startGenerateKnowledgeBaseJob,
   startInitKnowledgeBaseFoldersJob,
+  cancelAiJob,
+  retryAiJob,
   type AiKnowledgeBaseJob,
   type EntryInput as ApiEntryInput,
 } from './api';
@@ -360,6 +362,19 @@ export default function App() {
     toast(`「${input.domain || job.kbName || job.domain}」目录已在后台初始化`, 'success');
   }, []);
 
+  const handleCancelAiJob = useCallback(async (id: string): Promise<void> => {
+    const job = await cancelAiJob(id);
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    toast('已取消 AI 任务', 'info');
+  }, []);
+
+  const handleRetryAiJob = useCallback(async (id: string): Promise<void> => {
+    const job = await retryAiJob(id);
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    setAiTaskPanelOpen(true);
+    toast(`已重新提交「${job.domain}」`, 'success');
+  }, []);
+
   const handleOpenAiJobResult = useCallback((job: AiKnowledgeBaseJob): void => {
     if (!job.result) return;
     applyCompletedJobs([job]);
@@ -587,6 +602,8 @@ export default function App() {
         open={aiTaskPanelOpen}
         onOpenChange={setAiTaskPanelOpen}
         onOpenResult={handleOpenAiJobResult}
+        onCancel={handleCancelAiJob}
+        onRetry={handleRetryAiJob}
       />
       <Toaster />
     </div>

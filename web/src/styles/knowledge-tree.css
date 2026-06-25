@@ -27,6 +27,11 @@
 }
 .ik-segbtn:hover:not(:disabled) { background: var(--sel); border-color: color-mix(in srgb, var(--fg) 16%, var(--bd)); }
 .ik-segbtn:disabled { opacity: .5; cursor: not-allowed; }
+.ik-segbtn svg {
+  display: block;
+  flex: none;
+  opacity: .86;
+}
 .ik-segbtn-danger { color: var(--danger); }
 .ik-segbtn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, var(--panel)); border-color: color-mix(in srgb, var(--danger) 40%, var(--bd)); }
 .ik-segbtn-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
@@ -287,7 +292,7 @@
   justify-content: center;
   border: none;
   background: transparent;
-  color: var(--mut);
+  color: color-mix(in srgb, var(--mut) 78%, var(--fg));
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
@@ -309,26 +314,36 @@
   justify-content: center;
   justify-self: center;
   flex: none;
-  color: var(--mut);
+  color: color-mix(in srgb, var(--mut) 84%, var(--fg));
 }
 .ik-kt-root-icon {
   opacity: .78;
 }
 .ik-kt-icon-folder {
-  color: color-mix(in srgb, var(--accent) 62%, var(--mut));
+  color: color-mix(in srgb, var(--fg) 68%, var(--mut));
 }
 .ik-theme-glass .ik-kt-icon-folder {
-  color: color-mix(in srgb, var(--fg) 72%, var(--mut));
+  color: color-mix(in srgb, var(--fg) 62%, var(--mut));
 }
 .ik-kt-icon-folder::before {
   content: none;
 }
 .ik-kt-icon-entry {
-  opacity: .5;
+  color: color-mix(in srgb, var(--mut) 74%, var(--fg));
+  opacity: .76;
 }
 .ik-kt-icon svg,
 .ik-kt-root-icon svg {
   display: block;
+}
+.ik-kt-node:hover .ik-kt-icon-folder,
+.ik-kt-node.is-active .ik-kt-icon-folder {
+  color: color-mix(in srgb, var(--accent) 72%, var(--fg));
+}
+.ik-kt-node:hover .ik-kt-icon-entry,
+.ik-kt-node.is-active .ik-kt-icon-entry {
+  color: color-mix(in srgb, var(--accent) 52%, var(--mut));
+  opacity: .9;
 }
 .ik-kt-main {
   min-width: 0;

@@ -18,8 +18,33 @@ function indexTitles(nodes: IndexNode[]): string[] {
 }
 
 // 索引全文（标题 + 内容，含引言）
+function blockText(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(blockText).join(' ');
+  if (typeof value !== 'object') return '';
+  const obj = value as Record<string, unknown>;
+  const parts = [
+    typeof obj.text === 'string' ? obj.text : '',
+    blockText(obj.content),
+    blockText(obj.children),
+    typeof obj.caption === 'string' ? obj.caption : '',
+    typeof obj.alt === 'string' ? obj.alt : '',
+    typeof obj.name === 'string' ? obj.name : '',
+  ];
+  if (obj.props && typeof obj.props === 'object') {
+    const props = obj.props as Record<string, unknown>;
+    parts.push(
+      typeof props.caption === 'string' ? props.caption : '',
+      typeof props.alt === 'string' ? props.alt : '',
+      typeof props.name === 'string' ? props.name : '',
+    );
+  }
+  return parts.filter(Boolean).join(' ');
+}
+
 function indexText(e: Entry): string {
-  const parts: string[] = [e.intro];
+  const parts: string[] = [e.intro, blockText(e.doc)];
   const walk = (ns: IndexNode[]): void => { for (const n of ns) { parts.push(n.title, n.content); walk(n.children); } };
   walk(e.nodes);
   return parts.filter(Boolean).join(' ');

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { BookOpen, Plus, Sparkles } from 'lucide-react';
+import { LibraryBig, Plus, Sparkles } from 'lucide-react';
 import type { Entry, Folder, KnowledgeBase } from '../../types';
 import ImportPreviewModal from '../ImportPreviewModal';
 import type { ImportPayload, ImportPreview } from '../../api';
@@ -70,7 +70,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
               }}
             >
               <RowActions onRename={() => renameKbAction(kb)} onDelete={() => deleteKbAction(kb)} />
-              <div className="ik-kb-tile"><BookOpen size={24} strokeWidth={2.05} /></div>
+              <div className="ik-kb-tile"><LibraryBig size={22} strokeWidth={1.95} /></div>
               <div className="ik-kb-name">{kb.name}</div>
               <div className="ik-kb-stats">
                 <span className="ik-kb-stat"><b>{fn}</b> 文件夹</span>

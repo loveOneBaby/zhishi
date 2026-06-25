@@ -52,6 +52,13 @@ test('filterEntries: 中文/拼音命中, 无关排除', () => {
   assert.equal(filterEntries(list, '无关xyz').length, 0);
 });
 
+test('filterEntries: doc 块正文参与前端检索', () => {
+  const list = [
+    entry({ id: 'doc', title: 'Git Commit', doc: [{ type: 'paragraph', content: '不可变对象模型和 DAG 历史。' }] }),
+  ];
+  assert.deepEqual(filterEntries(list, 'DAG 历史').map((e) => e.id), ['doc']);
+});
+
 test('canvas model: buildModel / collectVisible / layout', () => {
   const list = [
     entry({ id: 'k1', cat: 'AI', title: '知识点1', nodes: [

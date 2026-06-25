@@ -1,4 +1,4 @@
-import type { Entry } from '../types.js';
+import type { Block, Entry } from '../types.js';
 
 interface GeneratedSection {
   title: string;
@@ -20,10 +20,19 @@ export interface GeneratedDraft {
 
 export interface GeneratedKbFolder {
   path: string[];
+  sourceId?: string;
+  parentSourceId?: string | null;
+  sort?: number;
+}
+
+export interface GeneratedSourceRef {
+  title: string;
+  url: string;
 }
 
 export interface GeneratedKbQuestion {
   folderPath: string[];
+  containerSourceId?: string;
   title: string;
   question: string;
   summary: string;
@@ -34,6 +43,8 @@ export interface GeneratedKbQuestion {
   followUps: string[];
   pitfalls: string[];
   answerTemplate: string;
+  doc?: Block[];
+  sourceRefs?: GeneratedSourceRef[];
 }
 
 export interface GeneratedKbDraft {
@@ -54,11 +65,13 @@ export interface GenerateEntryOptions {
   kbName: string;
   folderPath?: string;
   context?: Entry[];
+  signal?: AbortSignal;
 }
 
 export interface GenerateKnowledgeBaseOptions {
   domain: string;
   questionCount?: number;
+  signal?: AbortSignal;
 }
 
 export interface GenerateFolderTreeOptions {
@@ -67,10 +80,12 @@ export interface GenerateFolderTreeOptions {
   targetPath?: string;
   existingFolders?: string[];
   folderCount?: number;
+  signal?: AbortSignal;
 }
 
 export interface RewriteEntryOptions {
   entry: Entry;
+  signal?: AbortSignal;
 }
 
 export type GenerateEntryEvent =

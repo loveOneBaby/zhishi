@@ -163,6 +163,7 @@
   color: var(--accent);
 }
 .ik-ai-task-row.is-failed .ik-ai-task-row-icon { color: var(--danger); }
+.ik-ai-task-row.is-cancelled .ik-ai-task-row-icon { color: var(--mut); }
 .ik-ai-task-row.is-succeeded .ik-ai-task-row-icon { color: color-mix(in srgb, var(--accent) 76%, #1f8f54); }
 .ik-ai-task-row-main {
   min-width: 0;
@@ -221,6 +222,7 @@
   color: var(--accent);
 }
 .ik-ai-task-status.is-failed > span { color: var(--danger); }
+.ik-ai-task-status.is-cancelled > span { color: var(--mut); }
 .ik-ai-task-status b {
   display: block;
   overflow: hidden;
@@ -260,6 +262,38 @@
   color: var(--danger);
   font-size: 12.5px;
   line-height: 1.5;
+}
+.ik-ai-task-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.ik-ai-task-secondary {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--bd) 82%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 760;
+}
+.ik-ai-task-secondary:hover {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--bd));
+  background: color-mix(in srgb, var(--sel) 72%, transparent);
+}
+.ik-ai-task-secondary.is-danger {
+  color: var(--danger);
+}
+.ik-ai-task-secondary.is-danger:hover {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--bd));
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 .ik-ai-task-log,
 .ik-ai-task-output {

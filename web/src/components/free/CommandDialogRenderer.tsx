@@ -1,6 +1,6 @@
 import type { ReactNode, MutableRefObject } from 'react';
-import { Sparkles } from 'lucide-react';
-import type { Entry, Folder, KnowledgeBase } from '../../types';
+import { RotateCcw, Sparkles } from 'lucide-react';
+import type { Block, Entry, EntryInput, Folder, KnowledgeBase } from '../../types';
 import { folderPathName, folderSubtreeIds } from '../../tree';
 import CommandDialog from '../CommandDialog';
 import type { CommandState } from './types';
@@ -18,6 +18,59 @@ interface CommandDialogRendererProps {
   onResetAiLive: () => void;
   pendingGuardRef: MutableRefObject<(() => void) | null>;
   onConfirm: (value: string) => Promise<void>;
+}
+
+function inlineText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(inlineText).filter(Boolean).join('');
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return inlineText(obj.text ?? obj.content ?? obj.href ?? obj.url ?? '');
+  }
+  return '';
+}
+
+function collectHeadings(blocks?: Block[]): string[] {
+  const out: string[] = [];
+  const walk = (list?: Block[]): void => {
+    if (!Array.isArray(list)) return;
+    for (const block of list) {
+      if (block.type === 'heading') {
+        const text = inlineText(block.content).trim();
+        if (text) out.push(text);
+      }
+      walk(block.children);
+    }
+  };
+  walk(blocks);
+  return out;
+}
+
+function DraftPreview({ input, mode }: { input: EntryInput; mode: 'create' | 'rewrite' }): ReactNode {
+  const headings = collectHeadings(input.doc);
+  const outline = headings.length ? headings : input.nodes?.map((node) => node.title).filter(Boolean) ?? [];
+  return (
+    <section className="ik-command-draft" aria-label="AI 草稿预览">
+      <div className="ik-command-draft-head">
+        <span>{mode === 'rewrite' ? '待保存改写' : '待写入草稿'}</span>
+        <b>{input.title}</b>
+        {input.summary && <p>{input.summary}</p>}
+      </div>
+      {input.tags.length > 0 && (
+        <div className="ik-command-draft-tags">
+          {input.tags.slice(0, 8).map((tag) => <span key={tag}>{tag}</span>)}
+        </div>
+      )}
+      {outline.length > 0 && (
+        <div className="ik-command-draft-outline">
+          <span>内容结构</span>
+          <ul>
+            {outline.slice(0, 6).map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
 }
 
 // 根据 command.kind 渲染对应的命令弹窗。AI 类弹窗关闭时需要清空 aiLive 实时输出。
@@ -115,6 +168,7 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
         livePlanLabel="公开生成思路"
         liveOutput={aiLiveOutput}
         liveOutputLabel="结构化 JSON"
+        closeOnConfirm={false}
         onOpenChange={(open) => {
           if (!open) {
             onSetCommand(null);
@@ -139,12 +193,73 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
         livePlanLabel="公开改写思路"
         liveOutput={aiLiveOutput}
         liveOutputLabel="结构化 JSON"
+        closeOnConfirm={false}
         onOpenChange={(open) => {
           if (!open) {
             onSetCommand(null);
             onResetAiLive();
           }
         }}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+  if (command.kind === 'confirm-generated-entry') {
+    const targetLabel = command.folderId ? folderPathName(folders, command.folderId) : `${currentKb?.name ?? '当前知识库'} / 根层级`;
+    return (
+      <CommandDialog
+        open
+        title="确认写入知识点"
+        description={`AI 已生成草稿，将写入到 ${targetLabel || '当前位置'}。`}
+        helper="确认后才会写入知识库；取消会丢弃这次草稿。"
+        confirmText="写入知识库"
+        cancelText="丢弃草稿"
+        size="wide"
+        icon={<Sparkles size={18} strokeWidth={2.15} />}
+        preview={<DraftPreview input={command.input} mode="create" />}
+        onOpenChange={(open) => {
+          if (!open) {
+            onSetCommand(null);
+            onResetAiLive();
+          }
+        }}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+  if (command.kind === 'confirm-rewrite-entry') {
+    return (
+      <CommandDialog
+        open
+        title="确认保存改写"
+        description={`将覆盖「${command.entry.title}」当前内容，保存前会自动备份旧版本。`}
+        helper="确认后写入当前知识点；取消会丢弃这次 AI 改写草稿。"
+        confirmText="保存改写"
+        cancelText="丢弃草稿"
+        size="wide"
+        icon={<Sparkles size={18} strokeWidth={2.15} />}
+        preview={<DraftPreview input={command.input} mode="rewrite" />}
+        onOpenChange={(open) => {
+          if (!open) {
+            onSetCommand(null);
+            onResetAiLive();
+          }
+        }}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+  if (command.kind === 'restore-entry-version') {
+    return (
+      <CommandDialog
+        open
+        title="恢复上个版本"
+        description={`将把「${command.entry.title}」恢复到最近一次 AI 改写前的备份。`}
+        helper="恢复前会先保存当前内容为一个版本，方便继续回退。"
+        confirmText="恢复"
+        cancelText="取消"
+        icon={<RotateCcw size={18} strokeWidth={2.15} />}
+        onOpenChange={(open) => { if (!open) onSetCommand(null); }}
         onConfirm={onConfirm}
       />
     );

@@ -35,9 +35,9 @@ export function registerKbRoutes(api: Router): void {
   // AI 新建知识库后台任务：提交后立即返回 jobId，生成过程由服务端继续执行。
   api.post('/kbs/generate/jobs', (req, res) => {
     const domain = String(req.body?.domain ?? '').trim();
-    const questionCount = Number(req.body?.questionCount ?? 14);
+    const questionCount = Number(req.body?.questionCount ?? 18);
     if (!domain) return res.status(400).json({ error: 'domain 不能为空' });
-    const job = startKnowledgeBaseJob(domain, Number.isFinite(questionCount) ? questionCount : 14);
+    const job = startKnowledgeBaseJob(domain, Number.isFinite(questionCount) ? questionCount : 18);
     res.status(202).json({ job: jobSnapshot(job) });
   });
 
@@ -66,7 +66,7 @@ export function registerKbRoutes(api: Router): void {
   // AI 新建知识库：按领域自动规划目录，并生成一批 Q&A 面试知识点。
   api.post('/kbs/generate/stream', async (req, res) => {
     const domain = String(req.body?.domain ?? '').trim();
-    const questionCount = Number(req.body?.questionCount ?? 14);
+    const questionCount = Number(req.body?.questionCount ?? 18);
     if (!domain) return res.status(400).json({ error: 'domain 不能为空' });
 
     res.writeHead(200, {
@@ -80,7 +80,7 @@ export function registerKbRoutes(api: Router): void {
     try {
       const draft = await generateKnowledgeBaseDraftStream({
         domain,
-        questionCount: Number.isFinite(questionCount) ? questionCount : 14,
+        questionCount: Number.isFinite(questionCount) ? questionCount : 18,
       }, (event: GenerateKnowledgeBaseEvent) => sendSse(res, event.type, event));
 
       sendSse(res, 'stage', { message: '写入新知识库、目录和 Q&A 知识点' });

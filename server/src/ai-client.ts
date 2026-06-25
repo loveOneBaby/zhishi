@@ -13,6 +13,10 @@ export interface AiConfig {
   temperature: number;
 }
 
+export interface AiRequestOptions extends Partial<Pick<AiConfig, 'model' | 'temperature'>> {
+  signal?: AbortSignal;
+}
+
 export class AiConfigError extends Error {
   constructor(message = 'AI 未配置：请在 server/.env 中设置 AI_API_KEY') {
     super(message);
@@ -57,7 +61,7 @@ export function getAiConfig(): AiConfig {
 
 export async function chatCompletion(
   messages: AiMessage[],
-  options: Partial<Pick<AiConfig, 'model' | 'temperature'>> = {},
+  options: AiRequestOptions = {},
 ): Promise<string> {
   const config = getAiConfig();
   if (!config.apiKey) throw new AiConfigError();
@@ -68,6 +72,7 @@ export async function chatCompletion(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${config.apiKey}`,
     },
+    signal: options.signal,
     body: JSON.stringify({
       model: options.model ?? config.model,
       messages,
@@ -88,7 +93,7 @@ export async function chatCompletion(
 
 export async function chatCompletionStream(
   messages: AiMessage[],
-  options: Partial<Pick<AiConfig, 'model' | 'temperature'>> = {},
+  options: AiRequestOptions = {},
   onDelta?: (delta: string) => void,
 ): Promise<string> {
   const config = getAiConfig();
@@ -100,6 +105,7 @@ export async function chatCompletionStream(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${config.apiKey}`,
     },
+    signal: options.signal,
     body: JSON.stringify({
       model: options.model ?? config.model,
       messages,

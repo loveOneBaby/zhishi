@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Clock3, ExternalLink, Loader2, Sparkles, X } from 'lucide-react';
+import { AlertCircle, Ban, CheckCircle2, Clock3, ExternalLink, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AiKnowledgeBaseJob } from '../api';
@@ -8,6 +8,8 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenResult: (job: AiKnowledgeBaseJob) => void;
+  onCancel: (id: string) => Promise<void>;
+  onRetry: (id: string) => Promise<void>;
 }
 
 function statusLabel(status: AiKnowledgeBaseJob['status']): string {
@@ -16,6 +18,7 @@ function statusLabel(status: AiKnowledgeBaseJob['status']): string {
     case 'running': return '生成中';
     case 'succeeded': return '已完成';
     case 'failed': return '失败';
+    case 'cancelled': return '已取消';
   }
 }
 
@@ -32,6 +35,7 @@ function runningText(job: AiKnowledgeBaseJob): string {
 function statusIcon(status: AiKnowledgeBaseJob['status']): ReactNode {
   if (status === 'succeeded') return <CheckCircle2 size={16} strokeWidth={2.2} />;
   if (status === 'failed') return <AlertCircle size={16} strokeWidth={2.2} />;
+  if (status === 'cancelled') return <Ban size={16} strokeWidth={2.2} />;
   if (status === 'queued') return <Clock3 size={16} strokeWidth={2.2} />;
   return <Loader2 size={16} strokeWidth={2.2} className="ik-ai-task-spin" />;
 }
@@ -60,7 +64,7 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
-export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult }: Props): ReactNode {
+export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult, onCancel, onRetry }: Props): ReactNode {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const sortedJobs = useMemo(() => [...jobs].sort((a, b) => b.createdAt - a.createdAt), [jobs]);
   const runningCount = sortedJobs.filter((job) => job.status === 'queued' || job.status === 'running').length;
@@ -156,6 +160,19 @@ export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult }:
                 {selectedJob.error && (
                   <div className="ik-ai-task-error">{selectedJob.error}</div>
                 )}
+
+                <div className="ik-ai-task-actions">
+                  {(selectedJob.status === 'queued' || selectedJob.status === 'running') && (
+                    <button type="button" className="ik-ai-task-secondary is-danger" onClick={() => { void onCancel(selectedJob.id); }}>
+                      <Ban size={14} strokeWidth={2.2} />取消任务
+                    </button>
+                  )}
+                  {(selectedJob.status === 'failed' || selectedJob.status === 'cancelled') && (
+                    <button type="button" className="ik-ai-task-secondary" onClick={() => { void onRetry(selectedJob.id); }}>
+                      <RefreshCw size={14} strokeWidth={2.2} />重新生成
+                    </button>
+                  )}
+                </div>
 
                 <div className="ik-ai-task-log">
                   <div>进度</div>

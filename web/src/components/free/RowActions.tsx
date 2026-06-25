@@ -1,15 +1,15 @@
 import type { ReactNode } from 'react';
-import { Pencil, Trash2 } from 'lucide-react';
+import { PencilLine, Trash } from 'lucide-react';
 
 // 卡片 / 树节点右侧的轻量操作按钮
 export function RowActions({ onRename, onDelete }: { onRename: () => void; onDelete: () => void }): ReactNode {
   return (
     <div className="ik-row-actions">
       <button type="button" title="重命名" className="ik-row-action-btn" onClick={(e) => { e.stopPropagation(); onRename(); }}>
-        <Pencil size={13} strokeWidth={2.1} />
+        <PencilLine size={14} strokeWidth={1.95} />
       </button>
       <button type="button" title="删除" className="ik-row-action-btn ik-row-action-danger" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
-        <Trash2 size={13} strokeWidth={2.1} />
+        <Trash size={14} strokeWidth={1.95} />
       </button>
     </div>
   );

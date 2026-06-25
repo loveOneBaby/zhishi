@@ -25,6 +25,8 @@ interface Props {
   livePlanLabel?: string;
   liveOutput?: string;
   liveOutputLabel?: string;
+  preview?: ReactNode;
+  closeOnConfirm?: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: (value: string) => Promise<void> | void;
 }
@@ -48,6 +50,8 @@ export default function CommandDialog({
   livePlanLabel = '公开生成思路',
   liveOutput,
   liveOutputLabel = '模型输出',
+  preview,
+  closeOnConfirm = true,
   onOpenChange,
   onConfirm,
 }: Props): ReactNode {
@@ -79,7 +83,7 @@ export default function CommandDialog({
     try {
       await onConfirm(hasInput ? draft.trim() : draft);
       setSubmitting(false);
-      onOpenChange(false);
+      if (closeOnConfirm) onOpenChange(false);
     } catch {
       // Caller owns user-facing error copy so the dialog can stay open for retry.
       setSubmitting(false);
@@ -124,6 +128,8 @@ export default function CommandDialog({
             )}
 
             {helper && <div className="ik-command-helper">{helper}</div>}
+
+            {preview && <div className="ik-command-preview">{preview}</div>}
 
             {showProgress && (
               <div className="ik-command-progress" aria-live="polite">

@@ -41,6 +41,17 @@ export interface GenerateEntryStreamHandlers {
   onSaved?: (entry: Entry) => void;
 }
 
+export interface EntryVersion {
+  id: string;
+  entryId: string;
+  source: string;
+  title: string;
+  summary: string;
+  tags: string[];
+  snapshot: EntryInput;
+  createdAt: number;
+}
+
 export async function generateEntryWithAI(input: GenerateEntryInput): Promise<Entry> {
   const data = await apiPostJson<{ configured: boolean; entry?: Entry; error?: string }>('/entries/generate', input);
   if (!data.configured || !data.entry) throw new Error(data.error || 'AI 未配置，请先配置 server/.env');
@@ -72,10 +83,52 @@ function dispatchEntryStream(handlers: GenerateEntryStreamHandlers, errorMessage
   };
 }
 
+function dispatchEntryDraftStream(handlers: GenerateEntryStreamHandlers, errorMessage: string) {
+  return (event: string, data: Record<string, unknown>, ctx: SseDispatchCtx<EntryInput>): void => {
+    if (event === 'stage' && typeof data.message === 'string') handlers.onStage?.(data.message);
+    if (event === 'context' && Array.isArray(data.items)) {
+      handlers.onContext?.(data.items as Array<{ title: string; summary: string }>);
+    }
+    if (event === 'model-delta' && typeof data.content === 'string') handlers.onDelta?.(data.content);
+    if (event === 'model-output' && typeof data.content === 'string') handlers.onOutput?.(data.content);
+    if (event === 'parsed') {
+      handlers.onParsed?.({
+        title: String(data.title ?? ''),
+        tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
+        sections: Number(data.sections ?? 0),
+      });
+    }
+    if ((event === 'draft' || event === 'done') && data.input && typeof data.input === 'object') {
+      ctx.setSaved(data.input as EntryInput);
+    }
+    if (event === 'error') ctx.setError(String(data.error ?? errorMessage));
+  };
+}
+
 export async function generateEntryWithAIStream(input: GenerateEntryInput, handlers: GenerateEntryStreamHandlers = {}): Promise<Entry> {
   return runSseStream<Entry>('/entries/generate/stream', input, 'AI 生成未返回知识点', dispatchEntryStream(handlers, 'AI 生成失败'));
 }
 
 export async function rewriteEntryWithAIStream(entryId: string, handlers: GenerateEntryStreamHandlers = {}): Promise<Entry> {
   return runSseStream<Entry>(`/entries/${encodeURIComponent(entryId)}/rewrite/stream`, undefined, 'AI 改写未返回知识点', dispatchEntryStream(handlers, 'AI 改写失败'));
+}
+
+export async function generateEntryDraftWithAIStream(input: GenerateEntryInput, handlers: GenerateEntryStreamHandlers = {}): Promise<EntryInput> {
+  return runSseStream<EntryInput>('/entries/generate/draft/stream', input, 'AI 生成未返回草稿', dispatchEntryDraftStream(handlers, 'AI 生成失败'));
+}
+
+export async function rewriteEntryDraftWithAIStream(entryId: string, handlers: GenerateEntryStreamHandlers = {}): Promise<EntryInput> {
+  return runSseStream<EntryInput>(`/entries/${encodeURIComponent(entryId)}/rewrite/draft/stream`, undefined, 'AI 改写未返回草稿', dispatchEntryDraftStream(handlers, 'AI 改写失败'));
+}
+
+export async function commitRewriteEntryDraft(entryId: string, input: EntryInput): Promise<Entry> {
+  return apiPostKey<Entry>(`/entries/${encodeURIComponent(entryId)}/rewrite/commit`, input, 'entry');
+}
+
+export async function fetchEntryVersions(entryId: string): Promise<EntryVersion[]> {
+  return apiGetKey<EntryVersion[]>(`/entries/${encodeURIComponent(entryId)}/versions`, 'versions');
+}
+
+export async function restoreEntryVersion(entryId: string, versionId: string): Promise<Entry> {
+  return apiPostKey<Entry>(`/entries/${encodeURIComponent(entryId)}/versions/${encodeURIComponent(versionId)}/restore`, {}, 'entry');
 }

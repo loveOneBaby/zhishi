@@ -9,7 +9,8 @@ import { toSearchText } from './pinyin-search.js';
 import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc } from './assets.js';
 import { extractText, blocksToMarkdown as blockNoteToMarkdown } from './blocks.js';
 import { normalizeDocBlocks, splitDocToIndex, markdownToDocBlocks } from './doc.js';
-import { coerceGeneratedDraft, coerceGeneratedFolderTreeDraft, coerceGeneratedKbDraft, draftToMarkdown, extractJsonObject, kbQuestionToMarkdown } from './ai-generate.js';
+import { coerceGeneratedDraft, coerceGeneratedFolderTreeDraft, coerceGeneratedKbDraft, draftToMarkdown, extractJsonObject, kbQuestionToEntryInput, kbQuestionToMarkdown } from './ai-generate.js';
+import { ensureTags } from './ai/render.js';
 import type { Entry } from './types.js';
 
 const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -72,6 +73,13 @@ test('searchEntries: 中文子串 / 拼音 / 缩写命中, 无关不命中', () 
   const byAbbr = searchEntries(list, 'bb').map((e) => e.title);
   assert.deepEqual(byAbbr, ['闭包']);
   assert.equal(searchEntries(list, '完全不相关xyz').length, 0);
+});
+
+test('searchEntries: doc 块正文参与检索', () => {
+  const list = [
+    entry({ id: 'doc', title: 'Git Commit', doc: [{ type: 'paragraph', content: '不可变对象模型和 DAG 历史。' }] }),
+  ];
+  assert.deepEqual(searchEntries(list, '不可变对象').map((e) => e.id), ['doc']);
 });
 
 test('assets: parseDataUrl / sha256 / sniffImageSize / classifyImageSrc', () => {
@@ -180,6 +188,13 @@ test('ai-generate: 抽取模型 JSON 并转成知识点 markdown', () => {
   assert.ok(md.includes('## 高频追问'));
 });
 
+test('ai-generate: 标签规范化并保留 AI生成', () => {
+  assert.deepEqual(
+    ensureTags(['#Git', '版本控制/工程规范', 'git', ''], 'Git Commit'),
+    ['Git Commit', 'Git', '版本控制 工程规范', 'AI生成'],
+  );
+});
+
 test('ai-generate: 知识库 JSON 转目录与 Q&A markdown', () => {
   const draft = coerceGeneratedKbDraft({
     kbName: 'Redis 面试知识库',
@@ -202,6 +217,32 @@ test('ai-generate: 知识库 JSON 转目录与 Q&A markdown', () => {
   assert.ok(md.includes('## Q'));
   assert.ok(md.includes('## A'));
   assert.ok(md.includes('## 高频追问'));
+});
+
+test('ai-generate: kb-package-2 风格 containers/entries 可还原目录挂载', () => {
+  const draft = coerceGeneratedKbDraft({
+    kbName: 'AI Agent 面试知识库',
+    containers: [
+      { sourceId: 'folder_llm', kind: 'folder', parentSourceId: null, name: 'LLM', sort: 1 },
+      { sourceId: 'folder_llm_explain', kind: 'folder', parentSourceId: 'folder_llm', name: '解释', sort: 1 },
+      { sourceId: 'folder_agent', kind: 'folder', parentSourceId: null, name: 'Agent', sort: 2 },
+    ],
+    entries: [{
+      sourceId: 'agent_001',
+      containerSourceId: 'folder_llm_explain',
+      title: '什么是 LLM',
+      tags: ['LLM'],
+      doc: [
+        { type: 'heading', props: { level: 3 }, content: '基本定义' },
+        { type: 'paragraph', content: 'LLM 通过学习海量文本掌握语言规律。' },
+      ],
+    }],
+  }, 'AI Agent');
+  assert.deepEqual(draft.folders.map((folder) => folder.path), [['LLM'], ['LLM', '解释'], ['Agent']]);
+  assert.deepEqual(draft.questions[0].folderPath, ['LLM', '解释']);
+  const input = kbQuestionToEntryInput(draft.questions[0], 'AI Agent');
+  assert.equal(input.doc?.[0]?.type, 'heading');
+  assert.ok((input.tags ?? []).includes('AI生成'));
 });
 
 test('ai-generate: 目录初始化 JSON 只转文件夹路径', () => {

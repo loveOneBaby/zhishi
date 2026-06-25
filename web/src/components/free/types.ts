@@ -1,4 +1,4 @@
-import type { Entry, Folder, KnowledgeBase } from '../../types';
+import type { Entry, EntryInput, Folder, KnowledgeBase } from '../../types';
 
 export type CommandState =
   | { kind: 'create-kb' }
@@ -7,6 +7,9 @@ export type CommandState =
   | { kind: 'create-folder'; kbId: string; parentId: string | null }
   | { kind: 'generate-entry'; kbId: string; folderId: string | null }
   | { kind: 'rewrite-entry'; entry: Entry }
+  | { kind: 'confirm-generated-entry'; kbId: string; folderId: string | null; input: EntryInput }
+  | { kind: 'confirm-rewrite-entry'; entry: Entry; input: EntryInput }
+  | { kind: 'restore-entry-version'; entry: Entry }
   | { kind: 'rename-kb'; kb: KnowledgeBase }
   | { kind: 'rename-folder'; folder: Folder }
   | { kind: 'delete-kb'; kb: KnowledgeBase }

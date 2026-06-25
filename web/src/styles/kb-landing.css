@@ -73,27 +73,31 @@
 }
 .ik-theme-glass .ik-kb-card .ik-row-actions {
   border-color: rgba(255,255,255,.7);
-  background: rgba(255,255,255,.74);
-  box-shadow: 0 10px 26px rgba(42,55,83,.1);
+  background: rgba(255,255,255,.68);
+  box-shadow: 0 12px 28px rgba(42,55,83,.08);
 }
 .ik-theme-glass .ik-kb-card .ik-row-action-btn:hover {
   background: rgba(80,95,124,.08);
 }
 .ik-kb-tile {
-  width: 46px;
-  height: 46px;
+  width: 44px;
+  height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 13px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--fg) 6%, var(--panel));
+  border-radius: 14px;
+  color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 12%, var(--panel)), color-mix(in srgb, var(--fg) 4%, var(--panel)));
   margin-bottom: 16px;
-  transition: background 170ms ease, color 170ms ease, transform 170ms ease;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
+  transition: background 170ms ease, color 170ms ease, transform 170ms ease, box-shadow 170ms ease;
 }
 .ik-kb-card:hover .ik-kb-tile {
-  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 18%, var(--panel)), color-mix(in srgb, var(--fg) 4%, var(--panel)));
   transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.48), 0 8px 20px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .ik-kb-name {
   font-size: 19px;
@@ -149,6 +153,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg) 6%, var(--panel));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--fg) 5%, var(--panel));
+  color: color-mix(in srgb, var(--accent) 76%, var(--fg));
 }

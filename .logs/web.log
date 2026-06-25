@@ -3,53 +3,7 @@
 > vite
 
 
-  VITE v5.4.21  ready in 1394 ms
+  VITE v5.4.21  ready in 258 ms
 
   ➜  Local:   http://localhost:3000/
   ➜  Network: use --host to expose
-5:40:28 PM [vite] hmr update /src/components/TopBar.tsx
-5:40:43 PM [vite] hmr update /src/styles.css
-5:43:36 PM [vite] hmr update /src/styles.css
-5:43:44 PM [vite] hmr update /src/App.tsx, /src/components/AskModal.tsx, /src/components/FreeMode.tsx, /src/components/BlockEditor.tsx
-5:43:51 PM [vite] hmr update /src/components/CommandDialog.tsx
-5:44:40 PM [vite] hmr update /src/App.tsx
-5:45:01 PM [vite] hmr update /src/components/FreeMode.tsx
-5:45:15 PM [vite] hmr update /src/App.tsx
-5:46:20 PM [vite] hmr update /src/styles.css
-5:46:54 PM [vite] hmr update /src/styles.css
-5:47:02 PM [vite] hmr update /src/styles.css
-5:47:26 PM [vite] hmr update /src/components/FreeMode.tsx
-5:47:49 PM [vite] hmr update /src/styles.css
-5:48:18 PM [vite] hmr update /src/styles.css
-5:48:42 PM [vite] hmr update /src/styles.css
-5:51:20 PM [vite] http proxy error: /api/ai/jobs
-AggregateError [ECONNREFUSED]: 
-    at internalConnectMultiple (node:net:1193:18)
-    at afterConnectMultiple (node:net:1783:7)
-5:51:21 PM [vite] http proxy error: /api/ai/jobs
-AggregateError [ECONNREFUSED]: 
-    at internalConnectMultiple (node:net:1193:18)
-    at afterConnectMultiple (node:net:1783:7)
-5:51:21 PM [vite] http proxy error: /api/ai/jobs
-AggregateError [ECONNREFUSED]: 
-    at internalConnectMultiple (node:net:1193:18)
-    at afterConnectMultiple (node:net:1783:7)
-5:51:52 PM [vite] http proxy error: /api/ai/jobs
-AggregateError [ECONNREFUSED]: 
-    at internalConnectMultiple (node:net:1193:18)
-    at afterConnectMultiple (node:net:1783:7)
-5:51:52 PM [vite] http proxy error: /api/ai/jobs
-AggregateError [ECONNREFUSED]: 
-    at internalConnectMultiple (node:net:1193:18)
-    at afterConnectMultiple (node:net:1783:7)
-5:52:01 PM [vite] hmr update /src/App.tsx, /src/components/AskModal.tsx, /src/components/FreeMode.tsx, /src/components/BlockEditor.tsx
-5:52:08 PM [vite] hmr update /src/components/FreeMode.tsx
-5:52:17 PM [vite] hmr update /src/components/AiTaskCenter.tsx
-5:52:25 PM [vite] hmr update /src/styles.css
-5:52:32 PM [vite] hmr update /src/App.tsx
-5:52:52 PM [vite] hmr update /src/components/FreeMode.tsx
-5:53:00 PM [vite] hmr update /src/components/FreeMode.tsx
-5:53:10 PM [vite] hmr update /src/components/FreeMode.tsx
-5:55:00 PM [vite] hmr update /src/components/SearchMode.tsx
-5:56:01 PM [vite] hmr update /src/styles.css
-5:56:19 PM [vite] hmr update /src/styles.css

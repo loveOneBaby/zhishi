@@ -38,15 +38,19 @@ export function buildGenerateMessages(options: GenerateEntryOptions): AiMessage[
 
 export function buildGenerateKnowledgeBaseMessages(options: GenerateKnowledgeBaseOptions): AiMessage[] {
   const { domain } = options;
-  const questionCount = Math.min(24, Math.max(8, Math.floor(options.questionCount ?? 14)));
+  const questionCount = Math.min(36, Math.max(12, Math.floor(options.questionCount ?? 18)));
   const prompt = [
     `请为「${domain}」创建一套工程面试知识库。`,
+    '参考结构：先有 containers 目录树，再用 entries[].containerSourceId 把每个知识点挂到明确目录。这个结构类似 kb-package-2，但本次只输出生成草稿，不要加 version/package/assets。',
     '输出必须分两段：',
-    '1）先输出“建库思路”，用 4-8 条短 bullet 说明目录如何划分、哪些问题是高频、回答如何组织。这里是可公开说明，不要输出隐藏推理链路。',
+    '1）先输出“建库思路”，用 4-8 条短 bullet 说明一级目录、二级目录、每类知识点覆盖哪些高频面试场景。这里是可公开说明，不要输出隐藏推理链路。',
     '2）然后输出一行 ---JSON---，后面只放一个 JSON 对象，不要 Markdown 代码围栏。',
     'JSON 字段必须是：',
-    '{"kbName":"知识库名称","description":"一句话说明","folders":[{"path":["一级目录","二级目录"]}],"questions":[{"folderPath":["一级目录","二级目录"],"title":"知识点标题","question":"面试题","summary":"一句话摘要","tags":["标签"],"shortAnswer":"30-80字直接回答","answer":"展开回答","keyPoints":["关键点"],"followUps":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接复述的回答模板"}]}',
-    `要求：中文；questions 生成 ${questionCount} 道高频题；目录 4-7 个、最多二级；每道题必须是 Q&A 形式；覆盖定义、原理、实现、场景、性能、排障、对比、项目表达；避免空话和营销话术；标题适合作为知识点列表展示，不要全部以“什么是”开头。`,
+    '{"kbName":"知识库名称","description":"一句话说明","containers":[{"sourceId":"folder_unique_id","kind":"folder","parentSourceId":null,"name":"一级目录","sort":1},{"sourceId":"folder_child_id","kind":"folder","parentSourceId":"folder_unique_id","name":"二级目录","sort":1}],"entries":[{"sourceId":"entry_unique_id","containerSourceId":"folder_child_id","title":"知识点标题","question":"面试题","summary":"一句话摘要","tags":["标签"],"shortAnswer":"30-80字直接回答","answer":"展开回答","keyPoints":["关键点"],"followUps":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接复述的回答模板"}]}',
+    `结构要求：中文；entries 生成 ${questionCount} 条高频知识点；containers 生成 5-8 个一级目录，核心一级目录至少 1 个二级目录，最多二级；核心一级目录至少挂 2 条 entries，补充/对比类目录可 1 条；所有 entries.containerSourceId 必须指向已有 container.sourceId；sourceId 用英文小写、数字、下划线，稳定可读。`,
+    '目录组织建议：按知识体系拆，不按“定义/原理/场景/追问”这种通用模板拆。优先使用：基础概念、核心原理、关键机制、工程实践、性能优化、故障排查、对比选型、项目表达，也可以按该领域更自然的模块命名。',
+    '内容要求：每个知识点必须是可面试复述的 Q&A；覆盖定义、原理、实现、场景、性能、排障、对比、项目表达；避免空话和营销话术；标题适合作为知识点列表展示，不要全部以“什么是”开头。',
+    '质量要求：同一目录下知识点围绕同一主题递进；不要把大量知识点都挂到根目录或同一个目录；不要生成空目录，除非它是父目录。',
   ].join('\n');
 
   return [

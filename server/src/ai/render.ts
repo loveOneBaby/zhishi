@@ -1,11 +1,17 @@
-import { markdownToDocBlocks } from '../doc.js';
+import { markdownToDocBlocks, normalizeDocBlocks } from '../doc.js';
 import type { EntryInput } from '../db.js';
 import type { GeneratedDraft, GeneratedKbQuestion } from './types.js';
 
 export function ensureTags(tags: string[], topic: string): string[] {
+  const normalizeTag = (value: string): string => value
+    .replace(/^#+/, '')
+    .replace(/[，,;；|｜/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 24);
   const out: string[] = [];
   for (const tag of [topic, ...tags, 'AI生成']) {
-    const next = tag.replace(/^#/, '').trim();
+    const next = normalizeTag(tag);
     if (next && !out.some((item) => item.toLowerCase() === next.toLowerCase())) out.push(next);
     if (out.length >= 8) break;
   }
@@ -73,14 +79,22 @@ export function kbQuestionToMarkdown(question: GeneratedKbQuestion): string {
   if (!question.keyPoints.length && !question.answer) {
     lines.push('## 回答抓手', '- 定义是什么', '- 为什么这样设计', '- 工程里如何使用', '- 有什么边界和坑', '');
   }
+  if (question.sourceRefs?.length) {
+    lines.push('## 参考链接', ...question.sourceRefs.map((ref) => ref.url ? `- ${ref.title}: ${ref.url}` : `- ${ref.title}`), '');
+  }
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 export function kbQuestionToEntryInput(question: GeneratedKbQuestion, domain: string): EntryInput {
+  const sourceRefBlocks = question.sourceRefs?.length
+    ? markdownToDocBlocks(['## 参考链接', ...question.sourceRefs.map((ref) => ref.url ? `- ${ref.title}: ${ref.url}` : `- ${ref.title}`)].join('\n'))
+    : [];
   return {
     title: question.title,
     tags: ensureTags(question.tags, domain),
     summary: question.summary,
-    doc: markdownToDocBlocks(kbQuestionToMarkdown(question)),
+    doc: question.doc?.length
+      ? [...normalizeDocBlocks(question.doc), ...sourceRefBlocks]
+      : markdownToDocBlocks(kbQuestionToMarkdown(question)),
   };
 }
