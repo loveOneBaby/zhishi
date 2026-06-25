@@ -9,6 +9,7 @@ import {
   Folder as FolderIcon,
   FolderOpen,
   FolderPlus,
+  FolderX,
   Home,
   ListCollapse,
   ListTree,
@@ -16,6 +17,7 @@ import {
   Pencil,
   Plus,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import { Tree, type MoveHandler, type NodeApi, type NodeRendererProps, type TreeApi } from 'react-arborist';
@@ -64,6 +66,8 @@ interface Props {
   onCreateEntry: (folderId: string | null) => void;
   onRenameFolder: (folder: Folder) => void;
   onDeleteFolder: (folder: Folder) => void;
+  onClearFolder: (folder: Folder) => void;
+  onImportToFolder: (folder: Folder) => void;
   onEditEntry: (entry: Entry) => void;
   onDeleteEntry: (entry: Entry) => void;
   onDeleteBatch: (folders: Folder[], entries: Entry[]) => Promise<void>;
@@ -143,6 +147,8 @@ export default function KnowledgeTree(props: Props): ReactNode {
     onCreateEntry,
     onRenameFolder,
     onDeleteFolder,
+    onClearFolder,
+    onImportToFolder,
     onEditEntry,
     onDeleteEntry,
     onDeleteBatch,
@@ -603,6 +609,11 @@ export default function KnowledgeTree(props: Props): ReactNode {
               <button type="button" onClick={() => runMenuAction(() => onCreateFolder(menu.kind === 'folder' ? menu.folder.id : null))}>
                 <FolderPlus size={14} strokeWidth={2.1} />新建文件夹
               </button>
+              {menu.kind === 'folder' && (
+                <button type="button" onClick={() => runMenuAction(() => onImportToFolder(menu.folder))}>
+                  <Upload size={14} strokeWidth={2.1} />导入 JSON 到此文件夹
+                </button>
+              )}
             </div>
           )}
           {menu.kind === 'folder' && (
@@ -612,8 +623,11 @@ export default function KnowledgeTree(props: Props): ReactNode {
                 <Pencil size={14} strokeWidth={2.1} />重命名
               </button>
               <span className="ik-kt-menu-label is-danger">危险操作</span>
+              <button type="button" className="danger" onClick={() => runMenuAction(() => onClearFolder(menu.folder))}>
+                <FolderX size={14} strokeWidth={2.1} />清空内容（保留文件夹）
+              </button>
               <button type="button" className="danger" onClick={() => runMenuAction(() => onDeleteFolder(menu.folder))}>
-                <Trash2 size={14} strokeWidth={2.1} />删除文件夹
+                <Trash2 size={14} strokeWidth={2.1} />删除文件夹及全部内容
               </button>
             </div>
           )}

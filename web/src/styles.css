@@ -17,88 +17,109 @@ html, body {
 input::placeholder { color: var(--mut); opacity: .7; }
 textarea::placeholder { color: var(--mut); opacity: .7; }
 button { font-family: inherit; }
+
+/* 毛玻璃主题:柔和渐变背景 + 半透明面板 + backdrop 模糊 */
+.ik-theme-glass {
+  --app-bg: linear-gradient(135deg, #e7edfb 0%, #f4f6fb 42%, #e6f7f3 100%);
+}
+.ik-theme-glass .ik-surface,
+.ik-theme-glass .ik-kb-card,
+.ik-theme-glass .ik-kb-create,
+.ik-theme-glass .ik-action-bar,
+.ik-theme-glass .ik-fab-menu,
+.ik-theme-glass .ik-fab,
+.ik-theme-glass .ik-kt-shell,
+.ik-theme-glass .ik-bn.bn-container {
+  backdrop-filter: blur(16px) saturate(1.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+}
+.ik-theme-glass .ik-kb-card,
+.ik-theme-glass .ik-surface {
+  box-shadow: 0 14px 40px rgba(31,45,80,.10);
+}
+/* 按钮:柔和胶囊 — 圆角全胶囊、柔和填充、无边、克制微交互 */
 .ik-btn {
-  --btn-bg: var(--fg);
-  --btn-fg: var(--bg);
-  --btn-bd: var(--fg);
-  --btn-shadow: 0 10px 24px rgba(0,0,0,.08), inset 0 -1px 0 rgba(255,255,255,.12);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
   min-width: 0;
-  border: 1px solid var(--btn-bd);
-  border-radius: 9px;
-  background: var(--btn-bg);
-  color: var(--btn-fg);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg);
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 720;
+  font-size: 13.5px;
+  font-weight: 600;
   line-height: 1;
   letter-spacing: 0;
   white-space: nowrap;
-  box-shadow: var(--btn-shadow);
-  transition: transform 130ms ease, border-color 130ms ease, background 130ms ease, color 130ms ease, box-shadow 130ms ease, opacity 130ms ease;
-}
-.ik-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 30px rgba(0,0,0,.12), inset 0 -1px 0 rgba(255,255,255,.14);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 80ms ease, opacity 150ms ease;
 }
 .ik-btn:active:not(:disabled) {
-  transform: translateY(0);
-  box-shadow: 0 6px 16px rgba(0,0,0,.1);
+  transform: scale(0.97);
 }
 .ik-btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 42%, transparent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 .ik-btn:disabled {
-  cursor: default;
-  opacity: .45;
+  cursor: not-allowed;
+  opacity: .5;
   box-shadow: none;
 }
+
+/* default = 主按钮:深色实心胶囊 */
+.ik-btn-default {
+  background: var(--fg);
+  color: var(--bg);
+}
+.ik-btn-default:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 86%, var(--bg));
+}
+
+/* secondary = 次按钮:柔和中性填充,无边 */
 .ik-btn-secondary {
-  --btn-bg: color-mix(in srgb, var(--panel) 94%, var(--bg));
-  --btn-fg: var(--fg);
-  --btn-bd: var(--bd);
-  --btn-shadow: 0 10px 24px rgba(0,0,0,.075), inset 0 1px 0 rgba(255,255,255,.48);
+  background: color-mix(in srgb, var(--fg) 7%, var(--panel));
+  color: var(--fg);
 }
 .ik-btn-secondary:hover:not(:disabled) {
-  --btn-bg: color-mix(in srgb, var(--panel) 82%, var(--sel));
-  --btn-bd: color-mix(in srgb, var(--fg) 18%, var(--bd));
+  background: color-mix(in srgb, var(--fg) 13%, var(--panel));
 }
+
+/* destructive = 危险:柔和淡红填充 + 红字 */
 .ik-btn-destructive {
-  --btn-bg: color-mix(in srgb, var(--danger) 8%, var(--panel));
-  --btn-fg: var(--danger);
-  --btn-bd: color-mix(in srgb, var(--danger) 22%, var(--bd));
-  --btn-shadow: 0 10px 24px rgba(229,57,53,.1), inset 0 1px 0 rgba(255,255,255,.48);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+  color: var(--danger);
 }
 .ik-btn-destructive:hover:not(:disabled) {
-  --btn-bg: color-mix(in srgb, var(--danger) 14%, var(--panel));
-  --btn-bd: color-mix(in srgb, var(--danger) 42%, var(--bd));
+  background: color-mix(in srgb, var(--danger) 20%, var(--panel));
 }
+
+/* ghost = 幽灵:透明,hover 才出柔和底 */
 .ik-btn-ghost {
-  --btn-bg: transparent;
-  --btn-fg: var(--fg);
-  --btn-bd: transparent;
-  --btn-shadow: none;
+  background: transparent;
+  color: var(--fg);
 }
 .ik-btn-ghost:hover:not(:disabled) {
-  --btn-bg: var(--sel);
+  background: color-mix(in srgb, var(--fg) 7%, var(--panel));
 }
+
 .ik-btn-size-sm {
   height: 34px;
-  padding: 0 12px;
+  padding: 0 16px;
 }
 .ik-btn-size-md {
   height: 38px;
-  padding: 0 14px;
+  padding: 0 20px;
 }
 .ik-btn-size-icon {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   padding: 0;
-  border-radius: 10px;
+  border-radius: 999px;
 }
 .ik-btn-leading-icon {
   width: 15px;
@@ -107,6 +128,7 @@ button { font-family: inherit; }
   align-items: center;
   justify-content: center;
   flex: none;
+  opacity: .92;
 }
 .ik-btn-size-icon .ik-btn-leading-icon {
   width: 16px;
@@ -625,6 +647,117 @@ button { font-family: inherit; }
   color: var(--accent);
   background: color-mix(in srgb, var(--panel) 86%, var(--sel));
 }
+
+/* 知识库落地页:卡片网格 */
+.ik-kb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+.ik-kb-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 22px 20px;
+  min-height: 172px;
+  border: 1px solid var(--bd);
+  border-radius: 16px;
+  background: var(--panel);
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 8px 22px rgba(0,0,0,.04);
+  transition: transform 180ms cubic-bezier(.2,.7,.3,1), box-shadow 180ms ease, border-color 180ms ease;
+}
+.ik-kb-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--fg) 22%, var(--bd));
+  box-shadow: 0 24px 48px rgba(0,0,0,.10);
+}
+.ik-kb-tile {
+  width: 46px;
+  height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 13px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--fg) 6%, var(--panel));
+  margin-bottom: 16px;
+}
+.ik-kb-name {
+  font-size: 19px;
+  font-weight: 740;
+  letter-spacing: 0;
+  margin-bottom: 12px;
+}
+.ik-kb-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ik-kb-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--mut);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 5%, var(--panel));
+}
+.ik-kb-stat b {
+  font-weight: 680;
+  color: var(--fg);
+}
+.ik-kb-enter {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 640;
+  color: var(--accent);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 170ms ease, transform 170ms ease;
+}
+.ik-kb-card:hover .ik-kb-enter {
+  opacity: 1;
+  transform: none;
+}
+.ik-kb-create {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 172px;
+  border: 1.5px dashed var(--bd);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--mut);
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: border-color 170ms ease, color 170ms ease, background 170ms ease, transform 170ms ease;
+}
+.ik-kb-create:hover {
+  border-color: color-mix(in srgb, var(--fg) 28%, var(--bd));
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 3%, var(--panel));
+  transform: translateY(-3px);
+}
+.ik-kb-create-ico {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 6%, var(--panel));
+}
 .ik-tree-head-action {
   min-width: 0;
   display: block;
@@ -711,6 +844,42 @@ button { font-family: inherit; }
   flex: 1;
   min-height: 0;
 }
+/* 统一的顶部操作栏:编辑态与查看态共用,左侧信息 + 右侧按钮组 */
+.ik-action-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px 9px 16px;
+  border-bottom: 1px solid var(--bd);
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg));
+}
+.ik-action-spacer {
+  margin-right: auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--mut);
+  overflow: hidden;
+}
+.ik-action-spacer .ik-action-crumb {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.ik-action-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex: none;
+  background: var(--mut);
+}
+.ik-action-dot.is-dirty { background: var(--accent); }
+.ik-action-dot.is-saved { background: color-mix(in srgb, var(--accent) 70%, var(--mut)); }
 .ik-detail-location {
   min-width: 0;
   display: flex;
@@ -1130,6 +1299,29 @@ button { font-family: inherit; }
   margin: 5px 4px;
   background: var(--bd);
 }
+/* BlockNote 跟随应用主题:把编辑器配色变量映射到主题 token */
+.ik-bn-wrap { width: 100%; }
+.ik-bn.bn-container,
+.ik-bn .bn-editor {
+  --bn-colors-editor-text: var(--fg) !important;
+  --bn-colors-editor-background: transparent !important;
+  --bn-colors-menu-text: var(--fg) !important;
+  --bn-colors-menu-background: var(--panel) !important;
+  --bn-colors-tooltip-text: var(--fg) !important;
+  --bn-colors-tooltip-background: var(--panel) !important;
+  --bn-colors-hovered-text: var(--fg) !important;
+  --bn-colors-hovered-background: var(--sel) !important;
+  --bn-colors-selected-text: var(--fg) !important;
+  --bn-colors-selected-background: var(--sel) !important;
+  --bn-colors-disabled-text: var(--mut) !important;
+  --bn-colors-disabled-background: var(--panel) !important;
+  --bn-colors-border: var(--bd) !important;
+  --bn-colors-side-menu: var(--mut) !important;
+  background: transparent !important;
+}
+/* 链接配色 + 只读时可点击 */
+.ik-bn a { color: var(--accent); text-decoration: underline; }
+.ik-bn-wrap a { cursor: pointer; }
 .ik-tree-row {
   transition: background 140ms ease, border-color 140ms ease;
 }

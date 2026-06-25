@@ -1,49 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { ArrowLeft, Check, Eye, PencilLine } from 'lucide-react';
 import type { Entry, EntryInput, IndexNode, KnowledgeBase, Folder, Block } from '../types';
-import { forestOfKb } from '../tree';
-import type { FolderNode } from '../tree';
-import { renderMd } from '../markdown';
 import { toast } from '../toast';
 import BlockEditor from './BlockEditor';
-import SelectField, { type SelectOption } from './SelectField';
-
-const ROOT_FOLDER_VALUE = '__root__';
-
-const inputStyle: CSSProperties = {
-  width: '100%',
-  padding: '9px 11px',
-  border: '1px solid var(--bd)',
-  borderRadius: 10,
-  background: 'var(--panel)',
-  color: 'var(--fg)',
-  fontSize: 13,
-  outline: 'none',
-  fontFamily: 'inherit',
-};
-
-const ghostBtn: CSSProperties = {
-  padding: '9px 13px',
-  border: '1px solid var(--bd)',
-  borderRadius: 12,
-  background: 'var(--panel)',
-  color: 'var(--fg)',
-  cursor: 'pointer',
-  fontSize: 13,
-  fontFamily: 'inherit',
-};
-
-const primaryBtn: CSSProperties = {
-  padding: '10px 18px',
-  borderRadius: 12,
-  border: 'none',
-  background: 'var(--accent)',
-  color: '#fff',
-  fontWeight: 760,
-  fontSize: 13,
-  fontFamily: 'inherit',
-  cursor: 'pointer',
-};
+import Button from './Button';
 
 let idSeed = 0;
 function newIndexNode(title: string): IndexNode {
@@ -54,16 +15,6 @@ function newIndexNode(title: string): IndexNode {
     content: '',
     children: [],
   };
-}
-
-function folderOptions(roots: FolderNode[], depth = 0): SelectOption[] {
-  return roots.flatMap((n) => {
-    const prefix = depth > 0 ? '　'.repeat(depth) + '└ ' : '';
-    return [
-      { value: n.folder.id, label: `${prefix}${n.folder.name}` },
-      ...folderOptions(n.children, depth + 1),
-    ];
-  });
 }
 
 function nodeToMarkdown(node: IndexNode, level: number): string {
@@ -112,18 +63,6 @@ function parseDocumentToIndex(body: string): { intro: string; nodes: IndexNode[]
   return { intro: intro.join('\n').trim(), nodes: roots };
 }
 
-function flattenNodes(nodes: IndexNode[]): IndexNode[] {
-  const out: IndexNode[] = [];
-  const walk = (list: IndexNode[]): void => {
-    for (const node of list) {
-      out.push(node);
-      walk(node.children);
-    }
-  };
-  walk(nodes);
-  return out;
-}
-
 function cleanLine(line: string): string {
   return line
     .replace(/^#{1,6}\s+/, '')
@@ -170,13 +109,14 @@ interface Props {
 }
 
 export default function EntryEditor(props: Props): ReactNode {
-  const { initial, kbs, folders, defaultKbId, defaultFolderId, onSave, onCancel, onDirtyChange } = props;
+  const { initial, kbs, defaultKbId, defaultFolderId, onSave, onCancel, onDirtyChange } = props;
   const isEdit = !!initial;
 
   const [title, setTitle] = useState(initial?.title ?? '');
   const [kbId, setKbId] = useState(initial?.kbId ?? defaultKbId ?? kbs[0]?.id ?? '');
   const [folderId, setFolderId] = useState<string | null>(initial?.folderId ?? defaultFolderId ?? null);
   const [tags, setTags] = useState(initial?.tags.join(', ') ?? '');
+  const [tagDraft, setTagDraft] = useState('');
   const [doc, setDoc] = useState(entryToDocument(initial));
   const [docBlocks, setDocBlocks] = useState<Block[]>(initial?.doc ?? []);
   const [showPreview, setShowPreview] = useState(false);
@@ -187,6 +127,16 @@ export default function EntryEditor(props: Props): ReactNode {
     .split(/[,，]/)
     .map((t) => t.trim())
     .filter(Boolean);
+
+  const addTag = (raw: string): void => {
+    const t = raw.replace(/[,，]/g, '').trim();
+    if (!t || tagList.some((x) => x.toLowerCase() === t.toLowerCase())) { setTagDraft(''); return; }
+    setTags([...tagList, t].join(', '));
+    setTagDraft('');
+  };
+  const removeTag = (t: string): void => {
+    setTags(tagList.filter((x) => x !== t).join(', '));
+  };
 
   const baseRef = useRef('');
   if (!baseRef.current) {
@@ -199,20 +149,7 @@ export default function EntryEditor(props: Props): ReactNode {
     });
   }
 
-  const tree = useMemo(() => parseDocumentToIndex(doc), [doc]);
-  const nodes = useMemo(() => flattenNodes(tree.nodes), [tree.nodes]);
   const dirty = snapshot({ title, kbId, folderId, tags: tagList, doc }) !== baseRef.current;
-  const selectedKbName = kbs.find((k) => k.id === kbId)?.name ?? '知识库';
-  const selectedFolderName = folderId ? folders.find((f) => f.id === folderId)?.name ?? '文件夹' : '根目录';
-  const headingCount = nodes.length;
-  const kbOptions = useMemo<SelectOption[]>(
-    () => kbs.map((k) => ({ value: k.id, label: k.name })),
-    [kbs],
-  );
-  const folderSelectOptions = useMemo<SelectOption[]>(
-    () => [{ value: ROOT_FOLDER_VALUE, label: '根目录' }, ...folderOptions(forestOfKb(folders, kbId))],
-    [folders, kbId],
-  );
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -277,112 +214,138 @@ export default function EntryEditor(props: Props): ReactNode {
   }, [title, kbId, folderId, tags, doc, saving]);
 
   return (
-    <div style={{ maxWidth: 1040, margin: '0 auto' }}>
+    <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div
+        className="ik-surface"
         style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 3,
+          flex: 1,
+          minHeight: 0,
           display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '12px 0 14px',
-          marginBottom: 10,
-          background: 'linear-gradient(to bottom, var(--bg) 82%, color-mix(in srgb, var(--bg) 0%, transparent))',
-        }}
-      >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, color: 'var(--mut)', letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 820 }}>
-            {isEdit ? 'Edit Document' : 'New Document'}
-          </div>
-          <div style={{ marginTop: 3, fontSize: 13, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {selectedKbName} · {headingCount ? `${headingCount} 个标题会生成知识树` : '用标题块生成知识树'}
-            {dirty ? ' · 未保存' : savedAt ? ' · 已保存' : ''}
-          </div>
-        </div>
-
-        <button type="button" style={ghostBtn} onClick={() => setShowPreview((v) => !v)}>
-          {showPreview ? '继续编辑' : '预览'}
-        </button>
-        {onCancel && (
-          <button type="button" style={ghostBtn} onClick={onCancel}>
-            {isEdit ? '返回' : '取消'}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !dirty}
-          style={{
-            ...primaryBtn,
-            background: dirty ? 'var(--accent)' : 'var(--bd)',
-            color: dirty ? '#fff' : 'var(--mut)',
-            cursor: dirty && !saving ? 'pointer' : 'not-allowed',
-            opacity: saving ? 0.7 : 1,
-          }}
-        >
-          {saving ? '保存中…' : '保存 ⌘S'}
-        </button>
-      </div>
-
-      <div
-        style={{
+          flexDirection: 'column',
           border: '1px solid var(--bd)',
-          borderRadius: 18,
+          borderRadius: 12,
           background: 'var(--panel)',
-          boxShadow: '0 22px 60px rgba(0,0,0,.06)',
+          boxShadow: '0 10px 28px rgba(0,0,0,.045)',
           overflow: 'hidden',
         }}
       >
-        <details
+        {/* 统一操作栏:预览 / 返回 / 保存 */}
+        <div className="ik-action-bar">
+          <span className="ik-action-spacer">
+            <span className={`ik-action-dot ${dirty ? 'is-dirty' : savedAt ? 'is-saved' : ''}`} />
+            {dirty ? '未保存' : savedAt ? '已保存' : '编辑中'}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            leadingIcon={showPreview ? <PencilLine size={15} strokeWidth={2.15} /> : <Eye size={15} strokeWidth={2.15} />}
+            onClick={() => setShowPreview((v) => !v)}
+          >
+            {showPreview ? '继续编辑' : '预览'}
+          </Button>
+          {onCancel && (
+            <Button
+              variant="ghost"
+              size="sm"
+              leadingIcon={<ArrowLeft size={15} strokeWidth={2.15} />}
+              onClick={onCancel}
+            >
+              {isEdit ? '返回' : '取消'}
+            </Button>
+          )}
+          <Button
+            variant="default"
+            size="sm"
+            leadingIcon={<Check size={15} strokeWidth={2.4} />}
+            onClick={handleSave}
+            disabled={saving || !dirty}
+          >
+            {saving ? '保存中…' : '保存 ⌘S'}
+          </Button>
+        </div>
+
+        {/* 属性栏:只做标签管理 — 输入回车/逗号新建,点 × 删除 */}
+        <div
           style={{
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+            padding: '10px 16px',
             borderBottom: '1px solid var(--bd)',
             background: 'color-mix(in srgb, var(--bg) 55%, transparent)',
           }}
         >
-          <summary
-            style={{
-              padding: '12px 18px',
-              cursor: 'pointer',
-              color: 'var(--mut)',
-              fontSize: 12.5,
-              userSelect: 'none',
-            }}
-          >
-            属性 · {selectedKbName} / {selectedFolderName}{tagList.length ? ` · ${tagList.length} 个标签` : ''}
-          </summary>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(150px, 190px) minmax(150px, 190px) minmax(180px, 1fr)',
-              gap: 10,
-              padding: '0 18px 14px',
-            }}
-          >
-            <SelectField
-              value={kbId}
-              options={kbOptions}
-              title="知识库"
-              placeholder="选择知识库"
-              onChange={(value) => {
-                setKbId(value);
-                setFolderId(null);
+          {tagList.map((t) => (
+            <span
+              key={t}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 6px 4px 11px',
+                fontSize: 12.5,
+                color: 'var(--fg)',
+                background: 'var(--sel)',
+                border: '1px solid var(--bd)',
+                borderRadius: 999,
               }}
-            />
+            >
+              {t}
+              <button
+                type="button"
+                title="删除标签"
+                aria-label={`删除标签 ${t}`}
+                onClick={() => removeTag(t)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 16,
+                  height: 16,
+                  padding: 0,
+                  border: 'none',
+                  borderRadius: 999,
+                  background: 'transparent',
+                  color: 'var(--mut)',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <input
+            value={tagDraft}
+            onChange={(e) => setTagDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ',' || e.key === '，') {
+                e.preventDefault();
+                addTag(tagDraft);
+              } else if (e.key === 'Backspace' && !tagDraft && tagList.length) {
+                removeTag(tagList[tagList.length - 1]);
+              }
+            }}
+            onBlur={() => { if (tagDraft.trim()) addTag(tagDraft); }}
+            placeholder={tagList.length ? '添加标签' : '添加标签，回车确认'}
+            style={{
+              flex: 1,
+              minWidth: 120,
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              color: 'var(--fg)',
+              fontSize: 13,
+              fontFamily: 'inherit',
+              padding: '4px 2px',
+            }}
+          />
+        </div>
 
-            <SelectField
-              value={folderId ?? ROOT_FOLDER_VALUE}
-              options={folderSelectOptions}
-              title="文件夹"
-              placeholder="选择文件夹"
-              onChange={(value) => setFolderId(value === ROOT_FOLDER_VALUE ? null : value)}
-            />
-
-            <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="标签，用逗号分隔" style={inputStyle} />
-          </div>
-        </details>
-
-        <div style={{ padding: '46px 64px 64px' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '28px 36px 40px' }}>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -394,37 +357,23 @@ export default function EntryEditor(props: Props): ReactNode {
               outline: 'none',
               background: 'transparent',
               color: 'var(--fg)',
-              fontSize: 38,
+              fontSize: 30,
               lineHeight: 1.15,
-              fontWeight: 860,
-              letterSpacing: '-.04em',
+              fontWeight: 820,
+              letterSpacing: '-.02em',
               fontFamily: 'inherit',
-              marginBottom: 24,
+              marginBottom: 18,
             }}
           />
 
-          {showPreview ? (
-            <div
-              className="ik-md"
-              style={{
-                minHeight: 560,
-                color: 'var(--fg)',
-                fontSize: 16,
-                lineHeight: 1.85,
-              }}
-            >
-              {doc.trim() ? renderMd(doc) : <span style={{ color: 'var(--mut)' }}>还没有正文内容。</span>}
-            </div>
-          ) : (
-            <div style={{ minHeight: 560, border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden', background: 'var(--panel)' }}>
-              <BlockEditor
-                initialBlocks={initial?.doc}
-                initialMarkdown={initial?.doc && initial.doc.length ? undefined : doc}
-                onChange={setDocBlocks}
-                onChangeMarkdown={setDoc}
-              />
-            </div>
-          )}
+          {/* 编辑与预览复用同一个 BlockEditor 实例:宽度一致、切换不丢编辑内容 */}
+          <BlockEditor
+            editable={!showPreview}
+            initialBlocks={initial?.doc}
+            initialMarkdown={initial?.doc && initial.doc.length ? undefined : doc}
+            onChange={setDocBlocks}
+            onChangeMarkdown={setDoc}
+          />
 
           <div
             style={{

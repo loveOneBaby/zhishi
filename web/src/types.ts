@@ -67,7 +67,7 @@ export interface EntryInput {
   doc?: Block[];         // BlockNote 块文档(canonical;优先于 intro/nodes)
 }
 
-export type ThemeKey = 'mono' | 'ink' | 'paper';
+export type ThemeKey = 'mono' | 'ink' | 'paper' | 'glass';
 
 export interface Theme {
   name: string;

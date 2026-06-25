@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type MouseEvent } from 'react';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { useCreateBlockNote } from '@blocknote/react';
@@ -6,6 +6,7 @@ import { BlockNoteView } from '@blocknote/mantine';
 import type { PartialBlock } from '@blocknote/core';
 import type { Block } from '../types';
 import { uploadAsset } from '../api';
+import { linkifyBlocks } from '../linkify';
 
 interface Props {
   initialBlocks?: Block[];
@@ -18,8 +19,10 @@ interface Props {
 
 // 基于 BlockNote 的块编辑器 / 只读视图(editable=false)。图片上传走 /api/assets。
 export default function BlockEditor({ initialBlocks, initialMarkdown, editable = true, dark = false, onChange, onChangeMarkdown }: Props) {
+  // 只读预览:把纯文本里的裸 URL 转成可点击链接(编辑态保持原样,避免干扰输入)
+  const seedBlocks = editable ? initialBlocks : linkifyBlocks(initialBlocks);
   const editor = useCreateBlockNote({
-    initialContent: initialBlocks && initialBlocks.length ? (initialBlocks as unknown as PartialBlock[]) : undefined,
+    initialContent: seedBlocks && seedBlocks.length ? (seedBlocks as unknown as PartialBlock[]) : undefined,
     uploadFile: async (file: File) => uploadAsset(file),
   });
 
@@ -47,12 +50,28 @@ export default function BlockEditor({ initialBlocks, initialMarkdown, editable =
     }
   }
 
+  // 只读预览时,拦截链接点击 → 新标签打开(BlockNote 默认不导航)。
+  // 用捕获阶段,抢在 BlockNote/ProseMirror 自己的处理之前接管。
+  function handleClickCapture(e: MouseEvent): void {
+    if (editable) return;
+    const anchor = (e.target as HTMLElement).closest('a');
+    const href = anchor?.getAttribute('href');
+    if (anchor && href) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(href, '_blank', 'noopener,noreferrer');
+    }
+  }
+
   return (
-    <BlockNoteView
-      editor={editor}
-      editable={editable}
-      theme={dark ? 'dark' : 'light'}
-      onChange={handleChange}
-    />
+    <div className="ik-bn-wrap" onClickCapture={handleClickCapture}>
+      <BlockNoteView
+        editor={editor}
+        editable={editable}
+        className="ik-bn"
+        theme={dark ? 'dark' : 'light'}
+        onChange={handleChange}
+      />
+    </div>
   );
 }

@@ -38,18 +38,18 @@ export interface TreeLayout {
 export const MAX_VISIBLE_DEPTH = 3;
 export const WORLD_PADDING_X = 64;
 export const WORLD_PADDING_Y = 72;
-export const COLUMN_GAP = 156;
-export const ROW_GAP = 24;
+export const COLUMN_GAP = 112;
+export const ROW_GAP = 14;
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
 export function cardWidth(depth: number): number {
-  if (depth === 0) return 340;
-  if (depth === 1) return 286;
-  if (depth === 2) return 256;
-  return 232;
+  if (depth === 0) return 320;
+  if (depth === 1) return 224;
+  if (depth === 2) return 196;
+  return 184;
 }
 
 let textMeasureContext: CanvasRenderingContext2D | null = null;
@@ -79,26 +79,28 @@ function wrappedLineCount(text: string, maxWidth: number, font: string): number 
 export function cardHeight(node: GNode, depth: number): number {
   const root = depth === 0;
   const leaf = depth >= 2;
-  const horizontalPadding = root ? 26 : leaf ? 18 : 20;
-  const verticalPadding = root ? 24 : leaf ? 16 : 18;
+  const horizontalPadding = root ? 24 : leaf ? 14 : 16;
+  const verticalPadding = root ? 22 : leaf ? 11 : 13;
   const innerWidth = cardWidth(depth) - horizontalPadding * 2;
-  const titleSize = root ? 28 : leaf ? 14 : 16;
-  const titleLineHeight = titleSize * (root ? 1.08 : 1.25);
-  const bodySize = root ? 13.5 : leaf ? 11.5 : 12.5;
-  const bodyLineHeight = bodySize * (root ? 1.55 : 1.5);
+  const titleSize = root ? 26 : leaf ? 13 : 14.5;
+  const titleLineHeight = titleSize * (root ? 1.1 : 1.28);
+  const bodySize = 12.5;
+  const bodyLineHeight = bodySize * 1.5;
   const titleLines = wrappedLineCount(node.label, innerWidth, `700 ${titleSize}px system-ui`);
-  const bodyLines = node.sub
+  // 只有知识库根节点显示简介,其余卡片只显示标题,卡片更紧凑
+  const bodyLines = root && node.sub
     ? wrappedLineCount(node.sub, innerWidth, `400 ${bodySize}px system-ui`)
     : 0;
-  const metaBlock = (root ? 14 : 9) + 22;
-  const titleMargin = node.sub ? (root ? 13 : 7) : 0;
+  // 只有根节点保留顶部的来源标签;其余卡片只剩标题,无额外头部
+  const metaBlock = root ? 28 : 0;
+  const titleMargin = root && node.sub ? 10 : 0;
   const measuredHeight = verticalPadding * 2
     + metaBlock
     + titleLines * titleLineHeight
     + titleMargin
     + bodyLines * bodyLineHeight
-    + 8;
-  return Math.ceil(Math.max(root ? 176 : leaf ? 112 : 136, measuredHeight));
+    + 4;
+  return Math.ceil(Math.max(root ? 150 : leaf ? 52 : 58, measuredHeight));
 }
 
 function xAtDepth(depth: number): number {

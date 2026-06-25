@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { BookOpen, Download, FileText, FolderPlus, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
+import { ArrowRight, BookOpen, Download, FileText, FolderPlus, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import DetailSidePanel from './DetailSidePanel';
@@ -37,36 +37,6 @@ interface Props {
   onReorderFolders: (ids: string[]) => Promise<void>;
 }
 
-const cardStyle: CSSProperties = {
-  padding: 18,
-  background: 'var(--panel)',
-  border: '1px solid var(--bd)',
-  borderRadius: 10,
-  cursor: 'pointer',
-  position: 'relative',
-  minHeight: 148,
-  boxShadow: '0 16px 34px rgba(0,0,0,.045)',
-};
-
-const gridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-  gap: 16,
-};
-
-const actBtn: CSSProperties = {
-  padding: '10px 18px',
-  fontSize: 13,
-  fontFamily: 'inherit',
-  cursor: 'pointer',
-  background: 'var(--fg)',
-  color: 'var(--bg)',
-  border: 'none',
-  borderRadius: 8,
-  fontWeight: 680,
-  boxShadow: '0 12px 28px rgba(0,0,0,.16)',
-};
-
 const ghostBtn: CSSProperties = {
   padding: '10px 15px',
   fontSize: 13,
@@ -93,9 +63,6 @@ const treePanelStyle: CSSProperties = {
 };
 
 const ROOT_IMPORT_TARGET = '__ik_root_folder__';
-
-function hoverOn(e: React.MouseEvent<HTMLDivElement>): void { e.currentTarget.style.borderColor = 'var(--mut)'; }
-function hoverOff(e: React.MouseEvent<HTMLDivElement>): void { e.currentTarget.style.borderColor = 'var(--bd)'; }
 
 function orderEntries(list: Entry[]): Entry[] {
   return [...list].sort((a, b) =>
@@ -130,6 +97,7 @@ type CommandState =
   | { kind: 'rename-folder'; folder: Folder }
   | { kind: 'delete-kb'; kb: KnowledgeBase }
   | { kind: 'delete-folder'; folder: Folder }
+  | { kind: 'clear-folder'; folder: Folder }
   | { kind: 'delete-entry'; entry: Entry }
   | { kind: 'discard-edit' };
 
@@ -232,6 +200,9 @@ export default function FreeMode(props: Props): ReactNode {
   function deleteFolderAction(folder: Folder): void {
     setCommand({ kind: 'delete-folder', folder });
   }
+  function clearFolderAction(folder: Folder): void {
+    setCommand({ kind: 'clear-folder', folder });
+  }
 
   async function handleExport(): Promise<void> {
     try {
@@ -249,7 +220,7 @@ export default function FreeMode(props: Props): ReactNode {
     }
   }
 
-  function handleImport(e: React.ChangeEvent<HTMLInputElement>): void {
+  function handleImport(e: React.ChangeEvent<HTMLInputElement>, overrideFolderId?: string | null): void {
     const file = e.target.files?.[0];
     if (!file) return;
     const currentKb = freeKb ? kbs.find((kb) => kb.id === freeKb) : null;
@@ -263,7 +234,8 @@ export default function FreeMode(props: Props): ReactNode {
       e.target.value = '';
       return;
     }
-    const targetFolderId = freeFolder ?? null;
+    // 右键文件夹导入会传入目标文件夹;否则默认导入到当前所在位置
+    const targetFolderId = overrideFolderId !== undefined ? overrideFolderId : (freeFolder ?? null);
     const reader = new FileReader();
     reader.onload = () => {
       let parsed: unknown;
@@ -313,6 +285,18 @@ export default function FreeMode(props: Props): ReactNode {
     };
     reader.readAsText(file);
     e.target.value = '';
+  }
+
+  // 右键文件夹「导入」:用隐藏 input 选文件,导入目标锁定为该文件夹
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingImportFolderRef = useRef<string | null | undefined>(undefined);
+  function importToFolder(folder: Folder): void {
+    if (!freeKb) {
+      toast('请先进入一个知识库，再导入 JSON', 'info');
+      return;
+    }
+    pendingImportFolderRef.current = folder.id;
+    importInputRef.current?.click();
   }
 
   function refreshImportPreview(payload: ImportPayload): void {
@@ -411,6 +395,33 @@ export default function FreeMode(props: Props): ReactNode {
     await onDelete(entry.id);
     if (selectedEntryId === entry.id) setSelectedEntryId(null);
     toastUndo(toastMessage, snapshot, { kbId: entry.kbId, folderId: entry.folderId ?? null, entryId: entry.id });
+  }
+
+  // 只清空文件夹内容(直接子文件夹会连同其子树级联删除 + 直接子知识点),保留文件夹本身
+  async function clearFolderWithUndo(folder: Folder): Promise<void> {
+    const childFolders = folders.filter((candidate) => (candidate.parentId ?? null) === folder.id);
+    const directEntries = entries.filter((entry) => (entry.folderId ?? null) === folder.id);
+    if (!childFolders.length && !directEntries.length) {
+      toast('该文件夹已经是空的', 'info');
+      return;
+    }
+
+    const folderIds = new Set<string>();
+    for (const child of childFolders) {
+      for (const id of folderSubtreeIds(folders, child.id)) folderIds.add(id);
+    }
+    const snapshotFolders = folders.filter((candidate) => folderIds.has(candidate.id));
+    const directEntryIds = new Set(directEntries.map((entry) => entry.id));
+    const snapshotEntries = entries.filter((entry) => directEntryIds.has(entry.id) || (entry.folderId && folderIds.has(entry.folderId)));
+
+    for (const child of childFolders) await onDeleteFolder(child.id);
+    for (const entry of directEntries) await onDelete(entry.id);
+
+    setSelectedEntryId((id) => (id && snapshotEntries.some((entry) => entry.id === id) ? null : id));
+    toastUndo(`已清空「${folder.name}」`, { folders: snapshotFolders, entries: snapshotEntries }, {
+      kbId: folder.kbId,
+      folderId: folder.id,
+    });
   }
 
   async function deleteSelectionWithUndo(selectedFolders: Folder[], selectedEntries: Entry[]): Promise<void> {
@@ -569,6 +580,8 @@ export default function FreeMode(props: Props): ReactNode {
       case 'delete-folder':
       case 'delete-entry':
         return '删除失败';
+      case 'clear-folder':
+        return '清空失败';
       case 'discard-edit':
         return '操作失败';
     }
@@ -606,6 +619,10 @@ export default function FreeMode(props: Props): ReactNode {
         }
         case 'delete-folder': {
           await deleteFolderWithUndo(command.folder);
+          return;
+        }
+        case 'clear-folder': {
+          await clearFolderWithUndo(command.folder);
           return;
         }
         case 'delete-entry': {
@@ -723,6 +740,24 @@ export default function FreeMode(props: Props): ReactNode {
         />
       );
     }
+    if (command.kind === 'clear-folder') {
+      const ids = folderSubtreeIds(folders, command.folder.id);
+      const childCount = Math.max(0, ids.size - 1);
+      const entryCount = entries.filter((entry) => entry.folderId && ids.has(entry.folderId)).length;
+      return (
+        <CommandDialog
+          open
+          tone="danger"
+          title="清空文件夹"
+          description={`确定清空「${command.folder.name}」？会删除里面的 ${childCount} 个子文件夹、${entryCount} 条知识点，但保留这个文件夹本身。`}
+          helper="只删除文件夹里的内容，文件夹会保留为空。"
+          confirmText="清空"
+          cancelText="保留"
+          onOpenChange={(open) => { if (!open) setCommand(null); }}
+          onConfirm={confirmCommand}
+        />
+      );
+    }
     if (command.kind === 'delete-entry') {
       return (
         <CommandDialog
@@ -761,46 +796,46 @@ export default function FreeMode(props: Props): ReactNode {
   // ── 知识库列表页 ──
   if (!freeKb) {
     return (
-      <div style={{ padding: '14px 0 64px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <span style={{ fontSize: 24, fontWeight: 820, letterSpacing: '0' }}>知识库</span>
-            <span style={{ fontSize: 12.5, color: 'var(--mut)' }}>{kbs.length} 个知识库</span>
+      <div style={{ padding: '20px 0 64px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 28, flexWrap: 'wrap', gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--mut)', fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase' }}>Knowledge Bases</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 7 }}>
+              <span style={{ fontSize: 30, fontWeight: 840, letterSpacing: '-.02em' }}>知识库</span>
+              <span style={{ fontSize: 13, color: 'var(--mut)' }}>{kbs.length} 个知识库 · {entries.length} 条知识点</span>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button style={actBtn} onClick={newKb}>＋ 新建知识库</button>
-          </div>
+          <button className="ik-btn ik-btn-default ik-btn-size-md" onClick={newKb}>
+            <span className="ik-btn-leading-icon"><Plus size={15} strokeWidth={2.4} /></span>新建知识库
+          </button>
         </div>
 
-        {kbs.length === 0 ? (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--mut)', fontSize: 13 }}>
-            还没有知识库，点击「＋ 新建知识库」开始。
-          </div>
-        ) : (
-          <div style={gridStyle}>
-            {kbs.map((kb) => {
-              const n = entriesOfKb(kb.id).length;
-              const fn = folders.filter((f) => f.kbId === kb.id).length;
-              return (
-                <div
-                  className="ik-kb-card"
-                  key={kb.id}
-                  style={cardStyle}
-                  onMouseEnter={hoverOn}
-                  onMouseLeave={hoverOff}
-                  onClick={() => openKb(kb)}
-                >
-                  <RowActions onRename={() => renameKbAction(kb)} onDelete={() => deleteKbAction(kb)} />
-                  <div className="ik-kb-card-icon"><BookOpen size={22} strokeWidth={2.05} /></div>
-                  <div style={{ fontSize: 18, fontWeight: 780, marginBottom: 8, letterSpacing: '0' }}>{kb.name}</div>
-                  <div style={{ fontSize: 12.5, color: 'var(--mut)' }}>
-                    {fn} 个文件夹 · {n} 条知识点
-                  </div>
+        <div className="ik-kb-grid">
+          {kbs.map((kb) => {
+            const n = entriesOfKb(kb.id).length;
+            const fn = folders.filter((f) => f.kbId === kb.id).length;
+            return (
+              <div
+                className="ik-kb-card"
+                key={kb.id}
+                onClick={() => openKb(kb)}
+              >
+                <RowActions onRename={() => renameKbAction(kb)} onDelete={() => deleteKbAction(kb)} />
+                <div className="ik-kb-tile"><BookOpen size={24} strokeWidth={2.05} /></div>
+                <div className="ik-kb-name">{kb.name}</div>
+                <div className="ik-kb-stats">
+                  <span className="ik-kb-stat"><b>{fn}</b> 文件夹</span>
+                  <span className="ik-kb-stat"><b>{n}</b> 知识点</span>
                 </div>
-              );
-            })}
+                <span className="ik-kb-enter">进入<ArrowRight size={14} strokeWidth={2.3} /></span>
+              </div>
+            );
+          })}
+          <div className="ik-kb-create" onClick={newKb} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); newKb(); } }}>
+            <span className="ik-kb-create-ico"><Plus size={20} strokeWidth={2.2} /></span>
+            新建知识库
           </div>
-        )}
+        </div>
         {importPreview && (
           <ImportPreviewModal
             payload={importPreview.payload}
@@ -868,7 +903,7 @@ export default function FreeMode(props: Props): ReactNode {
       </div>
 
       <div className="ik-free-layout">
-        <aside style={treePanelStyle}>
+        <aside className="ik-surface" style={treePanelStyle}>
           <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid var(--bd)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
               <button
@@ -899,6 +934,8 @@ export default function FreeMode(props: Props): ReactNode {
               onCreateEntry={startCreateEntryInFolder}
               onRenameFolder={renameFolderAction}
               onDeleteFolder={deleteFolderAction}
+              onClearFolder={clearFolderAction}
+              onImportToFolder={importToFolder}
               onEditEntry={editEntryAction}
               onDeleteEntry={deleteEntryAction}
               onDeleteBatch={deleteSelectionWithUndo}
@@ -952,31 +989,30 @@ export default function FreeMode(props: Props): ReactNode {
               />
             ) : (
               <div className="ik-detail-shell">
-                <div className="ik-detail-actions">
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    leadingIcon={<Pencil size={16} strokeWidth={2.15} />}
-                    onClick={startEditEntry}
-                    disabled={!selectedEntry}
-                    aria-label="编辑知识点"
-                    title="编辑"
-                  />
-                  <Button
-                    variant="destructive"
-                    size="icon"
-                    leadingIcon={<Trash2 size={16} strokeWidth={2.15} />}
-                    onClick={deleteSelectedEntry}
-                    disabled={!selectedEntry}
-                    aria-label="删除知识点"
-                    title="删除"
-                  />
-                </div>
                 <DetailSidePanel
                   entry={selectedEntry}
                   query=""
                   contextLabel={viewingPathLabel}
-                  contextBadge={selectedEntry ? '查看知识点' : '浏览文件夹'}
+                  actions={selectedEntry ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        leadingIcon={<Pencil size={15} strokeWidth={2.15} />}
+                        onClick={startEditEntry}
+                      >
+                        编辑
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        leadingIcon={<Trash2 size={15} strokeWidth={2.15} />}
+                        onClick={deleteSelectedEntry}
+                      >
+                        删除
+                      </Button>
+                    </>
+                  ) : null}
                 />
               </div>
             )}
@@ -998,6 +1034,18 @@ export default function FreeMode(props: Props): ReactNode {
         />
       )}
       {renderCommandDialog()}
+      {/* 右键文件夹导入用的隐藏文件选择器 */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept="application/json"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const folderId = pendingImportFolderRef.current;
+          pendingImportFolderRef.current = undefined;
+          handleImport(e, folderId);
+        }}
+      />
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { Entry } from '../types';
 import { highlightText } from '../highlight';
 import BlockEditor from './BlockEditor';
@@ -7,25 +8,25 @@ interface Props {
   query?: string;
   contextLabel?: string;
   contextBadge?: string;
+  actions?: ReactNode;
 }
 
-function DetailLocation({ label, badge }: { label?: string; badge?: string }) {
-  if (!label) return null;
+function ActionBar({ label, actions }: { label?: string; actions?: ReactNode }) {
   return (
-    <div className="ik-detail-location">
-      <div className="ik-detail-location-copy">
-        <span className="ik-detail-location-kicker">当前位置</span>
-        <span className="ik-detail-location-path" title={label}>{label}</span>
-      </div>
-      {badge && <span className="ik-detail-location-badge">{badge}</span>}
+    <div className="ik-action-bar">
+      <span className="ik-action-spacer">
+        {label && <span className="ik-action-crumb" title={label}>{label}</span>}
+      </span>
+      {actions}
     </div>
   );
 }
 
-export default function DetailSidePanel({ entry, query = '', contextLabel, contextBadge }: Props) {
+export default function DetailSidePanel({ entry, query = '', contextLabel, actions }: Props) {
   if (!entry) {
     return (
       <aside
+        className="ik-surface"
         style={{
           position: 'relative',
           height: '100%',
@@ -38,12 +39,11 @@ export default function DetailSidePanel({ entry, query = '', contextLabel, conte
           color: 'var(--mut)',
           fontSize: 13,
           textAlign: 'center',
-          padding: '20px 24px 0',
           overflow: 'hidden',
         }}
       >
-        <DetailLocation label={contextLabel} badge={contextBadge} />
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 0' }}>
+        {(contextLabel || actions) && <ActionBar label={contextLabel} actions={actions} />}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
           点击左侧知识点，在这里查看完整内容
         </div>
       </aside>
@@ -52,6 +52,7 @@ export default function DetailSidePanel({ entry, query = '', contextLabel, conte
 
   return (
     <aside
+      className="ik-surface"
       style={{
         position: 'relative',
         height: '100%',
@@ -65,16 +66,12 @@ export default function DetailSidePanel({ entry, query = '', contextLabel, conte
         flexDirection: 'column',
       }}
     >
-      <div style={{ padding: '20px 32px 22px', borderBottom: '1px solid var(--bd)', flexShrink: 0 }}>
-        <DetailLocation label={contextLabel} badge={contextBadge} />
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-          <span style={{ fontSize: 11, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '3px 8px' }}>{highlightText(entry.cat, query)}</span>
-          {entry.tags.slice(0, 4).map((tag) => (
-            <span key={tag} style={{ fontSize: 11, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '3px 8px' }}>#{highlightText(tag, query)}</span>
-          ))}
-        </div>
-        <div style={{ fontSize: 'clamp(28px, 2.4vw, 40px)', lineHeight: 1.08, letterSpacing: '0', fontWeight: 800, marginBottom: 12 }}>{highlightText(entry.title, query)}</div>
-        <div style={{ fontSize: 14.5, lineHeight: 1.7, color: 'var(--mut)' }}>{highlightText(entry.summary, query)}</div>
+      {(contextLabel || actions) && <ActionBar label={contextLabel} actions={actions} />}
+      <div style={{ padding: '14px 28px 14px', borderBottom: '1px solid var(--bd)', flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 'clamp(19px, 1.6vw, 25px)', lineHeight: 1.2, letterSpacing: '0', fontWeight: 780 }}>{highlightText(entry.title, query)}</div>
+        {entry.tags.slice(0, 4).map((tag) => (
+          <span key={tag} style={{ fontSize: 11, color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap' }}>#{highlightText(tag, query)}</span>
+        ))}
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: '14px 18px 34px' }}>
