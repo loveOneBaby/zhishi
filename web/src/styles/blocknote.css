@@ -1,0 +1,23 @@
+/* BlockNote 跟随应用主题:把编辑器配色变量映射到主题 token */
+.ik-bn-wrap { width: 100%; }
+.ik-bn.bn-container,
+.ik-bn .bn-editor {
+  --bn-colors-editor-text: var(--fg) !important;
+  --bn-colors-editor-background: transparent !important;
+  --bn-colors-menu-text: var(--fg) !important;
+  --bn-colors-menu-background: var(--panel) !important;
+  --bn-colors-tooltip-text: var(--fg) !important;
+  --bn-colors-tooltip-background: var(--panel) !important;
+  --bn-colors-hovered-text: var(--fg) !important;
+  --bn-colors-hovered-background: var(--sel) !important;
+  --bn-colors-selected-text: var(--fg) !important;
+  --bn-colors-selected-background: var(--sel) !important;
+  --bn-colors-disabled-text: var(--mut) !important;
+  --bn-colors-disabled-background: var(--panel) !important;
+  --bn-colors-border: var(--bd) !important;
+  --bn-colors-side-menu: var(--mut) !important;
+  background: transparent !important;
+}
+/* 链接配色 + 只读时可点击 */
+.ik-bn a { color: var(--accent); text-decoration: underline; }
+.ik-bn-wrap a { cursor: pointer; }

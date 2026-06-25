@@ -1,0 +1,95 @@
+@media (prefers-reduced-motion: reduce) {
+  .ik-mind-card { transition: none; }
+  .ik-command-overlay,
+  .ik-command-dialog,
+  .ik-ai-task-panel {
+    animation: none;
+  }
+  .ik-ai-task-spin {
+    animation: none;
+  }
+  .ik-command-btn,
+  .ik-ai-task-dock,
+  .ik-ai-task-row,
+  .ik-kt-root,
+  .ik-kt-node,
+  .ik-tree-row,
+  .ik-tree-meta,
+  .ik-row-actions,
+  .ik-detail-actions {
+    transition: none;
+  }
+}
+@media (max-width: 980px) {
+  .ik-floating-toolbar {
+    position: static;
+    flex-direction: row;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .ik-floating-toolbar > button,
+  .ik-floating-toolbar > label {
+    min-width: 0;
+  }
+  .ik-free-layout {
+    grid-template-columns: 1fr;
+  }
+  .ik-free-layout > aside,
+  .ik-free-layout > div > aside {
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  .ik-detail-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+  .ik-command-dialog.is-wide {
+    width: min(720px, calc(100vw - 24px));
+    padding: 20px;
+  }
+  .ik-command-dialog.is-wide .ik-command-head {
+    grid-template-columns: 44px minmax(0, 1fr) 32px;
+    gap: 12px;
+  }
+  .ik-command-dialog.is-wide .ik-command-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+  }
+  .ik-command-dialog.is-wide .ik-command-title {
+    font-size: 21px;
+  }
+  .ik-ai-task-dock {
+    right: 16px;
+    bottom: 96px;
+  }
+  .ik-ai-task-panel {
+    inset: auto 12px 12px 12px;
+    top: 68px;
+    width: auto;
+    border-radius: 16px;
+  }
+  .ik-ai-task-panel-body {
+    grid-template-columns: 1fr;
+  }
+  .ik-ai-task-list {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--bd) 76%, transparent);
+  }
+  .ik-ai-task-row {
+    min-width: 220px;
+  }
+}

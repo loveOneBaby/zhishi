@@ -1,0 +1,40 @@
+/* 毛玻璃主题:环境有玻璃感,正文和树保持清晰可读 */
+.ik-theme-glass {
+  --app-bg: linear-gradient(135deg, #edf4fb 0%, #f8fafc 42%, #edf8f6 100%);
+  --chrome-bg: rgba(247,250,255,.76);
+  --glass-panel: rgba(255,255,255,.68);
+  --glass-panel-strong: rgba(255,255,255,.86);
+  --glass-border: rgba(255,255,255,.64);
+  --glass-reader-bg: rgba(255,255,255,.82);
+  --glass-shadow: 0 18px 46px rgba(40,54,82,.1), inset 0 1px 0 rgba(255,255,255,.5);
+  --glass-shadow-soft: 0 8px 28px rgba(40,54,82,.07);
+  --tree-hover-bg: rgba(255,255,255,.52);
+  --tree-active-bg: rgba(255,255,255,.7);
+}
+.ik-theme-glass .ik-topbar,
+.ik-theme-glass .ik-action-bar,
+.ik-theme-glass .ik-fab-menu,
+.ik-theme-glass .ik-fab,
+.ik-theme-glass .ik-select-content,
+.ik-theme-glass .ik-kt-menu,
+.ik-theme-glass .ik-command-overlay,
+.ik-theme-glass .ik-command-dialog,
+.ik-theme-glass .ik-ai-task-dock,
+.ik-theme-glass .ik-ai-task-panel {
+  backdrop-filter: blur(18px) saturate(1.25);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+}
+.ik-theme-glass .ik-surface,
+.ik-theme-glass .ik-kb-card,
+.ik-theme-glass .ik-kb-create {
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow-soft);
+}
+.ik-theme-glass ::-webkit-scrollbar { width: 6px; height: 6px; }
+.ik-theme-glass ::-webkit-scrollbar-thumb {
+  background: rgba(83,96,118,.22);
+  border-radius: 999px;
+}
+.ik-theme-glass ::-webkit-scrollbar-thumb:hover {
+  background: rgba(83,96,118,.34);
+}

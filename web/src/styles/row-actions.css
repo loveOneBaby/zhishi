@@ -1,0 +1,74 @@
+.ik-row-actions {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.ik-kb-card .ik-row-actions {
+  top: 18px;
+  right: 18px;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--bd) 74%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: 0 10px 26px rgba(15,23,42,.08);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  transform: translateY(-3px);
+}
+.ik-tree-row:hover .ik-row-actions,
+.ik-tree-row:focus-within .ik-row-actions,
+.ik-kb-card:hover .ik-row-actions,
+.ik-kb-card:focus-within .ik-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+.ik-kb-card:hover .ik-row-actions,
+.ik-kb-card:focus-within .ik-row-actions {
+  transform: translateY(0);
+}
+.ik-row-action-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--bd);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--mut);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  box-shadow: 0 8px 20px rgba(0,0,0,.08);
+}
+.ik-kb-card .ik-row-action-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+}
+.ik-row-action-btn:hover {
+  color: var(--fg);
+  border-color: var(--mut);
+}
+.ik-kb-card .ik-row-action-btn:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.ik-row-action-danger {
+  color: var(--danger);
+}
+.ik-kb-card .ik-row-action-danger:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 11%, transparent);
+}

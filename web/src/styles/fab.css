@@ -1,0 +1,86 @@
+/* 右下角悬浮操作按钮 + 展开菜单 */
+.ik-fab-wrap {
+  position: fixed;
+  right: clamp(16px, 2.2vw, 40px);
+  bottom: clamp(36px, 4.2vh, 56px);
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.ik-fab {
+  width: 48px;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: none;
+  outline: none;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 40%, rgba(0,0,0,.3));
+  transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease;
+}
+.ik-fab:hover { transform: translateY(-2px); filter: brightness(1.06); }
+.ik-fab:focus-visible { box-shadow: 0 8px 22px rgba(0,0,0,.22), 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent); }
+.ik-fab-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px;
+  min-width: 248px;
+  border: 1px solid var(--bd);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  box-shadow: 0 20px 52px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.06);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  animation: ik-pop .14s ease;
+}
+.ik-fab-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13.5px;
+  font-weight: 550;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.ik-fab-item:hover { background: color-mix(in srgb, var(--fg) 6%, var(--panel)); }
+.ik-fab-item-danger { color: var(--danger); }
+.ik-fab-item-danger:hover { background: color-mix(in srgb, var(--danger) 10%, var(--panel)); }
+.ik-fab-item-danger .ik-fab-ico { color: var(--danger); }
+.ik-fab-item-disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.ik-fab-item-disabled:hover { background: transparent; }
+.ik-fab-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  flex-shrink: 0;
+  color: var(--mut);
+}
+.ik-fab-ico svg { display: block; }
+.ik-fab-item-primary { color: var(--accent); }
+.ik-fab-item-primary .ik-fab-ico { color: var(--accent); }
+.ik-fab-sep {
+  height: 1px;
+  margin: 5px 10px;
+  background: var(--bd);
+}
+

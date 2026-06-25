@@ -1,0 +1,42 @@
+.ik-detail-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.ik-detail-actions {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.ik-detail-shell:hover .ik-detail-actions,
+.ik-detail-shell:focus-within .ik-detail-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.ik-detail-action-btn {
+  padding: 8px 13px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 680;
+  box-shadow: 0 12px 28px rgba(0,0,0,.1);
+}
+.ik-detail-action-btn:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+.ik-detail-action-danger {
+  color: var(--danger);
+}

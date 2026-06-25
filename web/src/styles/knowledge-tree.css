@@ -1,0 +1,473 @@
+.ik-kt-shell {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* 通用「分格」工具按钮:和左侧树工具栏一致(编辑/删除/预览等复用) */
+.ik-segbtn {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: background 130ms ease, border-color 130ms ease, color 130ms ease;
+}
+.ik-segbtn:hover:not(:disabled) { background: var(--sel); border-color: color-mix(in srgb, var(--fg) 16%, var(--bd)); }
+.ik-segbtn:disabled { opacity: .5; cursor: not-allowed; }
+.ik-segbtn-danger { color: var(--danger); }
+.ik-segbtn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, var(--panel)); border-color: color-mix(in srgb, var(--danger) 40%, var(--bd)); }
+.ik-segbtn-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.ik-segbtn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 88%, var(--panel)); border-color: color-mix(in srgb, var(--fg) 88%, var(--panel)); }
+.ik-theme-glass .ik-segbtn {
+  border-color: rgba(105,120,148,.16);
+  background: rgba(255,255,255,.46);
+  box-shadow: none;
+}
+.ik-theme-glass .ik-segbtn:hover:not(:disabled) {
+  border-color: rgba(105,120,148,.24);
+  background: rgba(255,255,255,.72);
+}
+.ik-theme-glass .ik-segbtn-danger {
+  color: color-mix(in srgb, var(--danger) 82%, #7f1d1d);
+}
+.ik-theme-glass .ik-segbtn-danger:hover:not(:disabled) {
+  background: rgba(226,61,71,.09);
+  border-color: rgba(226,61,71,.2);
+}
+.ik-theme-glass .ik-segbtn-primary {
+  border-color: transparent;
+  background: var(--fg);
+  color: #fff;
+}
+
+.ik-kt-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 34px;
+}
+.ik-kt-quick-actions,
+.ik-kt-batchbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.ik-kt-quick-actions button,
+.ik-kt-batchbar button {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ik-kt-quick-actions button:hover,
+.ik-kt-batchbar button:hover {
+  background: var(--sel);
+}
+.ik-theme-glass .ik-kt-quick-actions button,
+.ik-theme-glass .ik-kt-batchbar button {
+  border-color: rgba(105,120,148,.14);
+  background: rgba(255,255,255,.42);
+}
+.ik-theme-glass .ik-kt-quick-actions button:hover,
+.ik-theme-glass .ik-kt-batchbar button:hover {
+  background: rgba(255,255,255,.7);
+}
+.ik-kt-quick-actions .ik-kt-root-create {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+.ik-kt-quick-actions .ik-kt-root-create:hover {
+  background: color-mix(in srgb, var(--fg) 88%, var(--panel));
+}
+.ik-theme-glass .ik-kt-quick-actions .ik-kt-root-create {
+  border-color: transparent;
+  background: var(--fg);
+  color: #fff;
+}
+.ik-theme-glass .ik-kt-quick-actions .ik-kt-root-create:hover {
+  background: color-mix(in srgb, var(--fg) 90%, #fff);
+}
+.ik-kt-batchbar {
+  position: relative;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 3px;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--sel) 42%, var(--panel));
+  box-shadow: 0 8px 22px rgba(0,0,0,.06);
+}
+.ik-theme-glass .ik-kt-batchbar {
+  border-color: rgba(105,120,148,.14);
+  background: rgba(255,255,255,.56);
+  box-shadow: 0 8px 24px rgba(45,61,86,.07);
+}
+.ik-kt-batchbar > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 5px 0 6px;
+  color: var(--mut);
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.ik-kt-batchbar button {
+  border-color: transparent;
+  background: transparent;
+}
+.ik-kt-batchbar button:disabled {
+  cursor: default;
+  opacity: .4;
+}
+.ik-kt-batchbar button.danger {
+  color: var(--danger);
+}
+.ik-kt-move-menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 82;
+  width: min(280px, 76vw);
+  max-height: 320px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 98%, var(--bg));
+  box-shadow: 0 18px 46px rgba(0,0,0,.16);
+  animation: ik-pop .12s ease;
+}
+.ik-kt-move-menu button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 7px 9px;
+  overflow: hidden;
+  border: none;
+  border-radius: 8px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ik-kt-root,
+.ik-kt-node {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+}
+.ik-kt-root {
+  grid-template-columns: 18px minmax(0, 1fr);
+  min-height: 48px;
+  padding: 8px 11px;
+  cursor: pointer;
+}
+.ik-kt-row-shell {
+  width: 100%;
+  padding: 1px 2px 1px 0;
+}
+.ik-kt-node {
+  grid-template-columns: 16px 17px minmax(0, 1fr);
+  height: 34px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.ik-kt-node.is-batch {
+  grid-template-columns: 16px 16px 17px minmax(0, 1fr);
+  padding-left: 4px;
+}
+.ik-kt-check {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+  justify-self: center;
+  opacity: .48;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.ik-kt-node:hover .ik-kt-check,
+.ik-kt-node.is-selected .ik-kt-check {
+  opacity: .95;
+}
+.ik-kt-node.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--bd));
+  background: color-mix(in srgb, var(--sel) 82%, var(--panel));
+}
+.ik-theme-glass .ik-kt-node.is-selected {
+  border-color: transparent;
+  background: var(--tree-active-bg);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 76%, transparent);
+}
+.ik-kt-node-folder {
+  cursor: grab;
+}
+.ik-kt-node-entry {
+  cursor: grab;
+}
+.ik-kt-node-folder:active,
+.ik-kt-node-entry:active {
+  cursor: grabbing;
+}
+.ik-kt-root:hover,
+.ik-kt-node:hover,
+.ik-kt-root.is-active,
+.ik-kt-node.is-active {
+  background: var(--sel);
+  border-color: var(--bd);
+}
+.ik-theme-glass .ik-kt-root:hover,
+.ik-theme-glass .ik-kt-node:hover,
+.ik-theme-glass .ik-kt-root.is-active,
+.ik-theme-glass .ik-kt-node.is-active {
+  border-color: transparent;
+  background: var(--tree-hover-bg);
+}
+.ik-kt-node.is-active {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.ik-theme-glass .ik-kt-node.is-active {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 68%, transparent);
+}
+.ik-kt-node.is-drop-target {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.ik-theme-glass .ik-kt-node.is-drop-target {
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--tree-active-bg));
+}
+.ik-kt-node.is-dragging {
+  opacity: .5;
+}
+.ik-kt-caret {
+  width: 16px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--mut);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+}
+.ik-kt-caret svg {
+  display: block;
+}
+.ik-kt-caret.is-empty {
+  opacity: 0;
+  pointer-events: none;
+}
+.ik-kt-root-icon,
+.ik-kt-icon {
+  width: 17px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  flex: none;
+  color: var(--mut);
+}
+.ik-kt-root-icon {
+  opacity: .78;
+}
+.ik-kt-icon-folder {
+  color: color-mix(in srgb, var(--accent) 62%, var(--mut));
+}
+.ik-theme-glass .ik-kt-icon-folder {
+  color: color-mix(in srgb, var(--fg) 72%, var(--mut));
+}
+.ik-kt-icon-folder::before {
+  content: none;
+}
+.ik-kt-icon-entry {
+  opacity: .5;
+}
+.ik-kt-icon svg,
+.ik-kt-root-icon svg {
+  display: block;
+}
+.ik-kt-main {
+  min-width: 0;
+}
+.ik-kt-title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.18;
+}
+.ik-kt-node-folder .ik-kt-title {
+  font-size: 13.5px;
+  font-weight: 760;
+}
+.ik-kt-meta {
+  display: none;
+  min-width: 0;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mut);
+  font-size: 11.2px;
+  line-height: 1.2;
+}
+.ik-kt-node:focus,
+.ik-kt-node:focus-visible {
+  outline: none;
+}
+.ik-kt-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.ik-kt-arborist {
+  outline: none;
+  overflow-x: hidden !important;
+}
+.ik-kt-arborist > div {
+  overflow-x: hidden !important;
+}
+.ik-kt-empty {
+  margin: 12px 2px;
+  padding: 18px;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  border: 1px dashed var(--bd);
+  border-radius: 12px;
+  color: var(--mut);
+  font-size: 13px;
+  text-align: center;
+}
+.ik-kt-empty button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ik-kt-empty button:hover {
+  background: var(--sel);
+}
+.ik-kt-menu {
+  position: fixed;
+  left: var(--menu-x);
+  top: var(--menu-y);
+  z-index: 80;
+  width: 204px;
+  padding: 6px;
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 98%, var(--bg));
+  color: var(--fg);
+  box-shadow: 0 18px 46px rgba(0,0,0,.18);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: ik-pop .12s ease;
+}
+.ik-kt-menu-group {
+  display: grid;
+  gap: 2px;
+}
+.ik-kt-menu-group + .ik-kt-menu-group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--bd);
+}
+.ik-kt-menu-label {
+  padding: 4px 9px 2px;
+  color: var(--mut);
+  font-size: 10px;
+  font-weight: 780;
+  line-height: 1.2;
+}
+.ik-kt-menu-label.is-danger {
+  margin-top: 4px;
+  color: color-mix(in srgb, var(--danger) 72%, var(--mut));
+}
+.ik-kt-menu button {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 620;
+  text-align: left;
+  cursor: pointer;
+}
+.ik-kt-menu button:hover {
+  background: var(--sel);
+}
+.ik-kt-menu button.danger {
+  color: var(--danger);
+}
+.ik-kt-menu button.danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.ik-kt-menu-sep {
+  display: block;
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--bd);
+}

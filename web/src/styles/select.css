@@ -1,0 +1,119 @@
+.ik-select-trigger {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 11px;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 96%, var(--bg));
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.ik-select-trigger:hover {
+  border-color: color-mix(in srgb, var(--mut) 55%, var(--bd));
+  background: var(--panel);
+}
+.ik-select-trigger:focus-visible,
+.ik-select-trigger[data-state="open"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.ik-select-trigger[data-disabled] {
+  cursor: not-allowed;
+  opacity: .55;
+}
+.ik-select-trigger[data-placeholder] {
+  color: var(--mut);
+}
+.ik-select-trigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ik-select-icon {
+  color: var(--mut);
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 140ms ease;
+}
+.ik-select-trigger[data-state="open"] .ik-select-icon {
+  transform: rotate(180deg);
+}
+.ik-select-content {
+  z-index: 90;
+  min-width: var(--radix-select-trigger-width);
+  max-width: min(460px, calc(100vw - 24px));
+  max-height: min(360px, var(--radix-select-content-available-height));
+  overflow: hidden;
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 98%, var(--bg));
+  color: var(--fg);
+  box-shadow: 0 18px 46px rgba(0,0,0,.18);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: ik-pop .13s ease;
+}
+.ik-select-viewport {
+  padding: 6px;
+}
+.ik-select-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 8px 34px 8px 10px;
+  border-radius: 8px;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.25;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+.ik-select-item[data-highlighted] {
+  background: var(--sel);
+}
+.ik-select-item[data-state="checked"] {
+  font-weight: 720;
+}
+.ik-select-item[data-disabled] {
+  color: var(--mut);
+  cursor: not-allowed;
+  opacity: .48;
+}
+.ik-select-item span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ik-select-check {
+  position: absolute;
+  right: 10px;
+  color: var(--accent);
+  font-size: 12px;
+}
+.ik-select-scroll {
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mut);
+  font-size: 12px;
+}
+.ik-select-compact {
+  height: 34px;
+  border-radius: 8px;
+  font-size: 12px;
+}
