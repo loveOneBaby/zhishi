@@ -2,7 +2,7 @@ import type { Router } from 'express';
 import { listEntries } from '../db.js';
 import { searchEntries } from '../search.js';
 import { askAI } from '../ask.js';
-import { aiJobs, cancelAiJob, jobSnapshot, listJobSnapshots, retryAiJob } from '../services/ai-jobs.js';
+import { aiJobs, cancelAiJob, clearAiJobHistory, jobSnapshot, listJobSnapshots, retryAiJob } from '../services/ai-jobs.js';
 
 export function registerAiRoutes(api: Router): void {
   api.get('/ai/jobs', (_req, res) => {
@@ -13,6 +13,10 @@ export function registerAiRoutes(api: Router): void {
     const job = aiJobs.get(req.params.id);
     if (!job) return res.status(404).json({ error: '任务不存在' });
     res.json({ job: jobSnapshot(job) });
+  });
+
+  api.delete('/ai/jobs/history', (_req, res) => {
+    res.json({ jobs: clearAiJobHistory() });
   });
 
   api.post('/ai/jobs/:id/cancel', (req, res) => {

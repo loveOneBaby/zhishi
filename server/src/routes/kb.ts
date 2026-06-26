@@ -16,7 +16,7 @@ import {
   listEntries,
 } from '../db.js';
 import { createKnowledgeBaseFromDraft } from '../services/kb-draft-writer.js';
-import { jobSnapshot, startFolderInitJob, startKnowledgeBaseJob } from '../services/ai-jobs.js';
+import { discardAiJobResultsForKb, jobSnapshot, startFolderEntriesJob, startFolderInitJob, startKnowledgeBaseJob } from '../services/ai-jobs.js';
 import { folderPathLabel, sendSse } from '../services/utils.js';
 
 export function registerKbRoutes(api: Router): void {
@@ -59,6 +59,26 @@ export function registerKbRoutes(api: Router): void {
       targetPath: folderPathLabel(parentId),
       domain,
       folderCount: Number.isFinite(folderCount) ? folderCount : 18,
+    });
+    res.status(202).json({ job: jobSnapshot(job) });
+  });
+
+  // AI 按已有目录直接生成知识点：无需用户输入题目，按当前目录树自动补全空叶子目录。
+  api.post('/kbs/:id/folders/entries/jobs', (req, res) => {
+    const kb = getKb(req.params.id);
+    if (!kb) return res.status(404).json({ error: '知识库不存在' });
+    const requestedParentId = req.body?.parentId == null ? '' : String(req.body.parentId).trim();
+    const parentId = requestedParentId || null;
+    const parent = parentId ? getFolder(parentId) : null;
+    if (parentId && !parent) return res.status(404).json({ error: '目标文件夹不存在' });
+    if (parent && parent.kbId !== kb.id) return res.status(400).json({ error: '目标文件夹不属于当前知识库' });
+    const domain = String(req.body?.domain ?? '').trim() || kb.name;
+    const job = startFolderEntriesJob({
+      kbId: kb.id,
+      kbName: kb.name,
+      parentId,
+      targetPath: folderPathLabel(parentId),
+      domain,
     });
     res.status(202).json({ job: jobSnapshot(job) });
   });
@@ -106,7 +126,10 @@ export function registerKbRoutes(api: Router): void {
   });
 
   api.delete('/kbs/:id', (req, res) => {
-    const ok = deleteKb(req.params.id);
+    const kb = getKb(req.params.id);
+    if (!kb) return res.status(404).json({ error: 'not found' });
+    discardAiJobResultsForKb(kb.id);
+    const ok = deleteKb(kb.id);
     if (!ok) return res.status(404).json({ error: 'not found' });
     res.json({ ok: true, kbs: listKbs(), folders: listFolders(), entries: listEntries() });
   });

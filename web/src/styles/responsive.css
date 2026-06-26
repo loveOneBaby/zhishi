@@ -78,6 +78,9 @@
     width: auto;
     border-radius: 16px;
   }
+  .ik-ai-command-grid {
+    grid-template-columns: 1fr;
+  }
   .ik-ai-task-panel-body {
     grid-template-columns: 1fr;
   }

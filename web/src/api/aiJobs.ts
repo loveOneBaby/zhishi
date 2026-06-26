@@ -1,5 +1,5 @@
 import type { Entry, Folder, KnowledgeBase } from '../types';
-import { apiGetKey, apiPostKey } from './client';
+import { apiDelJson, apiGetKey, apiPostKey } from './client';
 
 // AI 建库/初始化目录的保存结果(与 AiKnowledgeBaseJob.result 同构,故同放此处避免循环依赖)
 export interface GenerateKnowledgeBaseResult {
@@ -12,7 +12,7 @@ export type AiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cance
 
 export interface AiKnowledgeBaseJob {
   id: string;
-  kind: 'kb-generate' | 'folder-init';
+  kind: 'kb-generate' | 'folder-init' | 'folder-entries';
   domain: string;
   questionCount: number;
   kbId?: string;
@@ -44,4 +44,9 @@ export async function cancelAiJob(id: string): Promise<AiKnowledgeBaseJob> {
 
 export async function retryAiJob(id: string): Promise<AiKnowledgeBaseJob> {
   return apiPostKey<AiKnowledgeBaseJob>(`/ai/jobs/${encodeURIComponent(id)}/retry`, {}, 'job');
+}
+
+export async function clearAiJobHistory(): Promise<AiKnowledgeBaseJob[]> {
+  const data = await apiDelJson<{ jobs: AiKnowledgeBaseJob[] }>('/ai/jobs/history');
+  return data.jobs;
 }

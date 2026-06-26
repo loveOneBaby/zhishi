@@ -12,6 +12,13 @@
 }
 
 /* 知识库落地页:卡片网格 */
+.ik-kb-gallery {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  padding: 20px 0 64px;
+}
 .ik-kb-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

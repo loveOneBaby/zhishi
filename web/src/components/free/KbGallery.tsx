@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { LibraryBig, Plus, Sparkles } from 'lucide-react';
+import { LibraryBig, Plus } from 'lucide-react';
 import type { Entry, Folder, KnowledgeBase } from '../../types';
 import ImportPreviewModal from '../ImportPreviewModal';
 import type { ImportPayload, ImportPreview } from '../../api';
@@ -10,7 +10,6 @@ interface KbGalleryProps {
   entries: Entry[];
   folders: Folder[];
   entriesOfKb: (kbId: string) => Entry[];
-  startGenerateKnowledgeBase: () => void;
   newKb: () => void;
   openKb: (kb: KnowledgeBase) => void;
   renameKbAction: (kb: KnowledgeBase) => void;
@@ -23,12 +22,12 @@ interface KbGalleryProps {
 }
 
 export function KbGallery(props: KbGalleryProps): ReactNode {
-  const { kbs, entries, folders, entriesOfKb, startGenerateKnowledgeBase, newKb, openKb,
+  const { kbs, entries, folders, entriesOfKb, newKb, openKb,
     renameKbAction, deleteKbAction, importPreview, importing, onCloseImportPreview,
     handleConfirmImport, commandDialog } = props;
 
   return (
-    <div style={{ padding: '20px 0 64px' }}>
+    <div className="ik-kb-gallery">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 28, flexWrap: 'wrap', gap: 16 }}>
         <div>
           <div style={{ fontSize: 12, color: 'var(--mut)', fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase' }}>Knowledge Bases</div>
@@ -38,9 +37,6 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="ik-btn ik-btn-secondary ik-btn-size-md" onClick={startGenerateKnowledgeBase}>
-            <span className="ik-btn-leading-icon"><Sparkles size={15} strokeWidth={2.15} /></span>AI 新建知识库
-          </button>
           <button className="ik-btn ik-btn-default ik-btn-size-md" onClick={newKb}>
             <span className="ik-btn-leading-icon"><Plus size={15} strokeWidth={2.4} /></span>新建知识库
           </button>
@@ -48,10 +44,6 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
       </div>
 
       <div className="ik-kb-grid">
-        <div className="ik-kb-create" onClick={startGenerateKnowledgeBase} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startGenerateKnowledgeBase(); } }}>
-          <span className="ik-kb-create-ico"><Sparkles size={20} strokeWidth={2.15} /></span>
-          AI 新建领域知识库
-        </div>
         {kbs.map((kb) => {
           const n = entriesOfKb(kb.id).length;
           const fn = folders.filter((f) => f.kbId === kb.id).length;

@@ -39,3 +39,19 @@ export async function startInitKnowledgeBaseFoldersJob(input: InitKnowledgeBaseF
     'job',
   );
 }
+
+// ───────────── AI 按目录生成知识点 ─────────────
+
+export interface GenerateKnowledgePointsFromFoldersInput {
+  kbId: string;
+  parentId?: string | null;
+  domain?: string;
+}
+
+export async function startGenerateKnowledgePointsFromFoldersJob(input: GenerateKnowledgePointsFromFoldersInput): Promise<AiKnowledgeBaseJob> {
+  return apiPostKey<AiKnowledgeBaseJob>(
+    `/kbs/${encodeURIComponent(input.kbId)}/folders/entries/jobs`,
+    { parentId: input.parentId ?? null, domain: input.domain },
+    'job',
+  );
+}

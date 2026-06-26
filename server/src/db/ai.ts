@@ -1,10 +1,11 @@
 import { db } from './client.js';
 
 export type StoredAiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type StoredAiJobKind = 'kb-generate' | 'folder-init' | 'folder-entries';
 
 export interface StoredAiJob {
   id: string;
-  kind: 'kb-generate' | 'folder-init';
+  kind: StoredAiJobKind;
   domain: string;
   questionCount: number;
   kbId?: string;
@@ -62,9 +63,11 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
 }
 
 function rowToJob(row: Record<string, unknown>): StoredAiJob {
+  const rawKind = String(row.kind);
+  const kind: StoredAiJobKind = rawKind === 'folder-init' || rawKind === 'folder-entries' ? rawKind : 'kb-generate';
   return {
     id: String(row.id),
-    kind: String(row.kind) === 'folder-init' ? 'folder-init' : 'kb-generate',
+    kind,
     domain: String(row.domain ?? ''),
     questionCount: Number(row.questionCount ?? 0),
     kbId: typeof row.kbId === 'string' && row.kbId ? row.kbId : undefined,
@@ -165,4 +168,9 @@ export function pruneStoredAiJobs(limit = 30): void {
   if (!rows.length) return;
   const stmt = db.prepare('DELETE FROM ai_jobs WHERE id = ?');
   for (const row of rows) stmt.run(row.id);
+}
+
+export function clearStoredAiJobHistory(): number {
+  const info = db.prepare("DELETE FROM ai_jobs WHERE status NOT IN ('queued','running')").run();
+  return Number(info.changes ?? 0);
 }

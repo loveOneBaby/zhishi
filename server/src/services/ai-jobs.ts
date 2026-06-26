@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { getKb, listEntries, listFolders, listStoredAiJobs, markInterruptedAiJobs, pruneStoredAiJobs, saveAiJob } from '../db.js';
+import { clearStoredAiJobHistory, getKb, listEntries, listFolders, listStoredAiJobs, markInterruptedAiJobs, pruneStoredAiJobs, saveAiJob } from '../db.js';
 import {
   generateEntryInputStream,
   generateFolderTreeDraftStream,
@@ -13,12 +13,14 @@ import { appendAiIllustration } from '../ai-image.js';
 import { kbDraftFromModelOutput } from '../ai/parse.js';
 import { createFoldersFromDraft, createKnowledgeBaseWriterFromDraft, createKnowledgeBaseWriterFromExisting, type GeneratedKnowledgeBaseResult } from './kb-draft-writer.js';
 import { folderPathLabel } from './utils.js';
+import { searchEntries } from '../search.js';
+import type { Folder } from '../types.js';
 
 export type AiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface AiKnowledgeBaseJob {
   id: string;
-  kind: 'kb-generate' | 'folder-init';
+  kind: 'kb-generate' | 'folder-init' | 'folder-entries';
   domain: string;
   questionCount: number;
   kbId?: string;
@@ -69,16 +71,17 @@ function pushJobLog(job: AiKnowledgeBaseJob, message: string): void {
 }
 
 export function jobSnapshot(job: AiKnowledgeBaseJob): AiKnowledgeBaseJob {
+  const result = hydrateKnowledgeBaseResult(job);
   return {
     ...job,
-    resumable: job.kind === 'folder-init'
-      ? Boolean(job.kbId && job.kbName)
+    resumable: job.kind === 'folder-init' || job.kind === 'folder-entries'
+      ? Boolean(job.kbId && job.kbName && getKb(job.kbId))
       : canResumeKnowledgeBaseJob(job),
     logs: [...job.logs],
-    result: job.result ? {
-      kb: job.result.kb,
-      folders: [...job.result.folders],
-      entries: [...job.result.entries],
+    result: result ? {
+      kb: result.kb,
+      folders: [...result.folders],
+      entries: [...result.entries],
     } : undefined,
   };
 }
@@ -87,6 +90,14 @@ export function listJobSnapshots(): AiKnowledgeBaseJob[] {
   return [...aiJobs.values()]
     .sort((a, b) => b.createdAt - a.createdAt)
     .map(jobSnapshot);
+}
+
+export function clearAiJobHistory(): AiKnowledgeBaseJob[] {
+  for (const [id, job] of aiJobs) {
+    if (job.status !== 'queued' && job.status !== 'running') aiJobs.delete(id);
+  }
+  clearStoredAiJobHistory();
+  return listJobSnapshots();
 }
 
 function pruneJobs(): void {
@@ -128,15 +139,16 @@ function createBaseJob(input: {
 function scheduleJob(job: AiKnowledgeBaseJob): void {
   setTimeout(() => {
     if (job.kind === 'folder-init') void runFolderInitJob(job.id, job.questionCount || 18);
+    else if (job.kind === 'folder-entries') void runFolderEntriesJob(job.id);
     else void runKnowledgeBaseJob(job.id);
   }, 0);
 }
 
 function hydrateKnowledgeBaseResult(job: AiKnowledgeBaseJob): GeneratedKnowledgeBaseResult | null {
   const kbId = job.result?.kb?.id ?? job.kbId;
-  if (!kbId) return job.result ?? null;
-  const kb = getKb(kbId) ?? job.result?.kb;
-  if (!kb) return job.result ?? null;
+  if (!kbId) return null;
+  const kb = getKb(kbId);
+  if (!kb) return null;
   return {
     kb,
     folders: listFolders().filter((folder) => folder.kbId === kb.id),
@@ -155,7 +167,23 @@ function extractPlanFromOutput(job: AiKnowledgeBaseJob): GeneratedKbDraft | null
 }
 
 function canResumeKnowledgeBaseJob(job: AiKnowledgeBaseJob): boolean {
+  if (job.kbId && !getKb(job.kbId)) return false;
   return Boolean(job.plan || extractPlanFromOutput(job));
+}
+
+export function discardAiJobResultsForKb(kbId: string): void {
+  for (const job of aiJobs.values()) {
+    const matches = job.kbId === kbId || job.result?.kb?.id === kbId;
+    if (!matches) continue;
+    if (job.status === 'queued' || job.status === 'running') {
+      runningControllers.get(job.id)?.abort();
+      stopJobForDeletedKb(job);
+    }
+    if (job.result?.kb?.id === kbId) {
+      job.result = undefined;
+      touchJob(job);
+    }
+  }
 }
 
 export function startKnowledgeBaseJob(domain: string, questionCount: number): AiKnowledgeBaseJob {
@@ -197,6 +225,30 @@ export function startFolderInitJob(input: {
   return job;
 }
 
+export function startFolderEntriesJob(input: {
+  kbId: string;
+  kbName: string;
+  parentId: string | null;
+  targetPath: string;
+  domain: string;
+}): AiKnowledgeBaseJob {
+  const job = createBaseJob({
+    kind: 'folder-entries',
+    domain: input.domain,
+    questionCount: 0,
+    kbId: input.kbId,
+    kbName: input.kbName,
+    parentId: input.parentId,
+    targetPath: input.targetPath,
+    logs: ['目录知识点生成任务已创建，等待后台执行'],
+  });
+  aiJobs.set(job.id, job);
+  persistJob(job);
+  pruneJobs();
+  scheduleJob(job);
+  return job;
+}
+
 export function cancelAiJob(id: string): AiKnowledgeBaseJob | null {
   const job = aiJobs.get(id);
   if (!job) return null;
@@ -213,12 +265,12 @@ export function retryAiJob(id: string): AiKnowledgeBaseJob | null {
   const job = aiJobs.get(id);
   if (!job) return null;
   if (job.status === 'queued' || job.status === 'running') return jobSnapshot(job);
-  if (job.kind === 'folder-init') {
+  if (job.kind === 'folder-init' || job.kind === 'folder-entries') {
     if (!job.kbId || !job.kbName) return null;
     job.status = 'queued';
     job.error = undefined;
     job.abortRequested = false;
-    pushJobLog(job, '重新提交目录初始化任务');
+    pushJobLog(job, job.kind === 'folder-init' ? '重新提交目录初始化任务' : '重新提交目录知识点生成任务');
     scheduleJob(job);
     return jobSnapshot(job);
   }
@@ -235,7 +287,11 @@ export function retryAiJob(id: string): AiKnowledgeBaseJob | null {
 
 for (const job of aiJobs.values()) {
   if (job.status === 'queued') {
-    pushJobLog(job, job.kind === 'folder-init' ? '服务已恢复，继续目录初始化任务' : '服务已恢复，继续 AI 建库任务');
+    pushJobLog(job, job.kind === 'folder-init'
+      ? '服务已恢复，继续目录初始化任务'
+      : job.kind === 'folder-entries'
+        ? '服务已恢复，继续目录知识点生成任务'
+        : '服务已恢复，继续 AI 建库任务');
     scheduleJob(job);
   }
 }
@@ -265,6 +321,13 @@ function mergedTags(primary: string[] | undefined, fallback: string[] | undefine
     if (out.length >= 8) break;
   }
   return out;
+}
+
+function stopJobForDeletedKb(job: AiKnowledgeBaseJob): void {
+  job.status = 'cancelled';
+  job.error = '知识库已删除';
+  job.abortRequested = true;
+  pushJobLog(job, '知识库已删除，任务已停止');
 }
 
 async function runKnowledgeBaseJob(jobId: string): Promise<void> {
@@ -314,6 +377,10 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
 
     pushJobLog(job, recoveredPlan ? 'LangChain Agent 第 2 步：恢复知识库和目录骨架' : 'LangChain Agent 第 2 步：创建知识库和目录骨架');
     const existingResult = recoveredPlan ? hydrateKnowledgeBaseResult(job) : null;
+    if (recoveredPlan && job.kbId && !existingResult) {
+      stopJobForDeletedKb(job);
+      return;
+    }
     const writer = existingResult
       ? createKnowledgeBaseWriterFromExisting(existingResult)
       : createKnowledgeBaseWriterFromDraft(plan);
@@ -338,6 +405,10 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
     if (startIndex > 0) pushJobLog(job, `从第 ${startIndex + 1}/${total} 个知识点继续生成`);
     for (let index = startIndex; index < plan.questions.length; index += 1) {
       if (isJobCancelled(jobId)) return;
+      if (!getKb(writer.kb.id)) {
+        stopJobForDeletedKb(job);
+        return;
+      }
       const question = plan.questions[index];
       const targetPath = question.folderPath.join(' / ') || '根层级';
       pushJobLog(job, `LangChain Agent 第 3 步：生成知识点 ${index + 1}/${total} · ${question.title}`);
@@ -382,6 +453,10 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
         if (event.type === 'image-stage') pushJobLog(current, `知识点 ${index + 1}/${total}：${event.message}`);
         if (event.type === 'image') pushJobLog(current, `知识点 ${index + 1}/${total} 图解已生成`);
       });
+      if (!getKb(writer.kb.id)) {
+        stopJobForDeletedKb(job);
+        return;
+      }
       const entry = writer.addEntry(illustrated, question.folderPath);
       job.parsed = { kbName: writer.kb.name, folders: writer.folders.length, questions: writer.entries.length };
       updateJobResult(job, writer);
@@ -391,6 +466,181 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
     job.status = 'succeeded';
     job.abortRequested = false;
     pushJobLog(job, `已完成：${writer.kb.name} · ${writer.folders.length} 个目录 · ${writer.entries.length} 条知识点`);
+    touchJob(job);
+  } catch (err) {
+    if (isJobCancelled(jobId) || isAbortError(err)) {
+      job.status = 'cancelled';
+      job.error = '用户已取消任务';
+      pushJobLog(job, '任务已取消');
+    } else {
+      job.status = 'failed';
+      job.error = err instanceof Error ? err.message : String(err);
+      pushJobLog(job, job.error);
+    }
+    touchJob(job);
+  } finally {
+    runningControllers.delete(jobId);
+  }
+}
+
+function folderPathParts(folder: Folder, byId: Map<string, Folder>): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let cursor: Folder | undefined = folder;
+  while (cursor && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    names.unshift(cursor.name);
+    cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+  }
+  return names;
+}
+
+function folderDepth(folder: Folder, byId: Map<string, Folder>): number {
+  return folderPathParts(folder, byId).length;
+}
+
+function collectFolderEntryTargets(kbId: string, parentId: string | null): Array<{ folder: Folder; path: string[] }> {
+  const folders = listFolders().filter((folder) => folder.kbId === kbId);
+  const entries = listEntries().filter((entry) => entry.kbId === kbId);
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const childrenByParent = new Map<string | null, Folder[]>();
+  for (const folder of folders) {
+    const key = folder.parentId ?? null;
+    if (!childrenByParent.has(key)) childrenByParent.set(key, []);
+    childrenByParent.get(key)!.push(folder);
+  }
+
+  const scopeIds = new Set<string>();
+  const queue = parentId ? [parentId] : [...(childrenByParent.get(null) ?? []).map((folder) => folder.id)];
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (scopeIds.has(id)) continue;
+    const folder = byId.get(id);
+    if (!folder) continue;
+    scopeIds.add(id);
+    for (const child of childrenByParent.get(id) ?? []) queue.push(child.id);
+  }
+
+  const directEntryCounts = new Map<string, number>();
+  for (const entry of entries) {
+    if (!entry.folderId) continue;
+    directEntryCounts.set(entry.folderId, (directEntryCounts.get(entry.folderId) ?? 0) + 1);
+  }
+
+  const scoped = folders
+    .filter((folder) => scopeIds.has(folder.id))
+    .sort((a, b) => folderDepth(a, byId) - folderDepth(b, byId) || a.sort - b.sort || a.createdAt - b.createdAt);
+  const leaves = scoped.filter((folder) => !(childrenByParent.get(folder.id) ?? []).some((child) => scopeIds.has(child.id)));
+  const candidates = leaves.length ? leaves : scoped;
+  return candidates
+    .filter((folder) => (directEntryCounts.get(folder.id) ?? 0) === 0)
+    .map((folder) => ({ folder, path: folderPathParts(folder, byId) }));
+}
+
+async function runFolderEntriesJob(jobId: string): Promise<void> {
+  const job = aiJobs.get(jobId);
+  if (!job || job.status === 'cancelled') return;
+  if (runningControllers.has(jobId)) return;
+  const controller = new AbortController();
+  runningControllers.set(jobId, controller);
+  job.status = 'running';
+  job.abortRequested = false;
+  pushJobLog(job, '后台目录知识点生成已启动');
+  try {
+    if (!job.kbId) throw new Error('知识库不存在');
+    const kb = getKb(job.kbId);
+    if (!kb) throw new Error('知识库不存在');
+    const result = hydrateKnowledgeBaseResult(job);
+    if (!result) throw new Error('知识库不存在');
+
+    const writer = createKnowledgeBaseWriterFromExisting(result);
+    let targets = collectFolderEntryTargets(kb.id, job.parentId ?? null);
+    job.questionCount = targets.length;
+    job.parsed = { kbName: kb.name, folders: writer.folders.length, questions: writer.entries.length };
+    updateJobResult(job, writer);
+    if (!targets.length) {
+      job.status = 'succeeded';
+      job.abortRequested = false;
+      pushJobLog(job, '当前目录范围没有需要补全的空叶子目录');
+      touchJob(job);
+      return;
+    }
+
+    pushJobLog(job, `准备按目录补全 ${targets.length} 条知识点`);
+    const total = targets.length;
+    let completed = 0;
+    while (completed < total) {
+      if (isJobCancelled(jobId)) return;
+      if (!getKb(kb.id)) {
+        stopJobForDeletedKb(job);
+        return;
+      }
+      targets = collectFolderEntryTargets(kb.id, job.parentId ?? null);
+      const target = targets[0];
+      if (!target) break;
+      const pathLabel = target.path.join(' / ') || target.folder.name;
+      const topic = [
+        '请基于当前目录自动生成一个工程面试知识点，用户没有额外输入题目。',
+        `目录路径：${pathLabel}`,
+        `目标目录：${target.folder.name}`,
+        '请从目录名推断最高频、最值得复习的核心知识点；标题要适合放入该目录，避免泛泛重复目录名。',
+      ].join('\n');
+      const currentIndex = completed + 1;
+      pushJobLog(job, `LangChain Agent：按目录生成知识点 ${currentIndex}/${total} · ${pathLabel}`);
+      job.modelOutput = trimJobOutput(`${job.modelOutput}\n\n---FOLDER ENTRY ${currentIndex}/${total}: ${pathLabel}---\n`);
+      touchJob(job);
+
+      const context = searchEntries(listEntries().filter((entry) => entry.kbId === kb.id), `${pathLabel} ${target.folder.name}`);
+      const input = await generateEntryInputStream({
+        topic,
+        kbName: kb.name,
+        folderPath: pathLabel,
+        context,
+        signal: controller.signal,
+      }, (event: GenerateEntryEvent) => {
+        const current = aiJobs.get(jobId);
+        if (!current || current.status === 'cancelled') return;
+        if (event.type === 'stage') pushJobLog(current, `目录知识点 ${currentIndex}/${total}：${event.message}`);
+        if (event.type === 'model-delta') {
+          current.modelOutput = trimJobOutput(`${current.modelOutput}${event.content}`);
+          touchJob(current);
+        }
+        if (event.type === 'model-output') {
+          touchJob(current);
+        }
+        if (event.type === 'parsed') {
+          pushJobLog(current, `目录知识点 ${currentIndex}/${total} 解析完成：${event.title}`);
+        }
+      });
+      if (isJobCancelled(jobId)) return;
+
+      const illustrated = await appendAiIllustration(input, {
+        title: input.title,
+        summary: input.summary,
+        tags: input.tags,
+        kbName: kb.name,
+        folderPath: pathLabel,
+      }, controller.signal, (event) => {
+        const current = aiJobs.get(jobId);
+        if (!current || current.status === 'cancelled') return;
+        if (event.type === 'image-stage') pushJobLog(current, `目录知识点 ${currentIndex}/${total}：${event.message}`);
+        if (event.type === 'image') pushJobLog(current, `目录知识点 ${currentIndex}/${total} 图解已生成`);
+      });
+      if (!getKb(kb.id)) {
+        stopJobForDeletedKb(job);
+        return;
+      }
+
+      const entry = writer.addEntry(illustrated, target.path);
+      job.parsed = { kbName: kb.name, folders: writer.folders.length, questions: writer.entries.length };
+      updateJobResult(job, writer);
+      pushJobLog(job, `已写入目录知识点 ${currentIndex}/${total}：${entry.title}`);
+      completed += 1;
+    }
+
+    job.status = 'succeeded';
+    job.abortRequested = false;
+    pushJobLog(job, `已完成：${kb.name} · ${writer.folders.length} 个目录 · ${writer.entries.length} 条知识点`);
     touchJob(job);
   } catch (err) {
     if (isJobCancelled(jobId) || isAbortError(err)) {

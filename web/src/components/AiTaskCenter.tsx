@@ -1,7 +1,17 @@
-import { AlertCircle, Ban, CheckCircle2, Clock3, ExternalLink, FileText, FolderTree, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
+import { AlertCircle, Ban, CheckCircle2, Clock3, ExternalLink, FileText, FolderTree, Loader2, RefreshCw, Sparkles, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AiKnowledgeBaseJob } from '../api';
+
+export interface AiQuickAction {
+  id: string;
+  title: string;
+  description: string;
+  icon: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  meta?: string;
+}
 
 interface Props {
   jobs: AiKnowledgeBaseJob[];
@@ -10,6 +20,9 @@ interface Props {
   onOpenResult: (job: AiKnowledgeBaseJob) => void;
   onCancel: (id: string) => Promise<void>;
   onRetry: (id: string) => Promise<void>;
+  onClearHistory: () => Promise<void>;
+  actions?: AiQuickAction[];
+  contextLabel?: string;
 }
 
 function statusLabel(status: AiKnowledgeBaseJob['status']): string {
@@ -23,13 +36,33 @@ function statusLabel(status: AiKnowledgeBaseJob['status']): string {
 }
 
 function jobKindLabel(job: AiKnowledgeBaseJob): string {
-  return job.kind === 'folder-init' ? '目录初始化' : '新建知识库';
+  if (job.kind === 'folder-init') return '目录初始化';
+  if (job.kind === 'folder-entries') return '目录生成知识点';
+  return '新建知识库';
 }
 
 function runningText(job: AiKnowledgeBaseJob): string {
   if (job.status === 'queued') return '排队中';
   if (job.status === 'running') return job.kind === 'folder-init' ? '初始化中' : '生成中';
   return statusLabel(job.status);
+}
+
+function parsedText(job: AiKnowledgeBaseJob): string {
+  if (!job.parsed) return '等待结构化结果';
+  if (job.kind === 'folder-init') return `${job.parsed.folders} 个目录`;
+  return `${job.parsed.folders} 个目录 / ${job.parsed.questions} 条知识点`;
+}
+
+function outputPlanLabel(job: AiKnowledgeBaseJob): string {
+  if (job.kind === 'folder-init') return '目录规划';
+  if (job.kind === 'folder-entries') return '生成过程';
+  return '建库思路';
+}
+
+function outputJsonLabel(job: AiKnowledgeBaseJob): string {
+  if (job.kind === 'folder-init') return '目录 JSON';
+  if (job.kind === 'folder-entries') return '知识点输出';
+  return '知识库 JSON';
 }
 
 function statusIcon(status: AiKnowledgeBaseJob['status']): ReactNode {
@@ -108,10 +141,21 @@ function growthItems(job: AiKnowledgeBaseJob): Array<{
     .slice(-14);
 }
 
-export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult, onCancel, onRetry }: Props): ReactNode {
+export default function AiTaskCenter({
+  jobs,
+  open,
+  onOpenChange,
+  onOpenResult,
+  onCancel,
+  onRetry,
+  onClearHistory,
+  actions = [],
+  contextLabel,
+}: Props): ReactNode {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const sortedJobs = useMemo(() => [...jobs].sort((a, b) => b.createdAt - a.createdAt), [jobs]);
   const runningCount = sortedJobs.filter((job) => job.status === 'queued' || job.status === 'running').length;
+  const historyCount = sortedJobs.length - runningCount;
   const failedCount = sortedJobs.filter((job) => job.status === 'failed').length;
   const selectedJob = sortedJobs.find((job) => job.id === selectedId) ?? sortedJobs[0] ?? null;
   const output = splitModelOutput(selectedJob?.modelOutput ?? '');
@@ -129,7 +173,7 @@ export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult, o
     }
   }, [selectedId, sortedJobs]);
 
-  if (!sortedJobs.length) return null;
+  if (!sortedJobs.length && !actions.length) return null;
 
   return (
     <>
@@ -137,29 +181,68 @@ export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult, o
         type="button"
         className={`ik-ai-task-dock ${runningCount ? 'is-running' : ''} ${failedCount ? 'has-error' : ''}`}
         onClick={() => onOpenChange(!open)}
-        title="AI 任务"
+        title="AI 控制台"
       >
         <span className="ik-ai-task-dock-icon">
           {runningCount ? <Loader2 size={16} strokeWidth={2.2} className="ik-ai-task-spin" /> : <Sparkles size={16} strokeWidth={2.15} />}
         </span>
         <span>
-          <b>{runningCount ? `${runningCount} 个运行中` : 'AI 任务'}</b>
-          <small>{failedCount ? `${failedCount} 个失败` : `${sortedJobs.length} 个记录`}</small>
+          <b>{runningCount ? `${runningCount} 个运行中` : 'AI 控制台'}</b>
+          <small>{failedCount ? `${failedCount} 个失败` : sortedJobs.length ? `${sortedJobs.length} 个记录` : `${actions.length} 个快捷动作`}</small>
         </span>
       </button>
 
       {open && (
-        <aside className="ik-ai-task-panel" aria-label="AI 任务进度">
+        <aside className="ik-ai-task-panel" aria-label="AI 控制台">
           <header className="ik-ai-task-panel-head">
             <div>
-              <span>AI 任务</span>
-              <strong>{runningCount ? `${runningCount} 个正在生成` : '暂无运行中任务'}</strong>
+              <span>AI Control</span>
+              <strong>AI 控制台</strong>
+              {contextLabel && <small className="ik-ai-task-context">{contextLabel}</small>}
             </div>
-            <button type="button" className="ik-ai-task-close" onClick={() => onOpenChange(false)} aria-label="关闭任务面板">
-              <X size={16} strokeWidth={2.25} />
-            </button>
+            <div className="ik-ai-task-head-actions">
+              {historyCount > 0 && (
+                <button type="button" className="ik-ai-task-clear" onClick={() => { void onClearHistory(); }}>
+                  <Trash2 size={14} strokeWidth={2.2} />清除历史
+                </button>
+              )}
+              <button type="button" className="ik-ai-task-close" onClick={() => onOpenChange(false)} aria-label="关闭任务面板">
+                <X size={16} strokeWidth={2.25} />
+              </button>
+            </div>
           </header>
 
+          {actions.length > 0 && (
+            <section className="ik-ai-command-zone">
+              <div className="ik-ai-command-head">
+                <span>快捷动作</span>
+                <b>{runningCount ? `${runningCount} 个后台任务运行中` : '按当前位置执行'}</b>
+              </div>
+              <div className="ik-ai-command-grid">
+                {actions.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    className="ik-ai-command-card"
+                    disabled={action.disabled}
+                    onClick={() => {
+                      if (action.disabled) return;
+                      action.onClick();
+                    }}
+                  >
+                    <span className="ik-ai-command-icon">{action.icon}</span>
+                    <span className="ik-ai-command-copy">
+                      <b>{action.title}</b>
+                      <small>{action.description}</small>
+                    </span>
+                    {action.meta && <em>{action.meta}</em>}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {sortedJobs.length > 0 ? (
           <div className="ik-ai-task-panel-body">
             <div className="ik-ai-task-list">
               {sortedJobs.map((job) => (
@@ -187,13 +270,7 @@ export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult, o
                   <span>{statusIcon(selectedJob.status)}</span>
                   <div>
                     <b>{selectedJob.domain}</b>
-                    <small>
-                      {selectedKindLabel} · {runningText(selectedJob)} · {selectedJob.parsed
-                        ? (selectedJob.kind === 'folder-init'
-                          ? `${selectedJob.parsed.folders} 个目录`
-                          : `${selectedJob.parsed.folders} 个目录 / ${selectedJob.parsed.questions} 道题`)
-                        : '等待结构化结果'}
-                    </small>
+                      <small>{selectedKindLabel} · {runningText(selectedJob)} · {parsedText(selectedJob)}</small>
                   </div>
                 </div>
 
@@ -254,12 +331,12 @@ export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult, o
                   <div className="ik-ai-task-output">
                     {output.plan && (
                       <div>
-                        <span>{selectedJob.kind === 'folder-init' ? '目录规划' : '建库思路'}</span>
+                        <span>{outputPlanLabel(selectedJob)}</span>
                         <pre>{output.plan}</pre>
                       </div>
                     )}
                     <div>
-                      <span>{selectedJob.kind === 'folder-init' ? '目录 JSON' : '知识库 JSON'}</span>
+                      <span>{outputJsonLabel(selectedJob)}</span>
                       <pre>{output.json || '等待 Qwen 输出结构化 JSON...'}</pre>
                     </div>
                   </div>
@@ -267,6 +344,13 @@ export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult, o
               </section>
             )}
           </div>
+          ) : (
+            <div className="ik-ai-task-empty">
+              <Sparkles size={20} strokeWidth={2.15} />
+              <b>暂无后台任务</b>
+              <span>开始 AI 建库或初始化目录后，进度和模型输出会显示在这里。</span>
+            </div>
+          )}
         </aside>
       )}
     </>

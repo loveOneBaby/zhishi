@@ -23,13 +23,24 @@
   overflow: hidden;
   padding: 14px 0 10px;
   background: transparent;
+  display: flex;
+  flex-direction: column;
+}
+.ik-free-workspace {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .ik-free-layout {
   display: grid;
   grid-template-columns: clamp(300px, 21vw, 420px) minmax(0, 1fr);
   gap: 16px;
   align-items: stretch;
-  height: 100%;
+  flex: 1;
+  height: auto;
   min-height: 0;
 }
 .ik-tree-panel {
@@ -88,4 +99,3 @@
   min-width: 0;
   box-shadow: none !important;
 }
-

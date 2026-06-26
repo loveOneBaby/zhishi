@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { History, ImagePlus, Pencil, Sparkles, Trash2 } from 'lucide-react';
+import { FileText, FolderPlus, History, ImagePlus, LibraryBig, Pencil, Sparkles, Trash2 } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import DetailSidePanel from './DetailSidePanel';
@@ -12,12 +12,14 @@ import { exportAll } from '../api';
 import { toast } from '../toast';
 import { KbGallery } from './free/KbGallery';
 import { FreeFab } from './free/FreeFab';
+import AiTaskCenter, { type AiQuickAction } from './AiTaskCenter';
 import { ROOT_IMPORT_TARGET, orderEntries, treePanelStyle } from './free/utils';
 import { useAiLiveOutput } from './free/useAiLiveOutput';
 import { useUndoableDeletes } from './free/useUndoableDeletes';
 import { useImportLogic } from './free/useImportLogic';
 import { useCommandSystem } from './free/useCommandSystem';
 import { CommandDialogRenderer } from './free/CommandDialogRenderer';
+import type { AiKnowledgeBaseJob } from '../api';
 
 interface Props {
   entries: Entry[];
@@ -36,6 +38,7 @@ interface Props {
   onGeneratedEntry: (entry: Entry) => void;
   onStartKnowledgeBaseJob: (domain: string) => Promise<void>;
   onStartFolderInitJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
+  onStartFolderEntriesJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
   onCreateKb: (name: string) => Promise<KnowledgeBase>;
   onCreateFolder: (input: { kbId: string; parentId?: string | null; name: string }) => Promise<Folder>;
   onRenameKb: (id: string, name: string) => Promise<void>;
@@ -44,12 +47,20 @@ interface Props {
   onDeleteFolder: (id: string) => Promise<void>;
   onMoveFolder: (id: string, opts: { parentId?: string | null; kbId?: string }) => Promise<void>;
   onReorderFolders: (ids: string[]) => Promise<void>;
+  aiJobs: AiKnowledgeBaseJob[];
+  aiTaskPanelOpen: boolean;
+  onAiTaskPanelOpenChange: (open: boolean) => void;
+  onOpenAiJobResult: (job: AiKnowledgeBaseJob) => void;
+  onCancelAiJob: (id: string) => Promise<void>;
+  onRetryAiJob: (id: string) => Promise<void>;
+  onClearAiJobHistory: () => Promise<void>;
 }
 
 export default function FreeMode(props: Props): ReactNode {
   const { entries, kbs, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
     onCreate, onUpdate, onDelete, onImported, onGeneratedEntry, onStartKnowledgeBaseJob, onStartFolderInitJob,
-    onCreateKb, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries } = props;
+    onStartFolderEntriesJob, onCreateKb, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
+    aiJobs, aiTaskPanelOpen, onAiTaskPanelOpenChange, onOpenAiJobResult, onCancelAiJob, onRetryAiJob, onClearAiJobHistory } = props;
 
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(() => localStorage.getItem('ik_free_entry') || null);
   const [panelMode, setPanelMode] = useState<'detail' | 'create' | 'edit'>('detail');
@@ -159,6 +170,20 @@ export default function FreeMode(props: Props): ReactNode {
       parentId: targetParentId,
       kbName: currentKb.name,
       targetLabel: targetLabel || '当前位置',
+    });
+  }
+  function startGenerateFolderEntries(parentId?: string | null): void {
+    if (!currentKb) {
+      toast('请先进入一个知识库，再按目录生成知识点', 'info');
+      return;
+    }
+    const targetParentId = parentId !== undefined ? parentId : (selectedEntry?.folderId ?? freeFolder ?? null);
+    void onStartFolderEntriesJob({
+      kbId: currentKb.id,
+      parentId: targetParentId,
+      domain: currentKb.name,
+    }).catch((err) => {
+      toast('按目录生成知识点失败：' + (err instanceof Error ? err.message : String(err)), 'error');
     });
   }
   function newFolder(kbId: string, parentId: string | null): void {
@@ -372,33 +397,107 @@ export default function FreeMode(props: Props): ReactNode {
       onConfirm={confirmCommand}
     />
   );
+  const runAiAction = (action: () => void): void => {
+    onAiTaskPanelOpenChange(false);
+    action();
+  };
+  const aiContextLabel = selectedEntry ? viewingPathLabel : operationPathLabel;
+  const aiActions: AiQuickAction[] = freeKb ? [
+    {
+      id: 'generate-entry',
+      title: '生成知识点',
+      description: selectedEntry ? '写入当前知识点所在文件夹' : '写入当前浏览位置',
+      icon: <FileText size={16} strokeWidth={2.15} />,
+      onClick: () => runAiAction(startGenerateEntry),
+      meta: '草稿确认',
+    },
+    {
+      id: 'init-folders',
+      title: '初始化目录',
+      description: selectedEntry ? '围绕当前文件夹补齐结构' : '在当前位置生成目录骨架',
+      icon: <FolderPlus size={16} strokeWidth={2.15} />,
+      onClick: () => runAiAction(() => startInitFolders(selectedEntry?.folderId ?? freeFolder ?? null)),
+      meta: '后台任务',
+    },
+    {
+      id: 'folder-entries',
+      title: '按目录补全知识点',
+      description: '无需输入题目，自动为当前目录树生成内容',
+      icon: <Sparkles size={16} strokeWidth={2.15} />,
+      onClick: () => runAiAction(() => startGenerateFolderEntries(selectedEntry?.folderId ?? freeFolder ?? null)),
+      meta: '后台任务',
+    },
+    ...(selectedEntry ? [
+      {
+        id: 'rewrite-entry',
+        title: '改写当前知识点',
+        description: '基于当前 doc 重写内容与面试考点',
+        icon: <Sparkles size={16} strokeWidth={2.15} />,
+        onClick: () => runAiAction(startRewriteEntry),
+        meta: '需确认',
+      },
+      {
+        id: 'illustrate-entry',
+        title: '生成图解',
+        description: '调用 qwen-image 追加中文技术图解',
+        icon: <ImagePlus size={16} strokeWidth={2.15} />,
+        onClick: () => runAiAction(startIllustrateEntry),
+        meta: '写回 doc',
+      },
+    ] : []),
+  ] : [
+    {
+      id: 'generate-kb',
+      title: 'AI 新建知识库',
+      description: '输入领域后后台生成目录和知识点',
+      icon: <LibraryBig size={16} strokeWidth={2.15} />,
+      onClick: () => runAiAction(startGenerateKnowledgeBase),
+      meta: '后台任务',
+    },
+  ];
+  const aiCenter = (
+    <AiTaskCenter
+      jobs={aiJobs}
+      open={aiTaskPanelOpen}
+      onOpenChange={onAiTaskPanelOpenChange}
+      onOpenResult={onOpenAiJobResult}
+      onCancel={onCancelAiJob}
+      onRetry={onRetryAiJob}
+      onClearHistory={onClearAiJobHistory}
+      actions={aiActions}
+      contextLabel={aiContextLabel}
+    />
+  );
 
   // ── 知识库列表页 ──
   if (!freeKb) {
     return (
-      <KbGallery
-        kbs={kbs}
-        entries={entries}
-        folders={folders}
-        entriesOfKb={entriesOfKb}
-        startGenerateKnowledgeBase={startGenerateKnowledgeBase}
-        newKb={newKb}
-        openKb={openKb}
-        renameKbAction={renameKbAction}
-        deleteKbAction={deleteKbAction}
-        importPreview={importLogic.importPreview}
-        importing={importLogic.importing}
-        onCloseImportPreview={() => { if (!importLogic.importing) importLogic.setImportPreview(null); }}
-        handleConfirmImport={importLogic.handleConfirmImport}
-        commandDialog={commandDialog}
-      />
+      <>
+        <KbGallery
+          kbs={kbs}
+          entries={entries}
+          folders={folders}
+          entriesOfKb={entriesOfKb}
+          newKb={newKb}
+          openKb={openKb}
+          renameKbAction={renameKbAction}
+          deleteKbAction={deleteKbAction}
+          importPreview={importLogic.importPreview}
+          importing={importLogic.importing}
+          onCloseImportPreview={() => { if (!importLogic.importing) importLogic.setImportPreview(null); }}
+          handleConfirmImport={importLogic.handleConfirmImport}
+          commandDialog={commandDialog}
+        />
+        {aiCenter}
+      </>
     );
   }
 
   const editorKey = `${panelMode}:${selectedEntry?.id ?? 'new'}:${freeKb}:${freeFolder ?? 'root'}`;
 
   return (
-    <div style={{ height: '100%', minHeight: 0, position: 'relative' }}>
+    <div className="ik-free-workspace">
+      {aiCenter}
       {/* 右下角悬浮操作：默认只露一个按钮，点开才展开动作 */}
       <FreeFab
         fabOpen={fabOpen}
@@ -409,10 +508,6 @@ export default function FreeMode(props: Props): ReactNode {
         canImportJson={canImportJson}
         startEditEntry={startEditEntry}
         startCreateEntryInFolder={startCreateEntryInFolder}
-        startGenerateEntry={startGenerateEntry}
-        startInitFolders={startInitFolders}
-        startRewriteEntry={startRewriteEntry}
-        startIllustrateEntry={startIllustrateEntry}
         deleteEntryAction={deleteEntryAction}
         startCreateEntry={startCreateEntry}
         newFolder={newFolder}
@@ -513,12 +608,6 @@ export default function FreeMode(props: Props): ReactNode {
                   contextLabel={viewingPathLabel}
                   actions={selectedEntry ? (
                     <>
-                      <button type="button" className="ik-segbtn" onClick={startRewriteEntry}>
-                        <Sparkles size={14} strokeWidth={2.15} />改写
-                      </button>
-                      <button type="button" className="ik-segbtn" onClick={startIllustrateEntry}>
-                        <ImagePlus size={14} strokeWidth={2.15} />图解
-                      </button>
                       <button type="button" className="ik-segbtn" onClick={restoreEntryVersionAction}>
                         <History size={14} strokeWidth={2.15} />版本
                       </button>

@@ -21,8 +21,10 @@ import {
   reorderFolders,
   startGenerateKnowledgeBaseJob,
   startInitKnowledgeBaseFoldersJob,
+  startGenerateKnowledgePointsFromFoldersJob,
   cancelAiJob,
   retryAiJob,
+  clearAiJobHistory,
   type AiKnowledgeBaseJob,
   type EntryInput as ApiEntryInput,
 } from './api';
@@ -96,6 +98,7 @@ export default function App() {
   const mergedJobIdsRef = useRef<Set<string>>(new Set());
   const notifiedJobIdsRef = useRef<Set<string>>(new Set());
   const autoOpenedJobIdsRef = useRef<Set<string>>(new Set());
+  const deletedKbIdsRef = useRef<Set<string>>(new Set());
   // 浏览器前进/后退触发的一次性标记:本轮 URL 同步用 replaceState(避免把回退后的地址又压成新历史)
   // 初始为 true,让首次挂载的 URL 规整也走 replace(不污染历史)
   const skipPushRef = useRef(true);
@@ -138,7 +141,7 @@ export default function App() {
   }, []);
 
   const applyCompletedJobs = useCallback((jobs: AiKnowledgeBaseJob[]): void => {
-    const materialized = jobs.filter((job) => job.result);
+    const materialized = jobs.filter((job) => job.result && !deletedKbIdsRef.current.has(job.result.kb.id));
     if (materialized.length) {
       setKbs((prev) => mergeById(prev, materialized.map((job) => job.result!.kb)));
       setFolders((prev) => mergeById(prev, materialized.flatMap((job) => job.result!.folders)));
@@ -167,7 +170,9 @@ export default function App() {
           notifiedJobIdsRef.current.add(job.id);
           toast(job.kind === 'folder-init'
             ? `AI 已初始化「${job.result!.kb.name}」目录`
-            : `AI 已新建「${job.result!.kb.name}」`, 'success');
+            : job.kind === 'folder-entries'
+              ? `AI 已按目录补全「${job.result!.kb.name}」知识点`
+              : `AI 已新建「${job.result!.kb.name}」`, 'success');
         }
       }
     }
@@ -175,7 +180,11 @@ export default function App() {
     for (const job of jobs) {
       if (job.status === 'failed' && !notifiedJobIdsRef.current.has(job.id)) {
         notifiedJobIdsRef.current.add(job.id);
-        toast(`${job.kind === 'folder-init' ? 'AI 初始化目录失败' : 'AI 建库失败'}：${job.error || job.domain}`, 'error');
+        toast(`${job.kind === 'folder-init'
+          ? 'AI 初始化目录失败'
+          : job.kind === 'folder-entries'
+            ? 'AI 按目录生成知识点失败'
+            : 'AI 建库失败'}：${job.error || job.domain}`, 'error');
       }
     }
   }, []);
@@ -357,6 +366,7 @@ export default function App() {
     setEntries(next);
   }, []);
   const handleImported = useCallback((nextEntries: Entry[], nextKbs: KnowledgeBase[], nextFolders: Folder[]) => {
+    for (const kb of nextKbs) deletedKbIdsRef.current.delete(kb.id);
     setEntries(nextEntries);
     setKbs(nextKbs);
     setFolders(nextFolders);
@@ -378,6 +388,13 @@ export default function App() {
     toast(`「${input.domain || job.kbName || job.domain}」目录已在后台初始化`, 'success');
   }, []);
 
+  const handleStartFolderEntriesJob = useCallback(async (input: { kbId: string; parentId?: string | null; domain?: string }): Promise<void> => {
+    const job = await startGenerateKnowledgePointsFromFoldersJob(input);
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    setAiTaskPanelOpen(true);
+    toast(`「${input.domain || job.kbName || job.domain}」已开始按目录生成知识点`, 'success');
+  }, []);
+
   const handleCancelAiJob = useCallback(async (id: string): Promise<void> => {
     const job = await cancelAiJob(id);
     setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
@@ -389,6 +406,12 @@ export default function App() {
     setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
     setAiTaskPanelOpen(true);
     toast(job.resumable ? `已继续生成「${job.domain}」` : `已重新提交「${job.domain}」`, 'success');
+  }, []);
+
+  const handleClearAiJobHistory = useCallback(async (): Promise<void> => {
+    const jobs = await clearAiJobHistory();
+    setAiJobs(jobs);
+    toast('已清除 AI 任务历史', 'success');
   }, []);
 
   const handleOpenAiJobResult = useCallback((job: AiKnowledgeBaseJob): void => {
@@ -414,11 +437,15 @@ export default function App() {
   }, []);
   const handleDeleteKb = useCallback(async (id: string): Promise<void> => {
     const { kbs: nk, folders: nf, entries: ne } = await deleteKb(id);
+    deletedKbIdsRef.current.add(id);
     setKbs(nk);
     setFolders(nf);
     setEntries(ne);
+    setAiJobs((prev) => prev.map((job) => job.result?.kb.id === id ? { ...job, result: undefined, resumable: false } : job));
     setOpenId(null);
+    setSearchKb((cur) => (cur === id ? null : cur));
     setFreeKb((cur) => (cur === id ? null : cur));
+    setFreeFolder(null);
   }, []);
 
   // 文件夹回调
@@ -550,6 +577,7 @@ export default function App() {
                 onGeneratedEntry={handleGeneratedEntry}
                 onStartKnowledgeBaseJob={handleStartKnowledgeBaseJob}
                 onStartFolderInitJob={handleStartFolderInitJob}
+                onStartFolderEntriesJob={handleStartFolderEntriesJob}
                 onCreateKb={handleCreateKb}
                 onCreateFolder={handleCreateFolder}
                 onRenameKb={handleRenameKb}
@@ -558,6 +586,13 @@ export default function App() {
                 onDeleteFolder={handleDeleteFolder}
                 onMoveFolder={handleMoveFolder}
                 onReorderFolders={handleReorderFolders}
+                aiJobs={aiJobs}
+                aiTaskPanelOpen={aiTaskPanelOpen}
+                onAiTaskPanelOpenChange={setAiTaskPanelOpen}
+                onOpenAiJobResult={handleOpenAiJobResult}
+                onCancelAiJob={handleCancelAiJob}
+                onRetryAiJob={handleRetryAiJob}
+                onClearAiJobHistory={handleClearAiJobHistory}
               />
             </div>
           )}
@@ -613,14 +648,17 @@ export default function App() {
           </div>
         </div>
       )}
-      <AiTaskCenter
-        jobs={aiJobs}
-        open={aiTaskPanelOpen}
-        onOpenChange={setAiTaskPanelOpen}
-        onOpenResult={handleOpenAiJobResult}
-        onCancel={handleCancelAiJob}
-        onRetry={handleRetryAiJob}
-      />
+      {mode === 'search' && (
+        <AiTaskCenter
+          jobs={aiJobs}
+          open={aiTaskPanelOpen}
+          onOpenChange={setAiTaskPanelOpen}
+          onOpenResult={handleOpenAiJobResult}
+          onCancel={handleCancelAiJob}
+          onRetry={handleRetryAiJob}
+          onClearHistory={handleClearAiJobHistory}
+        />
+      )}
       <Toaster />
     </div>
   );
