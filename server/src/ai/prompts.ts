@@ -59,6 +59,28 @@ export function buildGenerateKnowledgeBaseMessages(options: GenerateKnowledgeBas
   ];
 }
 
+export function buildPlanKnowledgeBaseMessages(options: GenerateKnowledgeBaseOptions): AiMessage[] {
+  const { domain } = options;
+  const questionCount = Math.min(60, Math.max(12, Math.floor(options.questionCount ?? 24)));
+  const prompt = [
+    `请为「${domain}」规划一套工程面试知识库骨架。`,
+    '这是一个多步 Agent 任务的第 1 步：只规划目录和知识点清单，不要生成长正文，不要输出完整答案。',
+    '输出必须分两段：',
+    '1）先输出“建库规划”，用 4-8 条短 bullet 说明目录划分、知识点分布和覆盖面。',
+    '2）然后输出一行 ---JSON---，后面只放一个 JSON 对象，不要 Markdown 代码围栏。',
+    'JSON 字段必须是：',
+    '{"kbName":"知识库名称","description":"一句话说明","containers":[{"sourceId":"folder_unique_id","kind":"folder","parentSourceId":null,"name":"一级目录","sort":1},{"sourceId":"folder_child_id","kind":"folder","parentSourceId":"folder_unique_id","name":"二级目录","sort":1}],"entries":[{"sourceId":"entry_unique_id","containerSourceId":"folder_child_id","title":"知识点标题","question":"面试题","summary":"一句话摘要","tags":["标签"]}]}',
+    `结构要求：entries 生成 ${questionCount} 条；containers 生成 5-10 个一级目录，核心一级目录至少 1 个二级目录，最多二级；核心一级目录至少挂 2 条 entries；所有 entries.containerSourceId 必须指向已有 container.sourceId。`,
+    '目录必须按知识体系拆分，不按“定义/原理/场景/追问”这种通用模板拆。目录名短、稳定、适合长期维护。',
+    'entry 只给规划字段：title/question/summary/tags，不要输出 answer/keyPoints/followUps/pitfalls/doc，后续步骤会逐条生成正文。',
+  ].join('\n');
+
+  return [
+    { role: 'system', content: '你是面试知识库架构 Agent。你的任务是先规划清晰、可扩展、可逐步写入的知识树骨架，不要一次性写长正文。' },
+    { role: 'user', content: prompt },
+  ];
+}
+
 export function buildGenerateFolderTreeMessages(options: GenerateFolderTreeOptions): AiMessage[] {
   const { domain, kbName, targetPath, existingFolders = [] } = options;
   const folderCount = Math.min(36, Math.max(8, Math.floor(options.folderCount ?? 18)));

@@ -11,6 +11,8 @@
     "test": "node --import tsx --test src/server.test.ts"
   },
   "dependencies": {
+    "@langchain/core": "^1.2.1",
+    "@langchain/openai": "^1.5.3",
     "express": "^4.21.0",
     "pinyin-pro": "^3.28.1"
   },

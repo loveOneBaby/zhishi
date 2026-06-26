@@ -7,6 +7,7 @@ export type CommandState =
   | { kind: 'create-folder'; kbId: string; parentId: string | null }
   | { kind: 'generate-entry'; kbId: string; folderId: string | null }
   | { kind: 'rewrite-entry'; entry: Entry }
+  | { kind: 'illustrate-entry'; entry: Entry }
   | { kind: 'confirm-generated-entry'; kbId: string; folderId: string | null; input: EntryInput }
   | { kind: 'confirm-rewrite-entry'; entry: Entry; input: EntryInput }
   | { kind: 'restore-entry-version'; entry: Entry }

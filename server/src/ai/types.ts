@@ -93,7 +93,9 @@ export type GenerateEntryEvent =
   | { type: 'context'; items: Array<{ title: string; summary: string }> }
   | { type: 'model-delta'; content: string }
   | { type: 'model-output'; content: string }
-  | { type: 'parsed'; title: string; tags: string[]; sections: number };
+  | { type: 'parsed'; title: string; tags: string[]; sections: number }
+  | { type: 'image-stage'; message: string }
+  | { type: 'image'; url: string; assetId: string; caption: string; prompt: string };
 
 export type GenerateKnowledgeBaseEvent =
   | { type: 'stage'; message: string }

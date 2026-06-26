@@ -295,6 +295,92 @@
   border-color: color-mix(in srgb, var(--danger) 36%, var(--bd));
   background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
+.ik-ai-growth {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--bd));
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 44%),
+    color-mix(in srgb, var(--panel) 82%, var(--bg));
+}
+.ik-ai-growth-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--bd) 64%, transparent);
+}
+.ik-ai-growth-head span {
+  color: var(--mut);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: .06em;
+}
+.ik-ai-growth-head b {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 760;
+}
+.ik-ai-growth-list {
+  display: grid;
+  gap: 6px;
+  max-height: 254px;
+  overflow: auto;
+  padding: 10px;
+}
+.ik-ai-growth-node {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--bd) 62%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 56%, transparent);
+  animation: ik-ai-node-in .18s ease;
+}
+.ik-ai-growth-node > span {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--accent);
+}
+.ik-ai-growth-node.is-entry > span {
+  background: color-mix(in srgb, var(--fg) 6%, var(--panel));
+  color: var(--mut);
+}
+.ik-ai-growth-node div {
+  min-width: 0;
+}
+.ik-ai-growth-node b,
+.ik-ai-growth-node small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ik-ai-growth-node b {
+  color: var(--fg);
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+.ik-ai-growth-node small {
+  margin-top: 2px;
+  color: var(--mut);
+  font-size: 11px;
+  line-height: 1.25;
+}
+.ik-ai-growth-empty {
+  padding: 12px;
+  color: var(--mut);
+  font-size: 12px;
+}
 .ik-ai-task-log,
 .ik-ai-task-output {
   margin-top: 14px;
@@ -340,4 +426,14 @@
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+}
+@keyframes ik-ai-node-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }

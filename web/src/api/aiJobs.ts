@@ -24,6 +24,7 @@ export interface AiKnowledgeBaseJob {
   modelOutput: string;
   parsed?: { kbName: string; folders: number; questions: number };
   result?: GenerateKnowledgeBaseResult;
+  resumable?: boolean;
   error?: string;
   createdAt: number;
   updatedAt: number;

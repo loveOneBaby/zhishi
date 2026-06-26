@@ -6,6 +6,7 @@ import {
   rewriteEntryInputStream,
   type GenerateEntryEvent,
 } from '../ai-generate.js';
+import { appendAiIllustration } from '../ai-image.js';
 import {
   listEntries,
   getEntry,
@@ -59,7 +60,14 @@ export function registerEntryRoutes(api: Router): void {
         folderPath: folderPathLabel(folderId),
         context,
       });
-      const entry = createEntry({ ...input, kbId, folderId });
+      const illustrated = await appendAiIllustration(input, {
+        title: input.title,
+        summary: input.summary,
+        tags: input.tags,
+        kbName: kb.name,
+        folderPath: folderPathLabel(folderId),
+      });
+      const entry = createEntry({ ...illustrated, kbId, folderId });
       res.status(201).json({ configured: true, entry });
     } catch (err) {
       if (err instanceof AiConfigError) {
@@ -99,8 +107,15 @@ export function registerEntryRoutes(api: Router): void {
         folderPath: folderPathLabel(folderId),
         context,
       }, (event: GenerateEntryEvent) => sendSse(res, event.type, event));
+      const illustrated = await appendAiIllustration(input, {
+        title: input.title,
+        summary: input.summary,
+        tags: input.tags,
+        kbName: kb.name,
+        folderPath: folderPathLabel(folderId),
+      }, undefined, (event) => sendSse(res, event.type, event));
       sendSse(res, 'stage', { message: '写入当前知识库' });
-      const entry = createEntry({ ...input, kbId, folderId });
+      const entry = createEntry({ ...illustrated, kbId, folderId });
       sendSse(res, 'saved', { entry });
       sendSse(res, 'done', { entry });
       res.end();
@@ -143,7 +158,14 @@ export function registerEntryRoutes(api: Router): void {
         folderPath: folderPathLabel(folderId),
         context,
       }, (event: GenerateEntryEvent) => sendSse(res, event.type, event));
-      const draft: EntryInput = { ...input, kbId, folderId };
+      const illustrated = await appendAiIllustration(input, {
+        title: input.title,
+        summary: input.summary,
+        tags: input.tags,
+        kbName: kb.name,
+        folderPath: folderPathLabel(folderId),
+      }, undefined, (event) => sendSse(res, event.type, event));
+      const draft: EntryInput = { ...illustrated, kbId, folderId };
       sendSse(res, 'draft', { input: draft });
       sendSse(res, 'done', { input: draft });
       res.end();
@@ -171,10 +193,17 @@ export function registerEntryRoutes(api: Router): void {
 
     try {
       const input = await rewriteEntryInputStream({ entry: current }, (event: GenerateEntryEvent) => sendSse(res, event.type, event));
+      const illustrated = await appendAiIllustration(input, {
+        title: input.title,
+        summary: input.summary,
+        tags: input.tags,
+        kbName: current.cat,
+        folderPath: folderPathLabel(current.folderId),
+      }, undefined, (event) => sendSse(res, event.type, event));
       sendSse(res, 'stage', { message: '写回当前知识点' });
       createEntryVersion(current, 'ai-rewrite');
       const entry = updateEntry(current.id, {
-        ...input,
+        ...illustrated,
         kbId: current.kbId,
         folderId: current.folderId,
       });
@@ -206,7 +235,14 @@ export function registerEntryRoutes(api: Router): void {
 
     try {
       const input = await rewriteEntryInputStream({ entry: current }, (event: GenerateEntryEvent) => sendSse(res, event.type, event));
-      const draft: EntryInput = { ...input, kbId: current.kbId, folderId: current.folderId };
+      const illustrated = await appendAiIllustration(input, {
+        title: input.title,
+        summary: input.summary,
+        tags: input.tags,
+        kbName: current.cat,
+        folderPath: folderPathLabel(current.folderId),
+      }, undefined, (event) => sendSse(res, event.type, event));
+      const draft: EntryInput = { ...illustrated, kbId: current.kbId, folderId: current.folderId };
       sendSse(res, 'draft', { input: draft });
       sendSse(res, 'done', { input: draft });
       res.end();
@@ -233,6 +269,50 @@ export function registerEntryRoutes(api: Router): void {
     });
     if (!entry) return res.status(404).json({ error: '知识点不存在' });
     res.json({ entry });
+  });
+
+  api.post('/entries/:id/illustration/stream', async (req, res) => {
+    const current = getEntry(req.params.id);
+    if (!current) return res.status(404).json({ error: '知识点不存在' });
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    sendSse(res, 'stage', { message: '准备生成图解' });
+
+    try {
+      const input: EntryInput = {
+        title: current.title,
+        tags: current.tags,
+        summary: current.summary,
+        doc: current.doc,
+        kbId: current.kbId,
+        folderId: current.folderId,
+      };
+      const illustrated = await appendAiIllustration(input, {
+        title: current.title,
+        summary: current.summary,
+        tags: current.tags,
+        kbName: current.cat,
+        folderPath: folderPathLabel(current.folderId),
+      }, undefined, (event) => sendSse(res, event.type, event), true);
+      sendSse(res, 'stage', { message: '写回当前知识点' });
+      createEntryVersion(current, 'ai-illustration');
+      const entry = updateEntry(current.id, illustrated);
+      if (!entry) throw new Error('知识点不存在');
+      sendSse(res, 'saved', { entry });
+      sendSse(res, 'done', { entry });
+      res.end();
+    } catch (err) {
+      sendSse(res, 'error', {
+        configured: !(err instanceof AiConfigError),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.end();
+    }
   });
 
   api.get('/entries/:id/versions', (req, res) => {

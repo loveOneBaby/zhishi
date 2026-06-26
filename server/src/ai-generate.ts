@@ -15,6 +15,7 @@ import {
   buildGenerateFolderTreeMessages,
   buildGenerateKnowledgeBaseMessages,
   buildGenerateMessages,
+  buildPlanKnowledgeBaseMessages,
   buildRewriteMessages,
 } from './ai/prompts.js';
 import {
@@ -116,6 +117,32 @@ export async function generateKnowledgeBaseDraftStream(
   return draft;
 }
 
+export async function generateKnowledgeBasePlanStream(
+  options: GenerateKnowledgeBaseOptions,
+  onEvent: (event: GenerateKnowledgeBaseEvent) => void,
+): Promise<GeneratedKbDraft> {
+  onEvent({ type: 'stage', message: 'Agent 第 1 步：规划目录树和知识点清单' });
+  const raw = await chatCompletionStream(buildPlanKnowledgeBaseMessages(options), { signal: options.signal }, (content) => {
+    onEvent({ type: 'model-delta', content });
+  });
+  onEvent({ type: 'model-output', content: raw });
+  onEvent({ type: 'stage', message: '规划输出完成，开始解析目录与挂载关系' });
+  const draft = await parseWithRepair(
+    raw,
+    KB_JSON_SCHEMA,
+    (value) => kbDraftFromModelOutput(value, options.domain),
+    () => onEvent({ type: 'stage', message: '规划 JSON 解析失败，正在自动修复' }),
+    options.signal,
+  );
+  onEvent({
+    type: 'parsed-kb',
+    kbName: draft.kbName,
+    folders: draft.folders.length,
+    questions: draft.questions.length,
+  });
+  return draft;
+}
+
 export async function generateFolderTreeDraftStream(
   options: GenerateFolderTreeOptions,
   onEvent: (event: GenerateFolderTreeEvent) => void,
@@ -151,7 +178,7 @@ export async function generateEntryInputStream(
     type: 'context',
     items: context.slice(0, 5).map((entry) => ({ title: entry.title, summary: entry.summary })),
   });
-  onEvent({ type: 'stage', message: '开始调用 Qwen 生成内容' });
+  onEvent({ type: 'stage', message: '通过 LangChain 调用 Qwen 生成内容' });
   const raw = await chatCompletionStream(buildGenerateMessages(options), { signal: options.signal }, (content) => {
     onEvent({ type: 'model-delta', content });
   });
@@ -179,7 +206,7 @@ export async function rewriteEntryInputStream(
 ): Promise<EntryInput> {
   const { entry } = options;
   onEvent({ type: 'stage', message: '读取当前 doc 内容完成' });
-  onEvent({ type: 'stage', message: '开始调用 Qwen 改写知识点' });
+  onEvent({ type: 'stage', message: '通过 LangChain 调用 Qwen 改写知识点' });
   const raw = await chatCompletionStream(buildRewriteMessages(options), { signal: options.signal }, (content) => {
     onEvent({ type: 'model-delta', content });
   });

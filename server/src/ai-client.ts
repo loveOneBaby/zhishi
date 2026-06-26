@@ -1,3 +1,9 @@
+import { ChatOpenAI } from '@langchain/openai';
+import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { StringOutputParser } from '@langchain/core/output_parsers';
+import { RunnableSequence } from '@langchain/core/runnables';
+
 export type AiRole = 'system' | 'user' | 'assistant';
 
 export interface AiMessage {
@@ -39,6 +45,34 @@ function numberEnv(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function toLangChainMessage(message: AiMessage): BaseMessage {
+  if (message.role === 'system') return new SystemMessage(message.content);
+  if (message.role === 'assistant') return new AIMessage(message.content);
+  return new HumanMessage(message.content);
+}
+
+function createLangChainModel(options: AiRequestOptions = {}): ChatOpenAI {
+  const config = getAiConfig();
+  if (!config.apiKey) throw new AiConfigError();
+  return new ChatOpenAI({
+    apiKey: config.apiKey,
+    model: options.model ?? config.model,
+    temperature: options.temperature ?? config.temperature,
+    configuration: {
+      baseURL: config.baseUrl,
+    },
+  });
+}
+
+function createTextChain(messages: AiMessage[], options: AiRequestOptions = {}) {
+  const prompt = ChatPromptTemplate.fromMessages(messages.map(toLangChainMessage));
+  return RunnableSequence.from([
+    prompt,
+    createLangChainModel(options),
+    new StringOutputParser(),
+  ]);
+}
+
 export function getAiConfig(): AiConfig {
   const apiKey = clean(process.env.AI_API_KEY)
     || clean(process.env.BAILIAN_API_KEY)
@@ -63,30 +97,8 @@ export async function chatCompletion(
   messages: AiMessage[],
   options: AiRequestOptions = {},
 ): Promise<string> {
-  const config = getAiConfig();
-  if (!config.apiKey) throw new AiConfigError();
-
-  const resp = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    signal: options.signal,
-    body: JSON.stringify({
-      model: options.model ?? config.model,
-      messages,
-      temperature: options.temperature ?? config.temperature,
-    }),
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`AI 接口返回错误（${resp.status}）：${text.slice(0, 500)}`);
-  }
-  const data = await resp.json() as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const content = data.choices?.[0]?.message?.content?.trim();
+  const chain = createTextChain(messages, options);
+  const content = (await chain.invoke({}, { signal: options.signal })).trim();
   if (!content) throw new Error('AI 未返回内容');
   return content;
 }
@@ -96,69 +108,15 @@ export async function chatCompletionStream(
   options: AiRequestOptions = {},
   onDelta?: (delta: string) => void,
 ): Promise<string> {
-  const config = getAiConfig();
-  if (!config.apiKey) throw new AiConfigError();
-
-  const resp = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    signal: options.signal,
-    body: JSON.stringify({
-      model: options.model ?? config.model,
-      messages,
-      temperature: options.temperature ?? config.temperature,
-      stream: true,
-    }),
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`AI 接口返回错误（${resp.status}）：${text.slice(0, 500)}`);
-  }
-  if (!resp.body) throw new Error('AI 接口未返回流式响应');
-
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   let full = '';
-
-  const consumeLine = (line: string): void => {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('data:')) return;
-    const payload = trimmed.slice(5).trim();
-    if (!payload || payload === '[DONE]') return;
-    let parsed: {
-      choices?: Array<{
-        delta?: { content?: string; reasoning_content?: string };
-        message?: { content?: string };
-      }>;
-    };
-    try {
-      parsed = JSON.parse(payload);
-    } catch {
-      return;
-    }
-    const choice = parsed.choices?.[0];
-    const delta = choice?.delta?.content ?? choice?.message?.content ?? '';
-    // reasoning_content 是模型隐藏推理类字段，不暴露到 UI。
-    if (!delta) return;
+  const chain = createTextChain(messages, options);
+  const stream = await chain.stream({}, { signal: options.signal });
+  for await (const chunk of stream) {
+    const delta = String(chunk ?? '');
+    if (!delta) continue;
     full += delta;
     onDelta?.(delta);
-  };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() ?? '';
-    for (const line of lines) consumeLine(line);
   }
-  buffer += decoder.decode();
-  for (const line of buffer.split(/\r?\n/)) consumeLine(line);
-
   const content = full.trim();
   if (!content) throw new Error('AI 未返回内容');
   return content;

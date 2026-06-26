@@ -1,5 +1,5 @@
 import type { ReactNode, MutableRefObject } from 'react';
-import { RotateCcw, Sparkles } from 'lucide-react';
+import { ImagePlus, RotateCcw, Sparkles } from 'lucide-react';
 import type { Block, Entry, EntryInput, Folder, KnowledgeBase } from '../../types';
 import { folderPathName, folderSubtreeIds } from '../../tree';
 import CommandDialog from '../CommandDialog';
@@ -193,6 +193,31 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
         livePlanLabel="公开改写思路"
         liveOutput={aiLiveOutput}
         liveOutputLabel="结构化 JSON"
+        closeOnConfirm={false}
+        onOpenChange={(open) => {
+          if (!open) {
+            onSetCommand(null);
+            onResetAiLive();
+          }
+        }}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+  if (command.kind === 'illustrate-entry') {
+    return (
+      <CommandDialog
+        open
+        title="AI 生成图解"
+        description={`将基于「${command.entry.title}」当前 doc 内容生成一张中文技术图解，并追加到正文末尾。`}
+        helper="使用 qwen-image-2.0-pro，图片会下载到本地资源库，刷新后仍可查看。"
+        confirmText="生成图解"
+        icon={<ImagePlus size={18} strokeWidth={2.15} />}
+        liveLogs={aiLiveLogs}
+        livePlan={aiLivePlan}
+        livePlanLabel="图解提示词"
+        liveOutput={aiLiveOutput}
+        liveOutputLabel="图片资源"
         closeOnConfirm={false}
         onOpenChange={(open) => {
           if (!open) {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { History, Pencil, Sparkles, Trash2 } from 'lucide-react';
+import { History, ImagePlus, Pencil, Sparkles, Trash2 } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import DetailSidePanel from './DetailSidePanel';
@@ -235,6 +235,15 @@ export default function FreeMode(props: Props): ReactNode {
     setCommand({ kind: 'rewrite-entry', entry: selectedEntry });
   }
 
+  function startIllustrateEntry(): void {
+    if (!selectedEntry) {
+      toast('请先选择一个知识点', 'info');
+      return;
+    }
+    aiLive.resetAiLive();
+    setCommand({ kind: 'illustrate-entry', entry: selectedEntry });
+  }
+
   function restoreEntryVersionAction(): void {
     if (!selectedEntry) {
       toast('请先选择一个知识点', 'info');
@@ -403,6 +412,7 @@ export default function FreeMode(props: Props): ReactNode {
         startGenerateEntry={startGenerateEntry}
         startInitFolders={startInitFolders}
         startRewriteEntry={startRewriteEntry}
+        startIllustrateEntry={startIllustrateEntry}
         deleteEntryAction={deleteEntryAction}
         startCreateEntry={startCreateEntry}
         newFolder={newFolder}
@@ -505,6 +515,9 @@ export default function FreeMode(props: Props): ReactNode {
                     <>
                       <button type="button" className="ik-segbtn" onClick={startRewriteEntry}>
                         <Sparkles size={14} strokeWidth={2.15} />改写
+                      </button>
+                      <button type="button" className="ik-segbtn" onClick={startIllustrateEntry}>
+                        <ImagePlus size={14} strokeWidth={2.15} />图解
                       </button>
                       <button type="button" className="ik-segbtn" onClick={restoreEntryVersionAction}>
                         <History size={14} strokeWidth={2.15} />版本

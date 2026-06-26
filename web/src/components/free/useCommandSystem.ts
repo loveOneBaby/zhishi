@@ -5,6 +5,7 @@ import {
   commitRewriteEntryDraft,
   fetchEntryVersions,
   generateEntryDraftWithAIStream,
+  generateEntryIllustrationWithAIStream,
   restoreEntryVersion,
   rewriteEntryDraftWithAIStream,
 } from '../../api';
@@ -65,6 +66,8 @@ export function useCommandSystem(deps: CommandSystemDeps) {
         return '生成失败';
       case 'rewrite-entry':
         return '改写失败';
+      case 'illustrate-entry':
+        return '图解生成失败';
       case 'confirm-generated-entry':
         return '写入失败';
       case 'confirm-rewrite-entry':
@@ -128,6 +131,7 @@ export function useCommandSystem(deps: CommandSystemDeps) {
               ...current,
               `解析完成：${payload.title || '未命名'} · ${payload.tags.length} 个标签 · ${payload.sections} 个小节`,
             ]),
+            onImage: (payload) => setAiLiveLogs((current) => [...current, `图解已生成：${payload.caption || '知识点图解'}`]),
           });
           setAiLiveLogs((current) => [...current, `草稿已生成：${input.title}`]);
           setCommand({ kind: 'confirm-generated-entry', kbId: command.kbId, folderId: command.folderId, input });
@@ -161,10 +165,33 @@ export function useCommandSystem(deps: CommandSystemDeps) {
               ...current,
               `解析完成：${payload.title || '未命名'} · ${payload.tags.length} 个标签 · ${payload.sections} 个小节`,
             ]),
+            onImage: (payload) => setAiLiveLogs((current) => [...current, `图解已生成：${payload.caption || '知识点图解'}`]),
           });
           setAiLiveLogs((current) => [...current, `改写草稿已生成：${input.title}`]);
           setCommand({ kind: 'confirm-rewrite-entry', entry: command.entry, input });
           toast('AI 改写草稿已生成，请确认保存', 'success');
+          return;
+        }
+        case 'illustrate-entry': {
+          setAiLiveLogs(['提交当前知识点到 Qwen Image']);
+          setAiLivePlan('');
+          setAiLiveOutput('');
+          aiRawOutputRef.current = '';
+          const entry = await generateEntryIllustrationWithAIStream(command.entry.id, {
+            onStage: (message) => setAiLiveLogs((current) => [...current, message]),
+            onImage: (payload) => {
+              setAiLiveLogs((current) => [...current, `图解已生成：${payload.caption || '知识点图解'}`]);
+              setAiLivePlan(payload.prompt);
+              setAiLiveOutput(JSON.stringify({ assetId: payload.assetId, url: payload.url, caption: payload.caption }, null, 2));
+            },
+            onSaved: (next) => setAiLiveLogs((current) => [...current, `已写回：${next.title}`]),
+          });
+          setPanelMode('detail');
+          dirtyRef.current = false;
+          onGeneratedEntry(entry);
+          setSelectedEntryId(entry.id);
+          setFreeFolder(entry.folderId ?? null);
+          toast('AI 图解已生成', 'success');
           return;
         }
         case 'confirm-rewrite-entry': {

@@ -38,6 +38,7 @@ export interface GenerateEntryStreamHandlers {
   onDelta?: (content: string) => void;
   onOutput?: (content: string) => void;
   onParsed?: (payload: { title: string; tags: string[]; sections: number }) => void;
+  onImage?: (payload: { url: string; assetId: string; caption: string; prompt: string }) => void;
   onSaved?: (entry: Entry) => void;
 }
 
@@ -67,6 +68,15 @@ function dispatchEntryStream(handlers: GenerateEntryStreamHandlers, errorMessage
     }
     if (event === 'model-delta' && typeof data.content === 'string') handlers.onDelta?.(data.content);
     if (event === 'model-output' && typeof data.content === 'string') handlers.onOutput?.(data.content);
+    if (event === 'image-stage' && typeof data.message === 'string') handlers.onStage?.(data.message);
+    if (event === 'image') {
+      handlers.onImage?.({
+        url: String(data.url ?? ''),
+        assetId: String(data.assetId ?? ''),
+        caption: String(data.caption ?? ''),
+        prompt: String(data.prompt ?? ''),
+      });
+    }
     if (event === 'parsed') {
       handlers.onParsed?.({
         title: String(data.title ?? ''),
@@ -91,6 +101,15 @@ function dispatchEntryDraftStream(handlers: GenerateEntryStreamHandlers, errorMe
     }
     if (event === 'model-delta' && typeof data.content === 'string') handlers.onDelta?.(data.content);
     if (event === 'model-output' && typeof data.content === 'string') handlers.onOutput?.(data.content);
+    if (event === 'image-stage' && typeof data.message === 'string') handlers.onStage?.(data.message);
+    if (event === 'image') {
+      handlers.onImage?.({
+        url: String(data.url ?? ''),
+        assetId: String(data.assetId ?? ''),
+        caption: String(data.caption ?? ''),
+        prompt: String(data.prompt ?? ''),
+      });
+    }
     if (event === 'parsed') {
       handlers.onParsed?.({
         title: String(data.title ?? ''),
@@ -119,6 +138,10 @@ export async function generateEntryDraftWithAIStream(input: GenerateEntryInput, 
 
 export async function rewriteEntryDraftWithAIStream(entryId: string, handlers: GenerateEntryStreamHandlers = {}): Promise<EntryInput> {
   return runSseStream<EntryInput>(`/entries/${encodeURIComponent(entryId)}/rewrite/draft/stream`, undefined, 'AI 改写未返回草稿', dispatchEntryDraftStream(handlers, 'AI 改写失败'));
+}
+
+export async function generateEntryIllustrationWithAIStream(entryId: string, handlers: GenerateEntryStreamHandlers = {}): Promise<Entry> {
+  return runSseStream<Entry>(`/entries/${encodeURIComponent(entryId)}/illustration/stream`, undefined, 'AI 图解未返回知识点', dispatchEntryStream(handlers, 'AI 图解失败'));
 }
 
 export async function commitRewriteEntryDraft(entryId: string, input: EntryInput): Promise<Entry> {

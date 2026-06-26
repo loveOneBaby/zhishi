@@ -15,6 +15,7 @@ export interface StoredAiJob {
   logs: string[];
   modelOutput: string;
   parsed?: { kbName: string; folders: number; questions: number };
+  plan?: unknown;
   result?: unknown;
   error?: string;
   abortRequested?: boolean;
@@ -36,6 +37,7 @@ db.exec(`
     logs            TEXT NOT NULL DEFAULT '[]',
     modelOutput     TEXT NOT NULL DEFAULT '',
     parsed          TEXT,
+    plan            TEXT,
     result          TEXT,
     error           TEXT,
     abortRequested  INTEGER NOT NULL DEFAULT 0,
@@ -44,6 +46,11 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_ai_jobs_updated ON ai_jobs(updatedAt DESC);
 `);
+
+const aiJobColumns = db.prepare('PRAGMA table_info(ai_jobs)').all() as { name: string }[];
+if (!aiJobColumns.some((c) => c.name === 'plan')) {
+  db.exec('ALTER TABLE ai_jobs ADD COLUMN plan TEXT');
+}
 
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
@@ -68,6 +75,7 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
     logs: parseJson<string[]>(String(row.logs ?? '[]'), []),
     modelOutput: String(row.modelOutput ?? ''),
     parsed: parseJson<StoredAiJob['parsed'] | undefined>(row.parsed as string | null, undefined),
+    plan: parseJson<unknown | undefined>(row.plan as string | null, undefined),
     result: parseJson<unknown | undefined>(row.result as string | null, undefined),
     error: typeof row.error === 'string' && row.error ? row.error : undefined,
     abortRequested: Number(row.abortRequested ?? 0) === 1,
@@ -80,10 +88,10 @@ export function saveAiJob(job: StoredAiJob): void {
   db.prepare(`
     INSERT INTO ai_jobs (
       id, kind, domain, questionCount, kbId, kbName, parentId, targetPath, status,
-      logs, modelOutput, parsed, result, error, abortRequested, createdAt, updatedAt
+      logs, modelOutput, parsed, plan, result, error, abortRequested, createdAt, updatedAt
     ) VALUES (
       :id, :kind, :domain, :questionCount, :kbId, :kbName, :parentId, :targetPath, :status,
-      :logs, :modelOutput, :parsed, :result, :error, :abortRequested, :createdAt, :updatedAt
+      :logs, :modelOutput, :parsed, :plan, :result, :error, :abortRequested, :createdAt, :updatedAt
     )
     ON CONFLICT(id) DO UPDATE SET
       kind=excluded.kind,
@@ -97,6 +105,7 @@ export function saveAiJob(job: StoredAiJob): void {
       logs=excluded.logs,
       modelOutput=excluded.modelOutput,
       parsed=excluded.parsed,
+      plan=excluded.plan,
       result=excluded.result,
       error=excluded.error,
       abortRequested=excluded.abortRequested,
@@ -105,6 +114,7 @@ export function saveAiJob(job: StoredAiJob): void {
     ...job,
     logs: JSON.stringify(job.logs ?? []),
     parsed: job.parsed ? JSON.stringify(job.parsed) : null,
+    plan: job.plan ? JSON.stringify(job.plan) : null,
     result: job.result ? JSON.stringify(job.result) : null,
     error: job.error ?? null,
     kbId: job.kbId ?? null,
@@ -131,14 +141,13 @@ export function markInterruptedAiJobs(): StoredAiJob[] {
   const now = Date.now();
   const stmt = db.prepare(`
     UPDATE ai_jobs
-    SET status='failed', error=:error, logs=:logs, updatedAt=:updatedAt
+    SET status='queued', error=NULL, abortRequested=0, logs=:logs, updatedAt=:updatedAt
     WHERE id=:id
   `);
   for (const job of jobs) {
-    const logs = [...job.logs, '服务重启，任务已中断，可重试'];
+    const logs = [...job.logs, '服务重启，任务将从已有进度继续'];
     stmt.run({
       id: job.id,
-      error: '服务重启，任务已中断',
       logs: JSON.stringify(logs.slice(-60)),
       updatedAt: now,
     });

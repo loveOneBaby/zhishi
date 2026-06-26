@@ -1,4 +1,4 @@
-import { AlertCircle, Ban, CheckCircle2, Clock3, ExternalLink, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
+import { AlertCircle, Ban, CheckCircle2, Clock3, ExternalLink, FileText, FolderTree, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AiKnowledgeBaseJob } from '../api';
@@ -64,6 +64,50 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
+type JobResult = NonNullable<AiKnowledgeBaseJob['result']>;
+
+function folderPath(result: JobResult, folderId: string | null): string {
+  if (!folderId) return result.kb.name;
+  const byId = new Map(result.folders.map((folder) => [folder.id, folder]));
+  const names: string[] = [];
+  let cursor = byId.get(folderId);
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    names.unshift(cursor.name);
+    cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+  }
+  return [result.kb.name, ...names].join(' / ');
+}
+
+function growthItems(job: AiKnowledgeBaseJob): Array<{
+  id: string;
+  kind: 'folder' | 'entry';
+  title: string;
+  subtitle: string;
+  createdAt: number;
+}> {
+  const result = job.result;
+  if (!result) return [];
+  const folders = result.folders.map((folder) => ({
+    id: folder.id,
+    kind: 'folder' as const,
+    title: folder.name,
+    subtitle: folderPath(result, folder.parentId),
+    createdAt: folder.createdAt ?? 0,
+  }));
+  const entries = result.entries.map((entry) => ({
+    id: entry.id,
+    kind: 'entry' as const,
+    title: entry.title,
+    subtitle: folderPath(result, entry.folderId),
+    createdAt: entry.createdAt ?? 0,
+  }));
+  return [...folders, ...entries]
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .slice(-14);
+}
+
 export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult, onCancel, onRetry }: Props): ReactNode {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const sortedJobs = useMemo(() => [...jobs].sort((a, b) => b.createdAt - a.createdAt), [jobs]);
@@ -72,6 +116,8 @@ export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult, o
   const selectedJob = sortedJobs.find((job) => job.id === selectedId) ?? sortedJobs[0] ?? null;
   const output = splitModelOutput(selectedJob?.modelOutput ?? '');
   const selectedKindLabel = selectedJob ? jobKindLabel(selectedJob) : 'AI 任务';
+  const liveItems = selectedJob ? growthItems(selectedJob) : [];
+  const retryText = selectedJob?.resumable ? '继续生成' : '重新生成';
 
   useEffect(() => {
     if (!sortedJobs.length) {
@@ -169,10 +215,31 @@ export default function AiTaskCenter({ jobs, open, onOpenChange, onOpenResult, o
                   )}
                   {(selectedJob.status === 'failed' || selectedJob.status === 'cancelled') && (
                     <button type="button" className="ik-ai-task-secondary" onClick={() => { void onRetry(selectedJob.id); }}>
-                      <RefreshCw size={14} strokeWidth={2.2} />重新生成
+                      <RefreshCw size={14} strokeWidth={2.2} />{retryText}
                     </button>
                   )}
                 </div>
+
+                {selectedJob.result && (
+                  <div className="ik-ai-growth">
+                    <div className="ik-ai-growth-head">
+                      <span>实时写入</span>
+                      <b>{selectedJob.result.folders.length} 目录 · {selectedJob.result.entries.length} 知识点</b>
+                    </div>
+                    <div className="ik-ai-growth-list">
+                      {liveItems.map((item) => (
+                        <div key={`${item.kind}-${item.id}`} className={`ik-ai-growth-node is-${item.kind}`}>
+                          <span>{item.kind === 'folder' ? <FolderTree size={15} strokeWidth={2.15} /> : <FileText size={15} strokeWidth={2.15} />}</span>
+                          <div>
+                            <b>{item.title}</b>
+                            <small>{item.subtitle}</small>
+                          </div>
+                        </div>
+                      ))}
+                      {!liveItems.length && <div className="ik-ai-growth-empty">等待 LangChain 写入第一个节点...</div>}
+                    </div>
+                  </div>
+                )}
 
                 <div className="ik-ai-task-log">
                   <div>进度</div>

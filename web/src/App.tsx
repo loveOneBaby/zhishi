@@ -95,6 +95,7 @@ export default function App() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const mergedJobIdsRef = useRef<Set<string>>(new Set());
   const notifiedJobIdsRef = useRef<Set<string>>(new Set());
+  const autoOpenedJobIdsRef = useRef<Set<string>>(new Set());
   // 浏览器前进/后退触发的一次性标记:本轮 URL 同步用 replaceState(避免把回退后的地址又压成新历史)
   // 初始为 true,让首次挂载的 URL 规整也走 replace(不污染历史)
   const skipPushRef = useRef(true);
@@ -137,14 +138,29 @@ export default function App() {
   }, []);
 
   const applyCompletedJobs = useCallback((jobs: AiKnowledgeBaseJob[]): void => {
+    const materialized = jobs.filter((job) => job.result);
+    if (materialized.length) {
+      setKbs((prev) => mergeById(prev, materialized.map((job) => job.result!.kb)));
+      setFolders((prev) => mergeById(prev, materialized.flatMap((job) => job.result!.folders)));
+      setEntries((prev) => mergeById(prev, materialized.flatMap((job) => job.result!.entries)));
+    }
+
+    const streamingKb = materialized.find((job) =>
+      job.kind === 'kb-generate'
+      && (job.status === 'queued' || job.status === 'running')
+      && !autoOpenedJobIdsRef.current.has(job.id)
+    );
+    if (streamingKb?.result) {
+      autoOpenedJobIdsRef.current.add(streamingKb.id);
+      setMode('free');
+      setFreeKb(streamingKb.result.kb.id);
+      setFreeFolder(null);
+      setAiTaskPanelOpen(true);
+      toast(`AI 已创建「${streamingKb.result.kb.name}」目录骨架，知识点会逐条写入`, 'success');
+    }
+
     const completed = jobs.filter((job) => job.status === 'succeeded' && job.result && !mergedJobIdsRef.current.has(job.id));
     if (completed.length) {
-      const nextKbs = completed.map((job) => job.result!.kb);
-      const nextFolders = completed.flatMap((job) => job.result!.folders);
-      const nextEntries = completed.flatMap((job) => job.result!.entries);
-      setKbs((prev) => mergeById(prev, nextKbs));
-      setFolders((prev) => mergeById(prev, nextFolders));
-      setEntries((prev) => mergeById(prev, nextEntries));
       for (const job of completed) {
         mergedJobIdsRef.current.add(job.id);
         if (!notifiedJobIdsRef.current.has(job.id)) {
@@ -372,7 +388,7 @@ export default function App() {
     const job = await retryAiJob(id);
     setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
     setAiTaskPanelOpen(true);
-    toast(`已重新提交「${job.domain}」`, 'success');
+    toast(job.resumable ? `已继续生成「${job.domain}」` : `已重新提交「${job.domain}」`, 'success');
   }, []);
 
   const handleOpenAiJobResult = useCallback((job: AiKnowledgeBaseJob): void => {

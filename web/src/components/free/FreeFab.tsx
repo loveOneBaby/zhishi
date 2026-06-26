@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Download, FileText, FolderPlus, Pencil, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { Download, FileText, FolderPlus, ImagePlus, Pencil, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import type { Entry } from '../../types';
 import { toast } from '../../toast';
 
@@ -15,6 +15,7 @@ interface FreeFabProps {
   startGenerateEntry: () => void;
   startInitFolders: (parentId?: string | null) => void;
   startRewriteEntry: () => void;
+  startIllustrateEntry: () => void;
   deleteEntryAction: (entry: Entry) => void;
   startCreateEntry: () => void;
   newFolder: (kbId: string, parentId: string | null) => void;
@@ -25,7 +26,7 @@ interface FreeFabProps {
 export function FreeFab(props: FreeFabProps): ReactNode {
   const { fabOpen, setFabOpen, selectedEntry, freeKb, freeFolder, canImportJson,
     startEditEntry, startCreateEntryInFolder, startGenerateEntry, startInitFolders,
-    startRewriteEntry, deleteEntryAction, startCreateEntry, newFolder, handleImport, handleExport } = props;
+    startRewriteEntry, startIllustrateEntry, deleteEntryAction, startCreateEntry, newFolder, handleImport, handleExport } = props;
 
   return (
     <>
@@ -50,6 +51,9 @@ export function FreeFab(props: FreeFabProps): ReactNode {
                 </button>
                 <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startRewriteEntry(); }}>
                   <span className="ik-fab-ico"><Sparkles size={16} strokeWidth={2.15} /></span>AI 改写当前知识点
+                </button>
+                <button className="ik-fab-item ik-fab-item-primary" onClick={() => { setFabOpen(false); startIllustrateEntry(); }}>
+                  <span className="ik-fab-ico"><ImagePlus size={16} strokeWidth={2.15} /></span>AI 生成图解
                 </button>
                 <div className="ik-fab-sep" />
                 <button className="ik-fab-item ik-fab-item-danger" onClick={() => { setFabOpen(false); deleteEntryAction(selectedEntry); }}>
