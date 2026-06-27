@@ -1,9 +1,26 @@
 import { randomUUID } from 'node:crypto';
-import { clearStoredAiJobHistory, getKb, listEntries, listFolders, listStoredAiJobs, markInterruptedAiJobs, pruneStoredAiJobs, saveAiJob } from '../db.js';
+import {
+  clearStoredAiJobHistory,
+  createEntry,
+  createEntryVersion,
+  ensureFolder,
+  getEntry,
+  getFolder,
+  getKb,
+  listEntries,
+  listFolders,
+  listStoredAiJobs,
+  markInterruptedAiJobs,
+  pruneStoredAiJobs,
+  renameFolder,
+  saveAiJob,
+  updateEntry,
+} from '../db.js';
 import {
   generateEntryInputStream,
   generateFolderTreeDraftStream,
   generateKnowledgeBasePlanStream,
+  rewriteEntryInputStream,
   type GenerateEntryEvent,
   type GenerateKnowledgeBaseEvent,
   type GenerateFolderTreeEvent,
@@ -16,13 +33,14 @@ import { createFoldersFromDraft, createKnowledgeBaseWriterFromDraft, createKnowl
 import { folderPathLabel } from './utils.js';
 import { searchEntries } from '../search.js';
 import { analyzeKnowledgeBase, analyzeEntry, type KbAnalysis } from '../ai-analyze.js';
+import { planKnowledgeBaseEdit, type AgentEditAction } from '../ai-agent-edit.js';
 import type { Folder } from '../types.js';
 
 export type AiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface AiKnowledgeBaseJob {
   id: string;
-  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze';
+  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze' | 'agent-edit';
   domain: string;
   questionCount: number;
   kbId?: string;
@@ -30,6 +48,7 @@ export interface AiKnowledgeBaseJob {
   entryId?: string;
   parentId?: string | null;
   targetPath?: string;
+  instruction?: string;
   status: AiJobStatus;
   logs: string[];
   modelOutput: string;
@@ -105,6 +124,8 @@ export async function jobSnapshot(job: AiKnowledgeBaseJob): Promise<AiKnowledgeB
   const kbExists = job.kbId ? Boolean(await getKb(job.kbId)) : false;
   const resumable = job.kind === 'analyze'
     ? (Boolean(job.entryId) || (Boolean(job.kbId && job.kbName) && kbExists))
+    : job.kind === 'agent-edit'
+      ? Boolean(job.kbId && job.instruction && kbExists)
     : job.kind === 'folder-init' || job.kind === 'folder-entries'
       ? (Boolean(job.kbId && job.kbName) && kbExists)
       : await canResumeKnowledgeBaseJob(job);
@@ -149,6 +170,7 @@ function createBaseJob(input: {
   entryId?: string;
   parentId?: string | null;
   targetPath?: string;
+  instruction?: string;
   logs: string[];
 }): AiKnowledgeBaseJob {
   const now = Date.now();
@@ -162,6 +184,7 @@ function createBaseJob(input: {
     entryId: input.entryId,
     parentId: input.parentId,
     targetPath: input.targetPath,
+    instruction: input.instruction,
     status: 'queued',
     logs: input.logs,
     modelOutput: '',
@@ -181,6 +204,7 @@ function scheduleJob(job: AiKnowledgeBaseJob): void {
     if (job.kind === 'folder-init') void runFolderInitJob(job.id, job.questionCount || 18);
     else if (job.kind === 'folder-entries') void runFolderEntriesJob(job.id);
     else if (job.kind === 'analyze') void runAnalyzeJob(job.id);
+    else if (job.kind === 'agent-edit') void runAgentEditJob(job.id);
     else void runKnowledgeBaseJob(job.id);
   }, 0);
 }
@@ -318,6 +342,33 @@ export async function startAnalyzeEntryJob(input: { entryId: string; entryTitle:
   return job;
 }
 
+export async function startAgentEditJob(input: {
+  kbId: string;
+  kbName: string;
+  instruction: string;
+  parentId?: string | null;
+  entryId?: string;
+  targetPath?: string;
+}): Promise<AiKnowledgeBaseJob> {
+  const title = input.instruction.replace(/\s+/g, ' ').trim().slice(0, 64);
+  const job = createBaseJob({
+    kind: 'agent-edit',
+    domain: title ? `调整「${input.kbName}」：${title}` : `调整「${input.kbName}」`,
+    kbId: input.kbId,
+    kbName: input.kbName,
+    parentId: input.parentId ?? null,
+    entryId: input.entryId,
+    targetPath: input.targetPath,
+    instruction: input.instruction,
+    logs: ['AI 调整任务已创建，等待后台执行'],
+  });
+  aiJobs.set(job.id, job);
+  await persistJob(job);
+  await pruneJobs();
+  scheduleJob(job);
+  return job;
+}
+
 // 启动时恢复：把上次中断的 queued/running 任务重置为 queued，重建内存表，并继续调度。
 export async function initAiJobs(): Promise<void> {
   await markInterruptedAiJobs();
@@ -329,7 +380,11 @@ export async function initAiJobs(): Promise<void> {
         ? '服务已恢复，继续目录初始化任务'
         : job.kind === 'folder-entries'
           ? '服务已恢复，继续目录知识点生成任务'
-          : '服务已恢复，继续 AI 建库任务');
+          : job.kind === 'analyze'
+            ? '服务已恢复，继续 AI 分析任务'
+            : job.kind === 'agent-edit'
+              ? '服务已恢复，继续 AI 调整任务'
+              : '服务已恢复，继续 AI 建库任务');
       scheduleJob(job);
     }
   }
@@ -407,6 +462,15 @@ export async function retryAiJob(id: string): Promise<AiKnowledgeBaseJob | null>
     scheduleJob(job);
     return jobSnapshot(job);
   }
+  if (job.kind === 'agent-edit') {
+    if (!job.kbId || !job.kbName || !job.instruction) return null;
+    job.status = 'queued';
+    job.error = undefined;
+    job.abortRequested = false;
+    await pushJobLog(job, '重新提交 AI 调整任务，将基于当前知识库重新规划');
+    scheduleJob(job);
+    return jobSnapshot(job);
+  }
   if (job.kind === 'folder-init' || job.kind === 'folder-entries') {
     if (!job.kbId || !job.kbName) return null;
     job.status = 'queued';
@@ -460,6 +524,213 @@ async function stopJobForDeletedKb(job: AiKnowledgeBaseJob): Promise<void> {
   job.abortRequested = true;
   finishJobTimer(job);
   await pushJobLog(job, '知识库已删除，任务已停止');
+}
+
+function agentEditCounts(actions: AgentEditAction[]): { structure: number; content: number } {
+  return {
+    structure: actions.filter((action) => action.kind === 'create-folder' || action.kind === 'rename-folder' || action.kind === 'move-entry').length,
+    content: actions.filter((action) => action.kind === 'create-entry' || action.kind === 'rewrite-entry').length,
+  };
+}
+
+async function resolveAgentActionFolder(
+  kbId: string,
+  action: AgentEditAction,
+  folderRefs: Map<string, string>,
+  fallback: string | null,
+): Promise<string | null> {
+  if (action.folderRef) {
+    const refId = folderRefs.get(action.folderRef);
+    if (!refId) throw new Error(`目录引用尚未创建：${action.folderRef}`);
+    return refId;
+  }
+  if (action.folderId === undefined) return fallback;
+  if (action.folderId === null) return null;
+  const folder = await getFolder(action.folderId);
+  if (!folder || folder.kbId !== kbId) throw new Error(`目标目录不存在或不属于当前知识库：${action.folderId}`);
+  return folder.id;
+}
+
+async function refreshAgentEditResult(job: AiKnowledgeBaseJob): Promise<void> {
+  const result = await hydrateKnowledgeBaseResult(job);
+  if (result) await updateJobResult(job, result);
+  else await touchJob(job);
+}
+
+async function runAgentEditJob(jobId: string): Promise<void> {
+  const job = aiJobs.get(jobId);
+  if (!job || job.status === 'cancelled') return;
+  if (runningControllers.has(jobId)) return;
+  const controller = new AbortController();
+  runningControllers.set(jobId, controller);
+  job.status = 'running';
+  job.abortRequested = false;
+  resetJobStats(job);
+  await pushJobLog(job, 'AI 调整任务已启动');
+  try {
+    if (!job.kbId || !job.instruction) throw new Error('缺少知识库或调整指令');
+    const kb = await getKb(job.kbId);
+    if (!kb) throw new Error('知识库不存在');
+    await refreshAgentEditResult(job);
+
+    await pushJobLog(job, 'Agent 第 1 步：读取当前目录和知识点，生成调整计划');
+    const planned = await planKnowledgeBaseEdit({
+      kbId: kb.id,
+      kbName: kb.name,
+      instruction: job.instruction,
+      folderId: job.parentId ?? null,
+      entryId: job.entryId,
+      signal: controller.signal,
+      onUsage: (usage) => void recordUsage(job, usage),
+    });
+    if (isJobCancelled(jobId)) return;
+
+    const counts = agentEditCounts(planned.plan.actions);
+    job.modelOutput = trimJobOutput([
+      `用户想法：${job.instruction}`,
+      '',
+      `执行摘要：${planned.plan.summary}`,
+      '',
+      '---JSON---',
+      JSON.stringify(planned.plan, null, 2),
+    ].join('\n'));
+    job.parsed = { kbName: kb.name, folders: counts.structure, questions: counts.content };
+    await pushJobLog(job, `计划完成：${counts.structure} 个结构动作 · ${counts.content} 个内容动作`);
+    await touchJob(job);
+
+    const folderRefs = new Map<string, string>();
+    const actions = planned.plan.actions;
+    for (let index = 0; index < actions.length; index += 1) {
+      if (isJobCancelled(jobId)) return;
+      if (!await getKb(kb.id)) {
+        await stopJobForDeletedKb(job);
+        return;
+      }
+      const action = actions[index];
+      const label = `${index + 1}/${actions.length}`;
+      if (action.kind === 'note') {
+        await pushJobLog(job, `动作 ${label}：${action.title}`);
+        continue;
+      }
+
+      if (action.kind === 'create-folder') {
+        const parentId = await resolveAgentActionFolder(kb.id, action, folderRefs, job.parentId ?? null);
+        const folder = await ensureFolder(kb.id, action.name ?? action.title, parentId);
+        if (action.ref) folderRefs.set(action.ref, folder.id);
+        if (action.name) folderRefs.set(action.name, folder.id);
+        await pushJobLog(job, `动作 ${label}：已创建/复用目录「${folder.name}」`);
+        await refreshAgentEditResult(job);
+        continue;
+      }
+
+      if (action.kind === 'rename-folder') {
+        if (!action.folderId || !action.name) throw new Error('目录改名动作缺少目录或新名称');
+        const folder = await getFolder(action.folderId);
+        if (!folder || folder.kbId !== kb.id) throw new Error('目录不存在或不属于当前知识库');
+        const renamed = await renameFolder(folder.id, action.name);
+        await pushJobLog(job, `动作 ${label}：已重命名目录为「${renamed?.name ?? action.name}」`);
+        await refreshAgentEditResult(job);
+        continue;
+      }
+
+      if (action.kind === 'move-entry') {
+        if (!action.entryId) throw new Error('移动知识点动作缺少 entryId');
+        const current = await getEntry(action.entryId);
+        if (!current || current.kbId !== kb.id) throw new Error('知识点不存在或不属于当前知识库');
+        const targetFolderId = await resolveAgentActionFolder(kb.id, action, folderRefs, job.parentId ?? null);
+        const moved = await updateEntry(current.id, { kbId: current.kbId, folderId: targetFolderId });
+        await pushJobLog(job, `动作 ${label}：已移动知识点「${moved?.title ?? current.title}」`);
+        await refreshAgentEditResult(job);
+        continue;
+      }
+
+      if (action.kind === 'create-entry') {
+        const targetFolderId = await resolveAgentActionFolder(kb.id, action, folderRefs, job.parentId ?? null);
+        const topic = [action.topic || action.name || action.title, action.detail].filter(Boolean).join('\n');
+        const pathLabel = await folderPathLabel(targetFolderId);
+        await pushJobLog(job, `动作 ${label}：生成知识点「${action.topic || action.name || action.title}」`);
+        job.modelOutput = trimJobOutput(`${job.modelOutput}\n\n---AGENT CREATE ${label}: ${action.title}---\n`);
+        await touchJob(job);
+        const context = searchEntries((await listEntries()).filter((entry) => entry.kbId === kb.id), topic);
+        const input = await generateEntryInputStream({
+          topic,
+          kbName: kb.name,
+          folderPath: pathLabel,
+          context,
+          signal: controller.signal,
+        }, (event: GenerateEntryEvent) => {
+          const current = aiJobs.get(jobId);
+          if (!current || current.status === 'cancelled') return;
+          if (event.type === 'stage') void pushJobLog(current, `动作 ${label}：${event.message}`);
+          if (event.type === 'model-delta') {
+            current.modelOutput = trimJobOutput(`${current.modelOutput}${event.content}`);
+            void touchJob(current);
+          }
+          if (event.type === 'parsed') void pushJobLog(current, `动作 ${label}：解析完成「${event.title}」`);
+          if (event.type === 'usage') void recordUsage(current, event.usage);
+        });
+        if (isJobCancelled(jobId)) return;
+        const entry = await createEntry({ ...input, kbId: kb.id, folderId: targetFolderId });
+        await pushJobLog(job, `动作 ${label}：已新增知识点「${entry.title}」`);
+        await refreshAgentEditResult(job);
+        continue;
+      }
+
+      if (action.kind === 'rewrite-entry') {
+        if (!action.entryId) throw new Error('改写知识点动作缺少 entryId');
+        const current = await getEntry(action.entryId);
+        if (!current || current.kbId !== kb.id) throw new Error('知识点不存在或不属于当前知识库');
+        const instruction = action.instruction || action.detail || job.instruction;
+        await pushJobLog(job, `动作 ${label}：改写知识点「${current.title}」`);
+        job.modelOutput = trimJobOutput(`${job.modelOutput}\n\n---AGENT REWRITE ${label}: ${current.title}---\n`);
+        await touchJob(job);
+        const input = await rewriteEntryInputStream({
+          entry: current,
+          instruction,
+          signal: controller.signal,
+        }, (event: GenerateEntryEvent) => {
+          const running = aiJobs.get(jobId);
+          if (!running || running.status === 'cancelled') return;
+          if (event.type === 'stage') void pushJobLog(running, `动作 ${label}：${event.message}`);
+          if (event.type === 'model-delta') {
+            running.modelOutput = trimJobOutput(`${running.modelOutput}${event.content}`);
+            void touchJob(running);
+          }
+          if (event.type === 'parsed') void pushJobLog(running, `动作 ${label}：改写解析完成「${event.title}」`);
+          if (event.type === 'usage') void recordUsage(running, event.usage);
+        });
+        if (isJobCancelled(jobId)) return;
+        await createEntryVersion(current, 'ai-agent-edit');
+        const rewritten = await updateEntry(current.id, {
+          ...input,
+          kbId: current.kbId,
+          folderId: current.folderId,
+        });
+        await pushJobLog(job, `动作 ${label}：已改写知识点「${rewritten?.title ?? current.title}」`);
+        await refreshAgentEditResult(job);
+      }
+    }
+
+    job.status = 'succeeded';
+    job.abortRequested = false;
+    await pushJobLog(job, `AI 调整完成：${kb.name}`);
+    await refreshAgentEditResult(job);
+  } catch (err) {
+    if (isJobCancelled(jobId) || isAbortError(err)) {
+      job.status = 'cancelled';
+      job.error = '用户已取消任务';
+      await pushJobLog(job, '任务已取消');
+    } else {
+      job.status = 'failed';
+      job.error = err instanceof Error ? err.message : String(err);
+      await pushJobLog(job, job.error);
+    }
+    await touchJob(job);
+  } finally {
+    finishJobTimer(job);
+    await touchJob(job);
+    runningControllers.delete(jobId);
+  }
 }
 
 async function runKnowledgeBaseJob(jobId: string): Promise<void> {

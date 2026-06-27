@@ -43,6 +43,7 @@ interface Props {
   onStartFolderEntriesJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
   onStartAnalyzeJob: (kbId: string) => Promise<void>;
   onStartAnalyzeEntryJob: (entryId: string) => Promise<void>;
+  onStartAgentEditJob: (input: { kbId: string; instruction: string; folderId?: string | null; entryId?: string }) => Promise<void>;
   onCreateKb: (name: string, categoryId?: string | null) => Promise<KnowledgeBase>;
   onCreateKbCategory: (input: { name: string; parentId?: string | null }) => Promise<KbCategory>;
   onRenameKbCategory: (id: string, name: string) => Promise<void>;
@@ -67,7 +68,7 @@ interface Props {
 export default function FreeMode(props: Props): ReactNode {
   const { entries, kbs, kbCategories, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
     onCreate, onUpdate, onDelete, onImported, onGeneratedEntry, onStartKnowledgeBaseJob, onStartFolderInitJob,
-    onStartFolderEntriesJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
+    onStartFolderEntriesJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onStartAgentEditJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
     aiJobs, aiTaskPanelOpen, onAiTaskPanelOpenChange, onOpenAiJobResult, onCancelAiJob, onRetryAiJob, onClearAiJobHistory } = props;
 
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(() => localStorage.getItem('ik_free_entry') || null);
@@ -389,6 +390,28 @@ export default function FreeMode(props: Props): ReactNode {
     }
     void onStartAnalyzeJob(freeKb);
   }
+
+  function startAgentEditDirect(instruction: string): void {
+    if (!currentKb) {
+      toast('请先进入一个知识库，再让 AI 调整', 'info');
+      return;
+    }
+    const text = instruction.trim();
+    if (!text) {
+      toast('请输入你的调整想法', 'info');
+      return;
+    }
+    onAiTaskPanelOpenChange(true);
+    void onStartAgentEditJob({
+      kbId: currentKb.id,
+      instruction: text,
+      folderId: selectedEntry?.folderId ?? freeFolder ?? null,
+      entryId: selectedEntry?.id,
+    }).catch((err) => {
+      toast('AI 调整失败：' + (err instanceof Error ? err.message : String(err)), 'error');
+    });
+  }
+
   const [applyingAll, setApplyingAll] = useState(false);
   const applyAllRef = useRef(false);
   function markApplied(id: string): void {
@@ -694,6 +717,19 @@ export default function FreeMode(props: Props): ReactNode {
     return crumbs;
   }, [currentFolderChain, currentFolderId, currentKb, folders, selectedEntry]);
   const aiActions: AiQuickAction[] = freeKb ? [
+    {
+      id: 'agent-edit',
+      title: '说想法调整',
+      description: selectedEntry ? '按当前知识点上下文调整结构和内容' : '按当前目录上下文调整结构和内容',
+      icon: <Pencil size={16} strokeWidth={2.15} />,
+      onClick: () => {},
+      prompt: {
+        placeholder: '例如：把缓存相关内容拆成基础/高可用/持久化，并补 3 个高频题',
+        submitLabel: '执行',
+        onSubmit: startAgentEditDirect,
+      },
+      meta: '结构 / 内容',
+    },
     {
       id: 'generate-entry',
       title: '生成知识点',

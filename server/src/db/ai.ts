@@ -1,7 +1,7 @@
 import { db, tryAlter } from './client.js';
 
 export type StoredAiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-export type StoredAiJobKind = 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze';
+export type StoredAiJobKind = 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze' | 'agent-edit';
 
 export interface StoredAiJob {
   id: string;
@@ -13,6 +13,7 @@ export interface StoredAiJob {
   entryId?: string;
   parentId?: string | null;
   targetPath?: string;
+  instruction?: string;
   status: StoredAiJobStatus;
   logs: string[];
   modelOutput: string;
@@ -42,6 +43,7 @@ export async function ensureAiJobsTable(): Promise<void> {
       kbName          TEXT,
       parentId        TEXT,
       targetPath      TEXT,
+      instruction     TEXT,
       status          TEXT NOT NULL,
       logs            TEXT NOT NULL DEFAULT '[]',
       modelOutput     TEXT NOT NULL DEFAULT '',
@@ -64,6 +66,7 @@ export async function ensureAiJobsTable(): Promise<void> {
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN plan TEXT');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN analysis TEXT');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN entryId TEXT');
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN instruction TEXT');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN startedAt INTEGER NOT NULL DEFAULT 0');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN durationMs INTEGER NOT NULL DEFAULT 0');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN promptTokens INTEGER NOT NULL DEFAULT 0');
@@ -82,7 +85,12 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
 
 function rowToJob(row: Record<string, unknown>): StoredAiJob {
   const rawKind = String(row.kind);
-  const kind: StoredAiJobKind = rawKind === 'folder-init' || rawKind === 'folder-entries' || rawKind === 'analyze' ? rawKind : 'kb-generate';
+  const kind: StoredAiJobKind = rawKind === 'folder-init'
+    || rawKind === 'folder-entries'
+    || rawKind === 'analyze'
+    || rawKind === 'agent-edit'
+    ? rawKind
+    : 'kb-generate';
   return {
     id: String(row.id),
     kind,
@@ -93,6 +101,7 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
     entryId: typeof row.entryId === 'string' && row.entryId ? row.entryId : undefined,
     parentId: row.parentId == null ? null : String(row.parentId),
     targetPath: typeof row.targetPath === 'string' && row.targetPath ? row.targetPath : undefined,
+    instruction: typeof row.instruction === 'string' && row.instruction ? row.instruction : undefined,
     status: String(row.status ?? 'failed') as StoredAiJobStatus,
     logs: parseJson<string[]>(String(row.logs ?? '[]'), []),
     modelOutput: String(row.modelOutput ?? ''),
@@ -115,11 +124,11 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
 export async function saveAiJob(job: StoredAiJob): Promise<void> {
   await db.prepare(`
     INSERT INTO ai_jobs (
-      id, kind, domain, questionCount, kbId, kbName, entryId, parentId, targetPath, status,
+      id, kind, domain, questionCount, kbId, kbName, entryId, parentId, targetPath, instruction, status,
       logs, modelOutput, parsed, plan, result, analysis, error, abortRequested, createdAt, updatedAt,
       startedAt, durationMs, promptTokens, completionTokens, totalTokens
     ) VALUES (
-      :id, :kind, :domain, :questionCount, :kbId, :kbName, :entryId, :parentId, :targetPath, :status,
+      :id, :kind, :domain, :questionCount, :kbId, :kbName, :entryId, :parentId, :targetPath, :instruction, :status,
       :logs, :modelOutput, :parsed, :plan, :result, :analysis, :error, :abortRequested, :createdAt, :updatedAt,
       :startedAt, :durationMs, :promptTokens, :completionTokens, :totalTokens
     )
@@ -132,6 +141,7 @@ export async function saveAiJob(job: StoredAiJob): Promise<void> {
       entryId=excluded.entryId,
       parentId=excluded.parentId,
       targetPath=excluded.targetPath,
+      instruction=excluded.instruction,
       status=excluded.status,
       logs=excluded.logs,
       modelOutput=excluded.modelOutput,
@@ -160,6 +170,7 @@ export async function saveAiJob(job: StoredAiJob): Promise<void> {
     entryId: job.entryId ?? null,
     parentId: job.parentId ?? null,
     targetPath: job.targetPath ?? null,
+    instruction: job.instruction ?? null,
     abortRequested: job.abortRequested ? 1 : 0,
   });
 }

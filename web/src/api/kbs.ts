@@ -14,6 +14,15 @@ export async function startAnalyzeEntryJob(entryId: string): Promise<AiKnowledge
   return apiPostKey<AiKnowledgeBaseJob>(`/entries/${encodeURIComponent(entryId)}/analyze/jobs`, {}, 'job');
 }
 
+export async function startAgentEditJob(input: {
+  kbId: string;
+  instruction: string;
+  folderId?: string | null;
+  entryId?: string;
+}): Promise<AiKnowledgeBaseJob> {
+  return apiPostKey<AiKnowledgeBaseJob>(`/kbs/${encodeURIComponent(input.kbId)}/agent-edit/jobs`, input, 'job');
+}
+
 // ───────────── 知识库 CRUD ─────────────
 
 export async function fetchKbCategories(): Promise<KbCategory[]> {

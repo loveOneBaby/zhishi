@@ -32,7 +32,7 @@ export interface KbAnalysis {
 
 export interface AiKnowledgeBaseJob {
   id: string;
-  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze';
+  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze' | 'agent-edit';
   domain: string;
   questionCount: number;
   kbId?: string;
@@ -40,6 +40,7 @@ export interface AiKnowledgeBaseJob {
   entryId?: string;
   parentId?: string | null;
   targetPath?: string;
+  instruction?: string;
   status: AiJobStatus;
   logs: string[];
   modelOutput: string;

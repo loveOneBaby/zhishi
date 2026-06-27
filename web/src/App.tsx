@@ -30,6 +30,7 @@ import {
   startGenerateKnowledgePointsFromFoldersJob,
   startAnalyzeJob,
   startAnalyzeEntryJob,
+  startAgentEditJob,
   cancelAiJob,
   retryAiJob,
   clearAiJobHistory,
@@ -186,7 +187,9 @@ export default function App() {
             ? `AI 已初始化「${job.result!.kb.name}」目录`
             : job.kind === 'folder-entries'
               ? `AI 已按目录补全「${job.result!.kb.name}」知识点`
-              : `AI 已新建「${job.result!.kb.name}」`, 'success');
+              : job.kind === 'agent-edit'
+                ? `AI 已调整「${job.result!.kb.name}」`
+                : `AI 已新建「${job.result!.kb.name}」`, 'success');
         }
       }
     }
@@ -198,7 +201,9 @@ export default function App() {
           ? 'AI 初始化目录失败'
           : job.kind === 'folder-entries'
             ? 'AI 按目录生成知识点失败'
-            : 'AI 建库失败'}：${job.error || job.domain}`, 'error');
+            : job.kind === 'agent-edit'
+              ? 'AI 调整知识库失败'
+              : 'AI 建库失败'}：${job.error || job.domain}`, 'error');
       }
     }
   }, []);
@@ -426,6 +431,18 @@ export default function App() {
     toast('已开始分析当前知识点', 'success');
   }, []);
 
+  const handleStartAgentEditJob = useCallback(async (input: {
+    kbId: string;
+    instruction: string;
+    folderId?: string | null;
+    entryId?: string;
+  }): Promise<void> => {
+    const job = await startAgentEditJob(input);
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    setAiTaskPanelOpen(true);
+    toast('AI 已开始调整当前知识库', 'success');
+  }, []);
+
   const handleCancelAiJob = useCallback(async (id: string): Promise<void> => {
     const job = await cancelAiJob(id);
     setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
@@ -649,6 +666,7 @@ export default function App() {
                   onStartFolderEntriesJob={handleStartFolderEntriesJob}
                   onStartAnalyzeJob={handleStartAnalyzeJob}
                   onStartAnalyzeEntryJob={handleStartAnalyzeEntryJob}
+                  onStartAgentEditJob={handleStartAgentEditJob}
                   onCreateKb={handleCreateKb}
                   onCreateKbCategory={handleCreateKbCategory}
                   onRenameKbCategory={handleRenameKbCategory}

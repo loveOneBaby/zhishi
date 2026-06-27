@@ -80,31 +80,47 @@ function jobKindLabel(job: AiKnowledgeBaseJob): string {
   if (job.kind === 'folder-init') return '目录初始化';
   if (job.kind === 'folder-entries') return '目录生成知识点';
   if (job.kind === 'analyze') return job.entryId ? 'AI 分析知识点' : 'AI 分析知识库';
+  if (job.kind === 'agent-edit') return 'AI 调整知识库';
   return '新建知识库';
 }
 
 function runningText(job: AiKnowledgeBaseJob): string {
   if (job.status === 'queued') return '排队中';
-  if (job.status === 'running') return job.kind === 'folder-init' ? '初始化中' : job.kind === 'analyze' ? '分析中' : '生成中';
+  if (job.status === 'running') {
+    if (job.kind === 'folder-init') return '初始化中';
+    if (job.kind === 'analyze') return '分析中';
+    if (job.kind === 'agent-edit') return '调整中';
+    return '生成中';
+  }
   return statusLabel(job.status);
 }
 
 function parsedText(job: AiKnowledgeBaseJob): string {
   if (!job.parsed) return '等待结构化结果';
   if (job.kind === 'folder-init') return `${job.parsed.folders} 个目录`;
+  if (job.kind === 'agent-edit') return `${job.parsed.folders} 个结构动作 / ${job.parsed.questions} 个内容动作`;
   return `${job.parsed.folders} 个目录 / ${job.parsed.questions} 条知识点`;
 }
 
 function outputPlanLabel(job: AiKnowledgeBaseJob): string {
   if (job.kind === 'folder-init') return '目录规划';
   if (job.kind === 'folder-entries') return '生成过程';
+  if (job.kind === 'agent-edit') return '调整计划';
   return '建库思路';
 }
 
 function outputJsonLabel(job: AiKnowledgeBaseJob): string {
   if (job.kind === 'folder-init') return '目录 JSON';
   if (job.kind === 'folder-entries') return '知识点输出';
+  if (job.kind === 'agent-edit') return '执行 JSON';
   return '知识库 JSON';
+}
+
+function rowCount(job: AiKnowledgeBaseJob): number {
+  if (!job.parsed) return 0;
+  if (job.kind === 'folder-init') return job.parsed.folders;
+  if (job.kind === 'agent-edit') return job.parsed.folders + job.parsed.questions;
+  return job.parsed.questions;
 }
 
 function liveStatusLabel(status: LiveTask['status']): string {
@@ -505,7 +521,7 @@ export default function AiTaskCenter({
                       <small>{jobKindLabel(job)} · {runningText(job)} · {formatTime(job.updatedAt)}{job.status !== 'queued' && job.status !== 'running' && (job.durationMs > 0 || job.totalTokens > 0) ? ` · ${formatDuration(job.durationMs)} · ${formatTokens(job.totalTokens)}` : ''}</small>
                     </span>
                     {job.parsed && (
-                      <span className="ik-ai-task-row-count">{job.kind === 'folder-init' ? job.parsed.folders : job.parsed.questions}</span>
+                      <span className="ik-ai-task-row-count">{rowCount(job)}</span>
                     )}
                   </button>
                 );
