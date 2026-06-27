@@ -85,6 +85,8 @@ export interface GenerateFolderTreeOptions {
 
 export interface RewriteEntryOptions {
   entry: Entry;
+  /** 可选的改写重点指令(来自 AI 分析建议),会引导本次改写优先满足该项改进 */
+  instruction?: string;
   signal?: AbortSignal;
 }
 

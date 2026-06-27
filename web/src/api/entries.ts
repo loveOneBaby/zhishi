@@ -132,16 +132,17 @@ export async function rewriteEntryWithAIStream(entryId: string, handlers: Genera
   return runSseStream<Entry>(`/entries/${encodeURIComponent(entryId)}/rewrite/stream`, undefined, 'AI 改写未返回知识点', dispatchEntryStream(handlers, 'AI 改写失败'));
 }
 
-export async function generateEntryDraftWithAIStream(input: GenerateEntryInput, handlers: GenerateEntryStreamHandlers = {}): Promise<EntryInput> {
-  return runSseStream<EntryInput>('/entries/generate/draft/stream', input, 'AI 生成未返回草稿', dispatchEntryDraftStream(handlers, 'AI 生成失败'));
+export async function generateEntryDraftWithAIStream(input: GenerateEntryInput, handlers: GenerateEntryStreamHandlers = {}, signal?: AbortSignal): Promise<EntryInput> {
+  return runSseStream<EntryInput>('/entries/generate/draft/stream', input, 'AI 生成未返回草稿', dispatchEntryDraftStream(handlers, 'AI 生成失败'), signal);
 }
 
-export async function rewriteEntryDraftWithAIStream(entryId: string, handlers: GenerateEntryStreamHandlers = {}): Promise<EntryInput> {
-  return runSseStream<EntryInput>(`/entries/${encodeURIComponent(entryId)}/rewrite/draft/stream`, undefined, 'AI 改写未返回草稿', dispatchEntryDraftStream(handlers, 'AI 改写失败'));
+export async function rewriteEntryDraftWithAIStream(entryId: string, handlers: GenerateEntryStreamHandlers = {}, instruction?: string, signal?: AbortSignal): Promise<EntryInput> {
+  const body = instruction ? { instruction } : undefined;
+  return runSseStream<EntryInput>(`/entries/${encodeURIComponent(entryId)}/rewrite/draft/stream`, body, 'AI 改写未返回草稿', dispatchEntryDraftStream(handlers, 'AI 改写失败'), signal);
 }
 
-export async function generateEntryIllustrationWithAIStream(entryId: string, handlers: GenerateEntryStreamHandlers = {}): Promise<Entry> {
-  return runSseStream<Entry>(`/entries/${encodeURIComponent(entryId)}/illustration/stream`, undefined, 'AI 图解未返回知识点', dispatchEntryStream(handlers, 'AI 图解失败'));
+export async function generateEntryIllustrationWithAIStream(entryId: string, handlers: GenerateEntryStreamHandlers = {}, signal?: AbortSignal): Promise<Entry> {
+  return runSseStream<Entry>(`/entries/${encodeURIComponent(entryId)}/illustration/stream`, undefined, 'AI 图解未返回知识点', dispatchEntryStream(handlers, 'AI 图解失败'), signal);
 }
 
 export async function commitRewriteEntryDraft(entryId: string, input: EntryInput): Promise<Entry> {

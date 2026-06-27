@@ -22,6 +22,8 @@ import {
   startGenerateKnowledgeBaseJob,
   startInitKnowledgeBaseFoldersJob,
   startGenerateKnowledgePointsFromFoldersJob,
+  startAnalyzeJob,
+  startAnalyzeEntryJob,
   cancelAiJob,
   retryAiJob,
   clearAiJobHistory,
@@ -395,6 +397,20 @@ export default function App() {
     toast(`「${input.domain || job.kbName || job.domain}」已开始按目录生成知识点`, 'success');
   }, []);
 
+  const handleStartAnalyzeJob = useCallback(async (kbId: string): Promise<void> => {
+    const job = await startAnalyzeJob(kbId);
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    setAiTaskPanelOpen(true);
+    toast('已开始分析当前知识库', 'success');
+  }, []);
+
+  const handleStartAnalyzeEntryJob = useCallback(async (entryId: string): Promise<void> => {
+    const job = await startAnalyzeEntryJob(entryId);
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    setAiTaskPanelOpen(true);
+    toast('已开始分析当前知识点', 'success');
+  }, []);
+
   const handleCancelAiJob = useCallback(async (id: string): Promise<void> => {
     const job = await cancelAiJob(id);
     setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
@@ -578,6 +594,8 @@ export default function App() {
                 onStartKnowledgeBaseJob={handleStartKnowledgeBaseJob}
                 onStartFolderInitJob={handleStartFolderInitJob}
                 onStartFolderEntriesJob={handleStartFolderEntriesJob}
+                onStartAnalyzeJob={handleStartAnalyzeJob}
+                onStartAnalyzeEntryJob={handleStartAnalyzeEntryJob}
                 onCreateKb={handleCreateKb}
                 onCreateFolder={handleCreateFolder}
                 onRenameKb={handleRenameKb}

@@ -5,6 +5,7 @@ import {
   CheckSquare,
   ChevronDown,
   ChevronRight,
+  Download,
   FileText,
   Folder as FolderIcon,
   FolderOpen,
@@ -68,6 +69,8 @@ interface Props {
   onDeleteFolder: (folder: Folder) => void;
   onClearFolder: (folder: Folder) => void;
   onImportToFolder: (folder: Folder) => void;
+  onImportHere: () => void;
+  onExportAll: () => void;
   onEditEntry: (entry: Entry) => void;
   onDeleteEntry: (entry: Entry) => void;
   onDeleteBatch: (folders: Folder[], entries: Entry[]) => Promise<void>;
@@ -149,6 +152,8 @@ export default function KnowledgeTree(props: Props): ReactNode {
     onDeleteFolder,
     onClearFolder,
     onImportToFolder,
+    onImportHere,
+    onExportAll,
     onEditEntry,
     onDeleteEntry,
     onDeleteBatch,
@@ -496,21 +501,28 @@ export default function KnowledgeTree(props: Props): ReactNode {
           <button type="button" className="ik-kt-root-create" onClick={() => onCreateFolder(null)}>
             <FolderPlus size={14} strokeWidth={2.1} />根文件夹
           </button>
-          <button type="button" onClick={() => treeRef.current?.openAll()}>
-            <ListTree size={14} strokeWidth={2.1} />展开
+          <button type="button" className="ik-kt-iconbtn" onClick={() => treeRef.current?.openAll()} title="展开全部" aria-label="展开全部">
+            <ListTree size={15} strokeWidth={2.1} />
           </button>
-          <button type="button" onClick={() => treeRef.current?.closeAll()}>
-            <ListCollapse size={14} strokeWidth={2.1} />收起
+          <button type="button" className="ik-kt-iconbtn" onClick={() => treeRef.current?.closeAll()} title="收起全部" aria-label="收起全部">
+            <ListCollapse size={15} strokeWidth={2.1} />
           </button>
           {!batchMode ? (
-            <button type="button" className="ik-kt-batch-toggle" onClick={enterBatchMode}>
-              <CheckSquare size={14} strokeWidth={2.1} />批量
+            <button type="button" className="ik-kt-iconbtn" onClick={enterBatchMode} title="批量操作" aria-label="批量操作">
+              <CheckSquare size={15} strokeWidth={2.1} />
             </button>
           ) : (
-            <button type="button" onClick={() => treeRef.current?.selectAll()}>
-              <CheckSquare size={14} strokeWidth={2.1} />全选
+            <button type="button" className="ik-kt-iconbtn is-active" onClick={() => treeRef.current?.selectAll()} title="全选" aria-label="全选">
+              <CheckSquare size={15} strokeWidth={2.1} />
             </button>
           )}
+          <span className="ik-kt-tool-sep" aria-hidden="true" />
+          <button type="button" className="ik-kt-iconbtn" onClick={onImportHere} title="导入 JSON 到当前位置" aria-label="导入 JSON">
+            <Upload size={15} strokeWidth={2.1} />
+          </button>
+          <button type="button" className="ik-kt-iconbtn" onClick={onExportAll} title="导出全部为 JSON" aria-label="导出全部">
+            <Download size={15} strokeWidth={2.1} />
+          </button>
         </div>
       </div>
 
@@ -587,9 +599,14 @@ export default function KnowledgeTree(props: Props): ReactNode {
         ) : (
           <div className="ik-kt-empty">
             <span>当前知识库还没有文件夹或知识点。</span>
-            <button type="button" onClick={() => onCreateFolder(null)}>
-              <FolderPlus size={14} strokeWidth={2.1} />新建根文件夹
-            </button>
+            <div className="ik-kt-empty-actions">
+              <button type="button" onClick={() => onCreateFolder(null)}>
+                <FolderPlus size={14} strokeWidth={2.1} />新建根文件夹
+              </button>
+              <button type="button" onClick={onImportHere}>
+                <Upload size={14} strokeWidth={2.1} />导入 JSON
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -609,11 +626,18 @@ export default function KnowledgeTree(props: Props): ReactNode {
               <button type="button" onClick={() => runMenuAction(() => onCreateFolder(menu.kind === 'folder' ? menu.folder.id : null))}>
                 <FolderPlus size={14} strokeWidth={2.1} />新建文件夹
               </button>
-              {menu.kind === 'folder' && (
+              {menu.kind === 'folder' ? (
                 <button type="button" onClick={() => runMenuAction(() => onImportToFolder(menu.folder))}>
                   <Upload size={14} strokeWidth={2.1} />导入 JSON 到此文件夹
                 </button>
+              ) : (
+                <button type="button" onClick={() => runMenuAction(onImportHere)}>
+                  <Upload size={14} strokeWidth={2.1} />导入 JSON
+                </button>
               )}
+              <button type="button" onClick={() => runMenuAction(onExportAll)}>
+                <Download size={14} strokeWidth={2.1} />导出全部
+              </button>
             </div>
           )}
           {menu.kind === 'folder' && (

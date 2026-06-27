@@ -62,11 +62,13 @@ export async function runSseStream<T>(
   body: unknown | undefined,
   notSavedMessage: string,
   dispatch: (event: string, data: Record<string, unknown>, ctx: SseDispatchCtx<T>) => void,
+  signal?: AbortSignal,
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(signal ? { signal } : {}),
   });
   if (!res.ok || !res.body) {
     let msg = `请求失败 ${res.status}`;

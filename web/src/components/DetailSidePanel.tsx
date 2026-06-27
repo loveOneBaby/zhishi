@@ -76,7 +76,7 @@ export default function DetailSidePanel({ entry, query = '', contextLabel, actio
 
       <div className="ik-detail-body">
         {/* 原生 BlockNote 只读渲染:图片/表格/代码/标题等都按块原样显示 */}
-        <BlockEditor key={entry.id} editable={false} initialBlocks={entry.doc} />
+        <BlockEditor key={`${entry.id}:${entry.updatedAt ?? 0}`} editable={false} initialBlocks={entry.doc} />
       </div>
     </aside>
   );

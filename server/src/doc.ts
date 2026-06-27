@@ -15,6 +15,38 @@ function toInline(content: unknown): unknown {
   return [];
 }
 
+// 行内 markdown → BlockNote 行内内容:解析 **粗体** / `代码` / [文本](链接) / *斜体*。
+// 仅用于 markdownToDocBlocks(把 AI/种子里的行内标记渲染成样式,避免出现裸 ** 或 ###)。
+type InlineRun =
+  | { type: 'text'; text: string; styles: Record<string, boolean> }
+  | { type: 'link'; href: string; content: Array<{ type: 'text'; text: string; styles: Record<string, boolean> }> };
+
+function parseInline(text: string): InlineRun[] {
+  if (!text) return [];
+  const patterns: Array<{ re: RegExp; make: (m: RegExpExecArray) => InlineRun }> = [
+    { re: /\*\*([^*\n]+?)\*\*/, make: (m) => ({ type: 'text', text: m[1], styles: { bold: true } }) },
+    { re: /__([^_\n]+?)__/, make: (m) => ({ type: 'text', text: m[1], styles: { bold: true } }) },
+    { re: /`([^`\n]+?)`/, make: (m) => ({ type: 'text', text: m[1], styles: { code: true } }) },
+    { re: /\[([^\]\n]+?)\]\(([^)\s]+?)\)/, make: (m) => ({ type: 'link', href: m[2], content: [{ type: 'text', text: m[1], styles: {} }] }) },
+    { re: /\*([^*\n]+?)\*/, make: (m) => ({ type: 'text', text: m[1], styles: { italic: true } }) },
+    { re: /(?<![A-Za-z0-9])_([^_\n]+?)_(?![A-Za-z0-9])/, make: (m) => ({ type: 'text', text: m[1], styles: { italic: true } }) },
+  ];
+  const out: InlineRun[] = [];
+  let rest = text;
+  while (rest) {
+    let best: { idx: number; len: number; node: InlineRun } | null = null;
+    for (const p of patterns) {
+      const m = p.re.exec(rest);
+      if (m && (best === null || m.index < best.idx)) best = { idx: m.index, len: m[0].length, node: p.make(m) };
+    }
+    if (!best) { out.push({ type: 'text', text: rest, styles: {} }); break; }
+    if (best.idx > 0) out.push({ type: 'text', text: rest.slice(0, best.idx), styles: {} });
+    out.push(best.node);
+    rest = rest.slice(best.idx + best.len);
+  }
+  return out;
+}
+
 const VOID_TYPES = new Set(['image', 'table', 'divider', 'file', 'video', 'audio']);
 
 // 友好简写 / 外部块 → 合法 BlockNote 块(补 id、props、行内内容;未知类型保留)
@@ -103,7 +135,7 @@ export function treeToDoc(tree: IndexTree): Block[] {
 export function markdownToDocBlocks(md: string): Block[] {
   const lines = (md || '').split('\n');
   const out: Block[] = [];
-  const para = (text: string): Block => ({ id: blockId(), type: 'paragraph', props: {}, content: toInline(text), children: [] });
+  const para = (text: string): Block => ({ id: blockId(), type: 'paragraph', props: {}, content: parseInline(text), children: [] });
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
@@ -120,7 +152,9 @@ export function markdownToDocBlocks(md: string): Block[] {
       continue;
     }
     if (heading) {
-      out.push({ id: blockId(), type: 'heading', props: { level: Math.min(heading[1].length, 3) }, content: toInline(heading[2].trim()), children: [] });
+      // 去掉标题里残留的 markdown 标记(模型偶尔把 ### 写进标题字段,导致出现 "## ### 标题")
+      const headingText = heading[2].trim().replace(/^#{1,6}\s*/, '').replace(/\s*#+\s*$/, '');
+      out.push({ id: blockId(), type: 'heading', props: { level: Math.min(heading[1].length, 3) }, content: parseInline(headingText), children: [] });
       i += 1;
       continue;
     }
@@ -131,19 +165,19 @@ export function markdownToDocBlocks(md: string): Block[] {
     }
     const bullet = /^\s*[-*]\s+(.+)$/.exec(line);
     if (bullet) {
-      out.push({ id: blockId(), type: 'bulletListItem', props: {}, content: toInline(bullet[1].trim()), children: [] });
+      out.push({ id: blockId(), type: 'bulletListItem', props: {}, content: parseInline(bullet[1].trim()), children: [] });
       i += 1;
       continue;
     }
     const ordered = /^\s*\d+\.\s+(.+)$/.exec(line);
     if (ordered) {
-      out.push({ id: blockId(), type: 'numberedListItem', props: {}, content: toInline(ordered[1].trim()), children: [] });
+      out.push({ id: blockId(), type: 'numberedListItem', props: {}, content: parseInline(ordered[1].trim()), children: [] });
       i += 1;
       continue;
     }
     const quote = /^>\s?(.*)$/.exec(line);
     if (quote) {
-      out.push({ id: blockId(), type: 'quote', props: {}, content: toInline(quote[1].trim()), children: [] });
+      out.push({ id: blockId(), type: 'quote', props: {}, content: parseInline(quote[1].trim()), children: [] });
       i += 1;
       continue;
     }

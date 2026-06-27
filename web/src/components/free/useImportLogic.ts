@@ -110,6 +110,16 @@ export function useImportLogic(deps: ImportLogicDeps) {
     importInputRef.current?.click();
   }
 
+  // 导入到当前所在位置(根层级或当前文件夹),供树工具栏 / 空状态使用
+  function importHere(): void {
+    if (!freeKb) {
+      toast('请先进入一个知识库，再导入 JSON', 'info');
+      return;
+    }
+    pendingImportFolderRef.current = freeFolder ?? null;
+    importInputRef.current?.click();
+  }
+
   async function handleConfirmImport(replace: boolean): Promise<void> {
     if (!importPreview) return;
     const { payload, preview } = importPreview;
@@ -145,6 +155,7 @@ export function useImportLogic(deps: ImportLogicDeps) {
     pendingImportFolderRef,
     handleImport,
     importToFolder,
+    importHere,
     refreshImportPreview,
     handleConfirmImport,
   };

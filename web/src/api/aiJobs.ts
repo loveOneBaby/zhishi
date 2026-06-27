@@ -10,13 +10,34 @@ export interface GenerateKnowledgeBaseResult {
 
 export type AiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
+// AI 分析(诊断 + 建议)类型,与 AiKnowledgeBaseJob.analysis 同放,避免循环依赖
+export type KbSuggestionKind = 'create-folder' | 'rename-folder' | 'create-entry' | 'rewrite-entry' | 'refine-entry' | 'note';
+
+export interface KbSuggestion {
+  id: string;
+  kind: KbSuggestionKind;
+  title: string;
+  detail: string;
+  folderId?: string | null;
+  entryId?: string;
+  name?: string;
+}
+
+export interface KbAnalysis {
+  overview: string;
+  scores: { structure: number; coverage: number; depth: number };
+  scoreLabels?: [string, string, string];
+  suggestions: KbSuggestion[];
+}
+
 export interface AiKnowledgeBaseJob {
   id: string;
-  kind: 'kb-generate' | 'folder-init' | 'folder-entries';
+  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze';
   domain: string;
   questionCount: number;
   kbId?: string;
   kbName?: string;
+  entryId?: string;
   parentId?: string | null;
   targetPath?: string;
   status: AiJobStatus;
@@ -24,6 +45,7 @@ export interface AiKnowledgeBaseJob {
   modelOutput: string;
   parsed?: { kbName: string; folders: number; questions: number };
   result?: GenerateKnowledgeBaseResult;
+  analysis?: KbAnalysis;
   resumable?: boolean;
   error?: string;
   createdAt: number;

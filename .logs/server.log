@@ -4,3 +4,9 @@
 
 [server] 知识检索服务已启动: http://localhost:5173
 [server] API: http://localhost:5173/api/entries
+6:00:19 PM [tsx] change in ./src/routes/entry.ts Restarting...
+c[server] 知识检索服务已启动: http://localhost:5173
+[server] API: http://localhost:5173/api/entries
+6:36:36 PM [tsx] change in ./src/routes/entry.ts Restarting...
+c[server] 知识检索服务已启动: http://localhost:5173
+[server] API: http://localhost:5173/api/entries

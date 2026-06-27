@@ -16,7 +16,7 @@ import {
   listEntries,
 } from '../db.js';
 import { createKnowledgeBaseFromDraft } from '../services/kb-draft-writer.js';
-import { discardAiJobResultsForKb, jobSnapshot, startFolderEntriesJob, startFolderInitJob, startKnowledgeBaseJob } from '../services/ai-jobs.js';
+import { discardAiJobResultsForKb, jobSnapshot, startAnalyzeJob, startFolderEntriesJob, startFolderInitJob, startKnowledgeBaseJob } from '../services/ai-jobs.js';
 import { folderPathLabel, sendSse } from '../services/utils.js';
 
 export function registerKbRoutes(api: Router): void {
@@ -115,6 +115,14 @@ export function registerKbRoutes(api: Router): void {
       });
       res.end();
     }
+  });
+
+  // AI 分析当前知识库:后台任务,完成后把诊断与建议挂在任务上(随任务持久化、刷新可恢复)
+  api.post('/kbs/:id/analyze/jobs', (req, res) => {
+    const kb = getKb(req.params.id);
+    if (!kb) return res.status(404).json({ error: '知识库不存在' });
+    const job = startAnalyzeJob({ kbId: kb.id, kbName: kb.name });
+    res.status(202).json({ job: jobSnapshot(job) });
   });
 
   api.put('/kbs/:id', (req, res) => {

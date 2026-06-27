@@ -21,3 +21,9 @@
 /* 链接配色 + 只读时可点击 */
 .ik-bn a { color: var(--accent); text-decoration: underline; }
 .ik-bn-wrap a { cursor: pointer; }
+
+/* 标题字号收敛:BlockNote 用 --level 控制标题字号,默认偏大,这里整体调小一档 */
+.ik-bn [data-content-type="heading"][data-level="1"] { --level: 1.5em; }
+.ik-bn [data-content-type="heading"][data-level="2"] { --level: 1.24em; }
+.ik-bn [data-content-type="heading"][data-level="3"] { --level: 1.08em; }
+.ik-bn [data-content-type="heading"][data-level="4"] { --level: 1em; }

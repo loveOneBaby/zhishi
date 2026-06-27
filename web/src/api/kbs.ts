@@ -2,6 +2,18 @@ import type { Entry, Folder, KnowledgeBase } from '../types';
 import { apiDelJson, apiGetKey, apiPostKey, apiPutKey, runSseStream } from './client';
 import type { AiKnowledgeBaseJob, GenerateKnowledgeBaseResult } from './aiJobs';
 
+// ───────────── AI 分析知识库(后台任务) ─────────────
+
+export type { KbAnalysis, KbSuggestion, KbSuggestionKind } from './aiJobs';
+
+export async function startAnalyzeJob(kbId: string): Promise<AiKnowledgeBaseJob> {
+  return apiPostKey<AiKnowledgeBaseJob>(`/kbs/${encodeURIComponent(kbId)}/analyze/jobs`, {}, 'job');
+}
+
+export async function startAnalyzeEntryJob(entryId: string): Promise<AiKnowledgeBaseJob> {
+  return apiPostKey<AiKnowledgeBaseJob>(`/entries/${encodeURIComponent(entryId)}/analyze/jobs`, {}, 'job');
+}
+
 // ───────────── 知识库 CRUD ─────────────
 
 export async function fetchKbs(): Promise<KnowledgeBase[]> {

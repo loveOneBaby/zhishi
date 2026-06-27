@@ -14,17 +14,19 @@ import { kbDraftFromModelOutput } from '../ai/parse.js';
 import { createFoldersFromDraft, createKnowledgeBaseWriterFromDraft, createKnowledgeBaseWriterFromExisting, type GeneratedKnowledgeBaseResult } from './kb-draft-writer.js';
 import { folderPathLabel } from './utils.js';
 import { searchEntries } from '../search.js';
+import { analyzeKnowledgeBase, analyzeEntry, type KbAnalysis } from '../ai-analyze.js';
 import type { Folder } from '../types.js';
 
 export type AiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface AiKnowledgeBaseJob {
   id: string;
-  kind: 'kb-generate' | 'folder-init' | 'folder-entries';
+  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze';
   domain: string;
   questionCount: number;
   kbId?: string;
   kbName?: string;
+  entryId?: string;
   parentId?: string | null;
   targetPath?: string;
   status: AiJobStatus;
@@ -33,6 +35,7 @@ export interface AiKnowledgeBaseJob {
   parsed?: { kbName: string; folders: number; questions: number };
   plan?: GeneratedKbDraft;
   result?: GeneratedKnowledgeBaseResult;
+  analysis?: KbAnalysis;
   resumable?: boolean;
   error?: string;
   abortRequested?: boolean;
@@ -71,12 +74,15 @@ function pushJobLog(job: AiKnowledgeBaseJob, message: string): void {
 }
 
 export function jobSnapshot(job: AiKnowledgeBaseJob): AiKnowledgeBaseJob {
-  const result = hydrateKnowledgeBaseResult(job);
+  // 分析任务不绑定知识库结果(否则会误显示「进入知识库 / 实时写入」)
+  const result = job.kind === 'analyze' ? null : hydrateKnowledgeBaseResult(job);
   return {
     ...job,
-    resumable: job.kind === 'folder-init' || job.kind === 'folder-entries'
-      ? Boolean(job.kbId && job.kbName && getKb(job.kbId))
-      : canResumeKnowledgeBaseJob(job),
+    resumable: job.kind === 'analyze'
+      ? (Boolean(job.entryId) || Boolean(job.kbId && job.kbName && getKb(job.kbId)))
+      : job.kind === 'folder-init' || job.kind === 'folder-entries'
+        ? Boolean(job.kbId && job.kbName && getKb(job.kbId))
+        : canResumeKnowledgeBaseJob(job),
     logs: [...job.logs],
     result: result ? {
       kb: result.kb,
@@ -113,6 +119,7 @@ function createBaseJob(input: {
   questionCount?: number;
   kbId?: string;
   kbName?: string;
+  entryId?: string;
   parentId?: string | null;
   targetPath?: string;
   logs: string[];
@@ -125,6 +132,7 @@ function createBaseJob(input: {
     questionCount: input.questionCount ?? 0,
     kbId: input.kbId,
     kbName: input.kbName,
+    entryId: input.entryId,
     parentId: input.parentId,
     targetPath: input.targetPath,
     status: 'queued',
@@ -140,6 +148,7 @@ function scheduleJob(job: AiKnowledgeBaseJob): void {
   setTimeout(() => {
     if (job.kind === 'folder-init') void runFolderInitJob(job.id, job.questionCount || 18);
     else if (job.kind === 'folder-entries') void runFolderEntriesJob(job.id);
+    else if (job.kind === 'analyze') void runAnalyzeJob(job.id);
     else void runKnowledgeBaseJob(job.id);
   }, 0);
 }
@@ -249,6 +258,79 @@ export function startFolderEntriesJob(input: {
   return job;
 }
 
+export function startAnalyzeJob(input: { kbId: string; kbName: string }): AiKnowledgeBaseJob {
+  const job = createBaseJob({
+    kind: 'analyze',
+    domain: input.kbName,
+    kbId: input.kbId,
+    kbName: input.kbName,
+    logs: ['知识库分析任务已创建，等待后台执行'],
+  });
+  aiJobs.set(job.id, job);
+  persistJob(job);
+  pruneJobs();
+  scheduleJob(job);
+  return job;
+}
+
+export function startAnalyzeEntryJob(input: { entryId: string; entryTitle: string; kbId?: string }): AiKnowledgeBaseJob {
+  const job = createBaseJob({
+    kind: 'analyze',
+    domain: input.entryTitle,
+    kbId: input.kbId,
+    entryId: input.entryId,
+    logs: ['知识点分析任务已创建，等待后台执行'],
+  });
+  aiJobs.set(job.id, job);
+  persistJob(job);
+  pruneJobs();
+  scheduleJob(job);
+  return job;
+}
+
+async function runAnalyzeJob(jobId: string): Promise<void> {
+  const job = aiJobs.get(jobId);
+  if (!job || job.status === 'cancelled') return;
+  if (runningControllers.has(jobId)) return;
+  const controller = new AbortController();
+  runningControllers.set(jobId, controller);
+  job.status = 'running';
+  job.abortRequested = false;
+  pushJobLog(job, '后台分析已启动');
+  try {
+    let analysis: KbAnalysis;
+    if (job.entryId) {
+      pushJobLog(job, '汇总知识点正文，提交大模型诊断结构 / 内容 / 排版');
+      analysis = await analyzeEntry(job.entryId, controller.signal);
+    } else {
+      if (!job.kbId) throw new Error('知识库不存在');
+      if (!getKb(job.kbId)) throw new Error('知识库不存在');
+      pushJobLog(job, '汇总目录与知识点，提交大模型诊断');
+      analysis = await analyzeKnowledgeBase(job.kbId, controller.signal);
+    }
+    if (isJobCancelled(jobId)) return;
+    job.analysis = analysis;
+    job.parsed = { kbName: job.kbName ?? job.domain, folders: 0, questions: analysis.suggestions.length };
+    job.status = 'succeeded';
+    job.abortRequested = false;
+    pushJobLog(job, `分析完成：${analysis.suggestions.length} 条建议`);
+    touchJob(job);
+  } catch (err) {
+    if (isJobCancelled(jobId) || isAbortError(err)) {
+      job.status = 'cancelled';
+      job.error = '用户已取消任务';
+      pushJobLog(job, '任务已取消');
+    } else {
+      job.status = 'failed';
+      job.error = err instanceof Error ? err.message : String(err);
+      pushJobLog(job, job.error);
+    }
+    touchJob(job);
+  } finally {
+    runningControllers.delete(jobId);
+  }
+}
+
 export function cancelAiJob(id: string): AiKnowledgeBaseJob | null {
   const job = aiJobs.get(id);
   if (!job) return null;
@@ -265,6 +347,15 @@ export function retryAiJob(id: string): AiKnowledgeBaseJob | null {
   const job = aiJobs.get(id);
   if (!job) return null;
   if (job.status === 'queued' || job.status === 'running') return jobSnapshot(job);
+  if (job.kind === 'analyze') {
+    if (!job.entryId && !(job.kbId && job.kbName)) return null;
+    job.status = 'queued';
+    job.error = undefined;
+    job.abortRequested = false;
+    pushJobLog(job, '重新提交分析任务');
+    scheduleJob(job);
+    return jobSnapshot(job);
+  }
   if (job.kind === 'folder-init' || job.kind === 'folder-entries') {
     if (!job.kbId || !job.kbName) return null;
     job.status = 'queued';

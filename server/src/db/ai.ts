@@ -1,7 +1,7 @@
 import { db } from './client.js';
 
 export type StoredAiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-export type StoredAiJobKind = 'kb-generate' | 'folder-init' | 'folder-entries';
+export type StoredAiJobKind = 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze';
 
 export interface StoredAiJob {
   id: string;
@@ -10,6 +10,7 @@ export interface StoredAiJob {
   questionCount: number;
   kbId?: string;
   kbName?: string;
+  entryId?: string;
   parentId?: string | null;
   targetPath?: string;
   status: StoredAiJobStatus;
@@ -18,6 +19,7 @@ export interface StoredAiJob {
   parsed?: { kbName: string; folders: number; questions: number };
   plan?: unknown;
   result?: unknown;
+  analysis?: unknown;
   error?: string;
   abortRequested?: boolean;
   createdAt: number;
@@ -52,6 +54,12 @@ const aiJobColumns = db.prepare('PRAGMA table_info(ai_jobs)').all() as { name: s
 if (!aiJobColumns.some((c) => c.name === 'plan')) {
   db.exec('ALTER TABLE ai_jobs ADD COLUMN plan TEXT');
 }
+if (!aiJobColumns.some((c) => c.name === 'analysis')) {
+  db.exec('ALTER TABLE ai_jobs ADD COLUMN analysis TEXT');
+}
+if (!aiJobColumns.some((c) => c.name === 'entryId')) {
+  db.exec('ALTER TABLE ai_jobs ADD COLUMN entryId TEXT');
+}
 
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
@@ -64,7 +72,7 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
 
 function rowToJob(row: Record<string, unknown>): StoredAiJob {
   const rawKind = String(row.kind);
-  const kind: StoredAiJobKind = rawKind === 'folder-init' || rawKind === 'folder-entries' ? rawKind : 'kb-generate';
+  const kind: StoredAiJobKind = rawKind === 'folder-init' || rawKind === 'folder-entries' || rawKind === 'analyze' ? rawKind : 'kb-generate';
   return {
     id: String(row.id),
     kind,
@@ -72,6 +80,7 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
     questionCount: Number(row.questionCount ?? 0),
     kbId: typeof row.kbId === 'string' && row.kbId ? row.kbId : undefined,
     kbName: typeof row.kbName === 'string' && row.kbName ? row.kbName : undefined,
+    entryId: typeof row.entryId === 'string' && row.entryId ? row.entryId : undefined,
     parentId: row.parentId == null ? null : String(row.parentId),
     targetPath: typeof row.targetPath === 'string' && row.targetPath ? row.targetPath : undefined,
     status: String(row.status ?? 'failed') as StoredAiJobStatus,
@@ -80,6 +89,7 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
     parsed: parseJson<StoredAiJob['parsed'] | undefined>(row.parsed as string | null, undefined),
     plan: parseJson<unknown | undefined>(row.plan as string | null, undefined),
     result: parseJson<unknown | undefined>(row.result as string | null, undefined),
+    analysis: parseJson<unknown | undefined>(row.analysis as string | null, undefined),
     error: typeof row.error === 'string' && row.error ? row.error : undefined,
     abortRequested: Number(row.abortRequested ?? 0) === 1,
     createdAt: Number(row.createdAt ?? 0),
@@ -90,11 +100,11 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
 export function saveAiJob(job: StoredAiJob): void {
   db.prepare(`
     INSERT INTO ai_jobs (
-      id, kind, domain, questionCount, kbId, kbName, parentId, targetPath, status,
-      logs, modelOutput, parsed, plan, result, error, abortRequested, createdAt, updatedAt
+      id, kind, domain, questionCount, kbId, kbName, entryId, parentId, targetPath, status,
+      logs, modelOutput, parsed, plan, result, analysis, error, abortRequested, createdAt, updatedAt
     ) VALUES (
-      :id, :kind, :domain, :questionCount, :kbId, :kbName, :parentId, :targetPath, :status,
-      :logs, :modelOutput, :parsed, :plan, :result, :error, :abortRequested, :createdAt, :updatedAt
+      :id, :kind, :domain, :questionCount, :kbId, :kbName, :entryId, :parentId, :targetPath, :status,
+      :logs, :modelOutput, :parsed, :plan, :result, :analysis, :error, :abortRequested, :createdAt, :updatedAt
     )
     ON CONFLICT(id) DO UPDATE SET
       kind=excluded.kind,
@@ -102,6 +112,7 @@ export function saveAiJob(job: StoredAiJob): void {
       questionCount=excluded.questionCount,
       kbId=excluded.kbId,
       kbName=excluded.kbName,
+      entryId=excluded.entryId,
       parentId=excluded.parentId,
       targetPath=excluded.targetPath,
       status=excluded.status,
@@ -110,6 +121,7 @@ export function saveAiJob(job: StoredAiJob): void {
       parsed=excluded.parsed,
       plan=excluded.plan,
       result=excluded.result,
+      analysis=excluded.analysis,
       error=excluded.error,
       abortRequested=excluded.abortRequested,
       updatedAt=excluded.updatedAt
@@ -119,9 +131,11 @@ export function saveAiJob(job: StoredAiJob): void {
     parsed: job.parsed ? JSON.stringify(job.parsed) : null,
     plan: job.plan ? JSON.stringify(job.plan) : null,
     result: job.result ? JSON.stringify(job.result) : null,
+    analysis: job.analysis ? JSON.stringify(job.analysis) : null,
     error: job.error ?? null,
     kbId: job.kbId ?? null,
     kbName: job.kbName ?? null,
+    entryId: job.entryId ?? null,
     parentId: job.parentId ?? null,
     targetPath: job.targetPath ?? null,
     abortRequested: job.abortRequested ? 1 : 0,

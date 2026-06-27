@@ -1,7 +1,22 @@
 import { AlertCircle, Ban, CheckCircle2, Clock3, ExternalLink, FileText, FolderTree, Loader2, RefreshCw, Sparkles, Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { AiKnowledgeBaseJob } from '../api';
+import type { AiKnowledgeBaseJob, KbSuggestion } from '../api';
+import KbAnalysisPanel, { type KbApiState } from './KbAnalysisPanel';
+import LiveRewritePanel from './free/LiveRewritePanel';
+
+// 前端流式 AI 操作(生成/改写/图解)的任务记录:运行时驱动实时预览,完成后作为记录保留
+export interface LiveTask {
+  id: string;
+  entryId: string;
+  title: string;
+  label: string;
+  mode: 'rewrite' | 'generate';
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  stage: string;
+  raw: string;
+  createdAt: number;
+}
 
 export interface AiQuickAction {
   id: string;
@@ -11,6 +26,15 @@ export interface AiQuickAction {
   onClick: () => void;
   disabled?: boolean;
   meta?: string;
+  // 需要输入时:点击卡片就地展开输入框(不弹窗),提交后回调
+  prompt?: {
+    placeholder: string;
+    submitLabel?: string;
+    optional?: boolean;
+    onSubmit: (value: string) => void;
+  };
+  // 需要二次确认时:点击卡片就地展开"确认/取消",防止误触
+  confirm?: boolean;
 }
 
 interface Props {
@@ -23,6 +47,13 @@ interface Props {
   onClearHistory: () => Promise<void>;
   actions?: AiQuickAction[];
   contextLabel?: string;
+  onApplySuggestion?: (s: KbSuggestion) => void;
+  onApplyAllSuggestions?: (list: KbSuggestion[]) => void;
+  analysisAppliedIds?: Set<string>;
+  analysisRunningId?: string | null;
+  analysisApplyingAll?: boolean;
+  liveTasks?: LiveTask[];
+  onCancelLiveTask?: (id: string) => void;
 }
 
 function statusLabel(status: AiKnowledgeBaseJob['status']): string {
@@ -38,12 +69,13 @@ function statusLabel(status: AiKnowledgeBaseJob['status']): string {
 function jobKindLabel(job: AiKnowledgeBaseJob): string {
   if (job.kind === 'folder-init') return '目录初始化';
   if (job.kind === 'folder-entries') return '目录生成知识点';
+  if (job.kind === 'analyze') return job.entryId ? 'AI 分析知识点' : 'AI 分析知识库';
   return '新建知识库';
 }
 
 function runningText(job: AiKnowledgeBaseJob): string {
   if (job.status === 'queued') return '排队中';
-  if (job.status === 'running') return job.kind === 'folder-init' ? '初始化中' : '生成中';
+  if (job.status === 'running') return job.kind === 'folder-init' ? '初始化中' : job.kind === 'analyze' ? '分析中' : '生成中';
   return statusLabel(job.status);
 }
 
@@ -65,7 +97,16 @@ function outputJsonLabel(job: AiKnowledgeBaseJob): string {
   return '知识库 JSON';
 }
 
-function statusIcon(status: AiKnowledgeBaseJob['status']): ReactNode {
+function liveStatusLabel(status: LiveTask['status']): string {
+  switch (status) {
+    case 'running': return '进行中';
+    case 'succeeded': return '已完成';
+    case 'failed': return '失败';
+    case 'cancelled': return '已取消';
+  }
+}
+
+function statusIcon(status: AiKnowledgeBaseJob['status'] | LiveTask['status']): ReactNode {
   if (status === 'succeeded') return <CheckCircle2 size={16} strokeWidth={2.2} />;
   if (status === 'failed') return <AlertCircle size={16} strokeWidth={2.2} />;
   if (status === 'cancelled') return <Ban size={16} strokeWidth={2.2} />;
@@ -151,8 +192,20 @@ export default function AiTaskCenter({
   onClearHistory,
   actions = [],
   contextLabel,
+  onApplySuggestion,
+  onApplyAllSuggestions,
+  analysisAppliedIds,
+  analysisRunningId,
+  analysisApplyingAll,
+  liveTasks = [],
+  onCancelLiveTask,
 }: Props): ReactNode {
+  const runningLive = liveTasks.find((t) => t.status === 'running') ?? null;
+  const sortedLive = useMemo(() => [...liveTasks].sort((a, b) => b.createdAt - a.createdAt), [liveTasks]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [promptId, setPromptId] = useState<string | null>(null);
+  const [promptValue, setPromptValue] = useState('');
+  const closePrompt = () => { setPromptId(null); setPromptValue(''); };
   const sortedJobs = useMemo(() => [...jobs].sort((a, b) => b.createdAt - a.createdAt), [jobs]);
   const runningCount = sortedJobs.filter((job) => job.status === 'queued' || job.status === 'running').length;
   const historyCount = sortedJobs.length - runningCount;
@@ -172,6 +225,17 @@ export default function AiTaskCenter({
       setSelectedId(sortedJobs[0].id);
     }
   }, [selectedId, sortedJobs]);
+
+  // 新建任务时自动定位过去:监测最新任务 id,出现更新的任务就选中它
+  const lastTopIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const top = sortedJobs[0];
+    if (!top) { lastTopIdRef.current = null; return; }
+    if (lastTopIdRef.current !== null && top.id !== lastTopIdRef.current) {
+      setSelectedId(top.id);
+    }
+    lastTopIdRef.current = top.id;
+  }, [sortedJobs]);
 
   if (!sortedJobs.length && !actions.length) return null;
 
@@ -219,37 +283,91 @@ export default function AiTaskCenter({
                 <b>{runningCount ? `${runningCount} 个后台任务运行中` : '按当前位置执行'}</b>
               </div>
               <div className="ik-ai-command-grid">
-                {actions.map((action) => (
-                  <button
-                    key={action.id}
-                    type="button"
-                    className="ik-ai-command-card"
-                    disabled={action.disabled}
-                    onClick={() => {
-                      if (action.disabled) return;
-                      action.onClick();
-                    }}
-                  >
-                    <span className="ik-ai-command-icon">{action.icon}</span>
-                    <span className="ik-ai-command-copy">
-                      <b>{action.title}</b>
-                      <small>{action.description}</small>
-                    </span>
-                    {action.meta && <em>{action.meta}</em>}
-                  </button>
-                ))}
+                {actions.map((action, index) => {
+                  const open = promptId === action.id && (Boolean(action.prompt) || Boolean(action.confirm));
+                  const alignRight = index % 3 === 2;
+                  return (
+                    <div className={`ik-ai-command-cell ${open ? 'is-open' : ''} ${alignRight ? 'is-right' : ''}`} key={action.id}>
+                      <button
+                        type="button"
+                        className="ik-ai-command-card"
+                        disabled={action.disabled}
+                        title={action.description}
+                        onClick={() => {
+                          if (action.disabled) return;
+                          if (action.prompt || action.confirm) { setPromptValue(''); setPromptId(open ? null : action.id); return; }
+                          action.onClick();
+                        }}
+                      >
+                        <span className="ik-ai-command-icon">{action.icon}</span>
+                        <b className="ik-ai-command-label">{action.title}</b>
+                      </button>
+                      {open && (
+                        <>
+                          <div className="ik-ai-pop-backdrop" onClick={closePrompt} />
+                          <div className="ik-ai-command-pop" role="dialog">
+                            {action.prompt ? (
+                              <form
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  const value = promptValue.trim();
+                                  if (!value && !action.prompt?.optional) return;
+                                  action.prompt?.onSubmit(value);
+                                  closePrompt();
+                                }}
+                              >
+                                <input
+                                  autoFocus
+                                  className="ik-ai-command-input"
+                                  placeholder={action.prompt.placeholder}
+                                  value={promptValue}
+                                  onChange={(e) => setPromptValue(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === 'Escape') closePrompt(); }}
+                                />
+                                <div className="ik-ai-pop-actions">
+                                  <button type="button" className="ik-ai-pop-cancel" onClick={closePrompt}>取消</button>
+                                  <button type="submit" className="ik-ai-command-go">{action.prompt.submitLabel ?? '生成'}</button>
+                                </div>
+                              </form>
+                            ) : (
+                              <>
+                                <div className="ik-ai-pop-text">确认执行「{action.title}」？</div>
+                                <div className="ik-ai-pop-actions">
+                                  <button type="button" className="ik-ai-pop-cancel" onClick={closePrompt}>取消</button>
+                                  <button type="button" className="ik-ai-command-go" onClick={() => { action.onClick(); closePrompt(); }}>确认</button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}
 
-          {sortedJobs.length > 0 ? (
+          {(sortedJobs.length > 0 || liveTasks.length > 0) ? (
           <div className="ik-ai-task-panel-body">
             <div className="ik-ai-task-list">
+              {sortedLive.map((task) => (
+                <div key={task.id} className={`ik-ai-task-row is-${task.status === 'running' ? 'live-active' : task.status} ${task.status === 'running' ? 'is-active' : ''}`}>
+                  <span className="ik-ai-task-row-icon">{statusIcon(task.status)}</span>
+                  <span className="ik-ai-task-row-main">
+                    <b>{task.title}</b>
+                    <small>{task.label} · {task.stage || liveStatusLabel(task.status)}</small>
+                  </span>
+                  {task.status === 'running' && onCancelLiveTask && (
+                    <button type="button" className="ik-ai-task-row-cancel" onClick={() => onCancelLiveTask(task.id)} aria-label="取消"><X size={14} strokeWidth={2.3} /></button>
+                  )}
+                </div>
+              ))}
               {sortedJobs.map((job) => (
                 <button
                   key={job.id}
                   type="button"
-                  className={`ik-ai-task-row ${selectedJob?.id === job.id ? 'is-active' : ''} is-${job.status}`}
+                  className={`ik-ai-task-row ${!runningLive && selectedJob?.id === job.id ? 'is-active' : ''} is-${job.status}`}
                   onClick={() => setSelectedId(job.id)}
                 >
                   <span className="ik-ai-task-row-icon">{statusIcon(job.status)}</span>
@@ -264,7 +382,31 @@ export default function AiTaskCenter({
               ))}
             </div>
 
-            {selectedJob && (
+            {runningLive ? (
+              <section className="ik-ai-task-detail ik-ai-task-detail-live">
+                <LiveRewritePanel title={runningLive.title} raw={runningLive.raw} stage={runningLive.stage} mode={runningLive.mode} onCancel={() => onCancelLiveTask?.(runningLive.id)} />
+              </section>
+            ) : selectedJob && selectedJob.kind === 'analyze' ? (
+              <section className="ik-ai-task-detail">
+                <KbAnalysisPanel
+                  kbName={selectedJob.kbName ?? selectedJob.domain}
+                  analysis={(
+                    selectedJob.status === 'succeeded' && selectedJob.analysis
+                      ? { status: 'ready', data: selectedJob.analysis }
+                      : selectedJob.status === 'failed' || selectedJob.status === 'cancelled'
+                        ? { status: 'error', message: selectedJob.error ?? (selectedJob.status === 'cancelled' ? '已取消分析' : '分析失败') }
+                        : { status: 'loading' }
+                  ) as KbApiState}
+                  appliedIds={analysisAppliedIds ?? new Set()}
+                  runningId={analysisRunningId ?? null}
+                  applyingAll={Boolean(analysisApplyingAll)}
+                  onRetry={() => { void onRetry(selectedJob.id); }}
+                  onApply={(s) => onApplySuggestion?.(s)}
+                  onApplyAll={(list) => onApplyAllSuggestions?.(list)}
+                  onCancel={() => { void onCancel(selectedJob.id); }}
+                />
+              </section>
+            ) : selectedJob && (
               <section className="ik-ai-task-detail">
                 <div className={`ik-ai-task-status is-${selectedJob.status}`}>
                   <span>{statusIcon(selectedJob.status)}</span>

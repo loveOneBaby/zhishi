@@ -159,6 +159,7 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
         title="AI 生成知识点"
         description={`将生成到 ${targetLabel || '当前位置'}。`}
         inputLabel="主题或面试题"
+        initialValue={command.topic ?? ''}
         placeholder="例如：ReAct 工作模式、RAG 多路召回、MCP 协议"
         helper="会自动生成知识内容、面试考点、常见追问和易错点。"
         confirmText="生成"

@@ -23,6 +23,7 @@ import {
 } from '../db.js';
 import { searchEntries } from '../search.js';
 import { folderPathLabel, sendSse } from '../services/utils.js';
+import { jobSnapshot, startAnalyzeEntryJob } from '../services/ai-jobs.js';
 
 export function registerEntryRoutes(api: Router): void {
   // ───────────── 知识点 ─────────────
@@ -233,8 +234,13 @@ export function registerEntryRoutes(api: Router): void {
     });
     sendSse(res, 'stage', { message: '准备改写草稿请求' });
 
+    const instruction = typeof req.body?.instruction === 'string' ? req.body.instruction : undefined;
+    // 客户端断开(取消改写)时,中止正在进行的大模型调用。
+    // 注意:必须监听 res 的 close 且判断未写完,req 的 close 在请求体读完后就会触发,会导致误中止。
+    const abort = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) abort.abort(); });
     try {
-      const input = await rewriteEntryInputStream({ entry: current }, (event: GenerateEntryEvent) => sendSse(res, event.type, event));
+      const input = await rewriteEntryInputStream({ entry: current, instruction, signal: abort.signal }, (event: GenerateEntryEvent) => sendSse(res, event.type, event));
       const illustrated = await appendAiIllustration(input, {
         title: input.title,
         summary: input.summary,
@@ -283,6 +289,9 @@ export function registerEntryRoutes(api: Router): void {
     });
     sendSse(res, 'stage', { message: '准备生成图解' });
 
+    // 客户端断开(取消)时中止图解生成
+    const abort = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) abort.abort(); });
     try {
       const input: EntryInput = {
         title: current.title,
@@ -298,7 +307,7 @@ export function registerEntryRoutes(api: Router): void {
         tags: current.tags,
         kbName: current.cat,
         folderPath: folderPathLabel(current.folderId),
-      }, undefined, (event) => sendSse(res, event.type, event), true);
+      }, abort.signal, (event) => sendSse(res, event.type, event), true);
       sendSse(res, 'stage', { message: '写回当前知识点' });
       createEntryVersion(current, 'ai-illustration');
       const entry = updateEntry(current.id, illustrated);
@@ -324,6 +333,14 @@ export function registerEntryRoutes(api: Router): void {
     const entry = restoreEntryVersion(req.params.id, req.params.versionId);
     if (!entry) return res.status(404).json({ error: '版本不存在' });
     res.json({ entry });
+  });
+
+  // AI 分析当前知识点(后台任务):诊断页面结构 / 内容质量 / 排版规范,给出建议
+  api.post('/entries/:id/analyze/jobs', (req, res) => {
+    const entry = getEntry(req.params.id);
+    if (!entry) return res.status(404).json({ error: '知识点不存在' });
+    const job = startAnalyzeEntryJob({ entryId: entry.id, entryTitle: entry.title, kbId: entry.kbId });
+    res.status(202).json({ job: jobSnapshot(job) });
   });
 
   // 单条
@@ -353,8 +370,20 @@ export function registerEntryRoutes(api: Router): void {
     res.json({ ok: true, entries: listEntries() });
   });
 
-  // 更新
+  // 更新(手动编辑):内容有实际变化时,先把旧版本存为一个历史版本
   api.put('/entries/:id', (req, res) => {
+    const current = getEntry(req.params.id);
+    const input = (req.body ?? {}) as Partial<EntryInput>;
+    if (current) {
+      const before = JSON.stringify({ t: current.title, s: current.summary, g: current.tags, d: current.doc });
+      const after = JSON.stringify({
+        t: input.title ?? current.title,
+        s: input.summary ?? current.summary,
+        g: input.tags ?? current.tags,
+        d: input.doc ?? current.doc,
+      });
+      if (before !== after) createEntryVersion(current, 'manual-edit');
+    }
     const entry = updateEntry(req.params.id, req.body ?? {});
     if (!entry) return res.status(404).json({ error: 'not found' });
     res.json({ entry });

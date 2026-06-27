@@ -57,6 +57,11 @@
   background: var(--fg);
   color: #fff;
 }
+.ik-theme-glass .ik-segbtn-primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--fg) 86%, #ffffff);
+  color: #fff;
+}
 
 .ik-kt-toolbar {
   display: flex;
@@ -72,6 +77,38 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
+}
+.ik-kt-quick-actions {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  width: 100%;
+}
+.ik-kt-iconbtn {
+  padding: 5px !important;
+  width: 30px;
+  flex: 0 0 auto;
+}
+.ik-kt-iconbtn svg {
+  opacity: .82;
+}
+.ik-kt-iconbtn:hover svg {
+  opacity: 1;
+}
+.ik-kt-iconbtn.is-active {
+  background: var(--fg) !important;
+  border-color: var(--fg) !important;
+  color: var(--bg);
+}
+.ik-kt-iconbtn.is-active svg {
+  opacity: 1;
+}
+.ik-kt-tool-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 18px;
+  margin: 2px 3px;
+  background: var(--bd);
+  flex: 0 0 auto;
 }
 .ik-kt-quick-actions button,
 .ik-kt-batchbar button {
@@ -404,6 +441,12 @@
   color: var(--mut);
   font-size: 13px;
   text-align: center;
+}
+.ik-kt-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
 }
 .ik-kt-empty button {
   min-height: 30px;

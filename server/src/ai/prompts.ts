@@ -106,10 +106,14 @@ export function buildGenerateFolderTreeMessages(options: GenerateFolderTreeOptio
 }
 
 export function buildRewriteMessages(options: RewriteEntryOptions): AiMessage[] {
-  const { entry } = options;
+  const { entry, instruction } = options;
   const currentMarkdown = blocksToMarkdown(entry.doc);
+  const focusLines = instruction && instruction.trim()
+    ? ['本次改写必须优先落实以下改进建议（在保留主题的前提下重点补强）：', instruction.trim(), '']
+    : [];
   const prompt = [
     '请改写下面这个面试知识点，让它更适合复习和面试表达。',
+    ...focusLines,
     '输出必须分两段：',
     '1）先输出“改写思路”，用 3-6 条短 bullet 说明你会补强哪些知识、删减哪些冗余、如何组织面试考点。这里是可公开说明，不要输出隐藏推理链路。',
     '2）然后输出一行 ---JSON---，后面只放一个 JSON 对象，不要 Markdown 代码围栏。',
