@@ -34,6 +34,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# 备份文件
+.backups/
+
 # 临时文件
 output/
 .thumbnail

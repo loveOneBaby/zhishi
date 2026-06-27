@@ -13,7 +13,7 @@ import type { SelectOption } from './SelectField';
 import { exportAll, generateEntryDraftWithAIStream, generateEntryIllustrationWithAIStream, rewriteEntryDraftWithAIStream, commitRewriteEntryDraft, type KbSuggestion } from '../api';
 import { toast } from '../toast';
 import { KbGallery } from './free/KbGallery';
-import AiTaskCenter, { type AiQuickAction, type LiveTask } from './AiTaskCenter';
+import AiTaskCenter, { type AiContextCrumb, type AiQuickAction, type LiveTask } from './AiTaskCenter';
 import { ROOT_IMPORT_TARGET, orderEntries, treePanelStyle } from './free/utils';
 import { useAiLiveOutput } from './free/useAiLiveOutput';
 import { useUndoableDeletes } from './free/useUndoableDeletes';
@@ -123,6 +123,7 @@ export default function FreeMode(props: Props): ReactNode {
       if (panelMode !== 'detail') setPanelMode('detail');
       return;
     }
+    if (!selectedEntryId) return;
     if (selectedEntryId && kbEntries.some((entry) => entry.id === selectedEntryId)) return;
     if (selectedEntryId && kbEntries.length === 0) return;
     setSelectedEntryId(kbEntries[0]?.id ?? null);
@@ -573,6 +574,15 @@ export default function FreeMode(props: Props): ReactNode {
     });
   }
 
+  function jumpToAiFolder(folderId: string | null): void {
+    guardPanel(() => {
+      setFreeFolder(folderId);
+      setSelectedEntryId(null);
+      setPanelMode('detail');
+      dirtyRef.current = false;
+    });
+  }
+
   function editEntryAction(entry: Entry): void {
     guardPanel(() => {
       setSelectedEntryId(entry.id);
@@ -645,6 +655,44 @@ export default function FreeMode(props: Props): ReactNode {
     action();
   };
   const aiContextLabel = selectedEntry ? viewingPathLabel : operationPathLabel;
+  const aiContextCrumbs = useMemo<AiContextCrumb[]>(() => {
+    if (!currentKb) return [];
+    const crumbs: AiContextCrumb[] = [
+      {
+        key: `kb:${currentKb.id}`,
+        label: currentKb.name,
+        title: `${currentKb.name} / 根层级`,
+        current: !selectedEntry && !currentFolderId,
+        onClick: () => jumpToAiFolder(null),
+      },
+    ];
+    if (!currentFolderChain.length) {
+      crumbs.push({
+        key: `kb:${currentKb.id}:root`,
+        label: '根层级',
+        title: `${currentKb.name} / 根层级`,
+        current: !selectedEntry && !currentFolderId,
+        onClick: () => jumpToAiFolder(null),
+      });
+    } else {
+      crumbs.push(...currentFolderChain.map((folder) => ({
+        key: `folder:${folder.id}`,
+        label: folder.name,
+        title: folderPathName(folders, folder.id) || folder.name,
+        current: !selectedEntry && currentFolderId === folder.id,
+        onClick: () => jumpToAiFolder(folder.id),
+      })));
+    }
+    if (selectedEntry) {
+      crumbs.push({
+        key: `entry:${selectedEntry.id}`,
+        label: selectedEntry.title,
+        title: selectedEntry.title,
+        current: true,
+      });
+    }
+    return crumbs;
+  }, [currentFolderChain, currentFolderId, currentKb, folders, selectedEntry]);
   const aiActions: AiQuickAction[] = freeKb ? [
     {
       id: 'generate-entry',
@@ -737,6 +785,7 @@ export default function FreeMode(props: Props): ReactNode {
       onClearHistory={onClearAiJobHistory}
       actions={aiActions}
       contextLabel={aiContextLabel}
+      contextCrumbs={aiContextCrumbs}
       onApplySuggestion={applySuggestion}
       onApplyAllSuggestions={applyAllSuggestions}
       analysisAppliedIds={appliedIds}
@@ -764,6 +813,7 @@ export default function FreeMode(props: Props): ReactNode {
           deleteCategory={onDeleteKbCategory}
           moveKbToCategory={onMoveKbToCategory}
           onExportAll={handleExport}
+          onImportKnowledgeBases={importLogic.importKnowledgeBases}
           openKb={openKb}
           renameKbAction={renameKbAction}
           deleteKbAction={deleteKbAction}
@@ -772,6 +822,13 @@ export default function FreeMode(props: Props): ReactNode {
           onCloseImportPreview={() => { if (!importLogic.importing) importLogic.setImportPreview(null); }}
           handleConfirmImport={importLogic.handleConfirmImport}
           commandDialog={commandDialog}
+        />
+        <input
+          ref={importLogic.importInputRef}
+          type="file"
+          accept="application/json"
+          style={{ display: 'none' }}
+          onChange={importLogic.handleKnowledgeBaseImport}
         />
         {aiCenter}
       </>

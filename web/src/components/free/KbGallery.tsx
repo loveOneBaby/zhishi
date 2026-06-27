@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { Check, ChevronRight, Download, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Tags, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, Download, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Tags, Trash2, Upload } from 'lucide-react';
 import type { Entry, Folder as KbFolder, KnowledgeBase, KbCategory } from '../../types';
 import ImportPreviewModal from '../ImportPreviewModal';
 import CommandDialog from '../CommandDialog';
@@ -36,6 +36,7 @@ interface KbGalleryProps {
   deleteCategory: (id: string) => Promise<void>;
   moveKbToCategory: (id: string, categoryId?: string | null) => Promise<void>;
   onExportAll: () => Promise<void>;
+  onImportKnowledgeBases: () => void;
   openKb: (kb: KnowledgeBase) => void;
   renameKbAction: (kb: KnowledgeBase) => void;
   deleteKbAction: (kb: KnowledgeBase) => void;
@@ -58,7 +59,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
   const {
     kbs, categories, entries, folders, entriesOfKb, newKb,
     createCategory, renameCategory, deleteCategory, moveKbToCategory,
-    onExportAll, openKb, renameKbAction, deleteKbAction, importPreview, importing, onCloseImportPreview,
+    onExportAll, onImportKnowledgeBases, openKb, renameKbAction, deleteKbAction, importPreview, importing, onCloseImportPreview,
     handleConfirmImport, commandDialog,
   } = props;
 
@@ -191,7 +192,11 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
       if (categoryCommand.kind === 'create') {
         const name = value.trim();
         if (!name) throw new Error('分类名称不能为空');
-        await createCategory({ name, parentId: categoryCommand.parentId });
+        const category = await createCategory({ name, parentId: categoryCommand.parentId });
+        if (categoryCommand.parentId) {
+          setExpanded((current) => new Set(current).add(categoryCommand.parentId!));
+        }
+        setActiveCategory(category.id);
         toast('已新建分类', 'success');
       } else if (categoryCommand.kind === 'rename') {
         const name = value.trim();
@@ -238,10 +243,16 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
           <div style={{ fontSize: 12, color: 'var(--mut)', fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase' }}>Knowledge Bases</div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 7, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 30, fontWeight: 840, letterSpacing: 0 }}>知识库</span>
-            <span style={{ fontSize: 13, color: 'var(--mut)' }}>{kbs.length} 个知识库 · {entries.length} 条知识点 · {categories.length} 个分类</span>
+            <span style={{ fontSize: 13, color: 'var(--mut)' }}>{entries.length} 条知识点 · {categories.length} 个分类</span>
           </div>
         </div>
         <div className="ik-kb-gallery-actions">
+          <button
+            className="ik-btn ik-btn-secondary ik-btn-size-md"
+            onClick={onImportKnowledgeBases}
+          >
+            <span className="ik-btn-leading-icon"><Upload size={15} strokeWidth={2.3} /></span>导入知识库
+          </button>
           <button
             className="ik-btn ik-btn-secondary ik-btn-size-md"
             onClick={() => {
@@ -250,7 +261,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
           >
             <span className="ik-btn-leading-icon"><Download size={15} strokeWidth={2.3} /></span>导出全部
           </button>
-          <button className="ik-btn ik-btn-secondary ik-btn-size-md" onClick={() => setCategoryCommand({ kind: 'create', parentId: activeCategoryId, parentName: activeCategoryId ? activeCategoryName : undefined })}>
+          <button className="ik-btn ik-btn-secondary ik-btn-size-md" onClick={() => setCategoryCommand({ kind: 'create', parentId: null })}>
             <span className="ik-btn-leading-icon"><FolderPlus size={15} strokeWidth={2.4} /></span>新建分类
           </button>
           <button className="ik-btn ik-btn-default ik-btn-size-md" onClick={createKbInActiveCategory}>
@@ -263,7 +274,6 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
         <aside className="ik-kb-category-panel">
           <div className="ik-kb-category-title">
             <span>分类树</span>
-            <b>{visibleKbs.length}</b>
           </div>
           <div className="ik-kb-category-list">
             <button
@@ -275,16 +285,6 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
               <span className="ik-kb-category-name">全部知识库</span>
               <span className="ik-kb-category-count">{kbs.length}</span>
             </button>
-            <button
-              type="button"
-              className={`ik-kb-category-row ${activeCategory === UNCATEGORIZED ? 'is-active' : ''}`}
-              onClick={() => setActiveCategory(UNCATEGORIZED)}
-            >
-              <span className="ik-kb-category-icon"><Folder size={15} strokeWidth={2.05} /></span>
-              <span className="ik-kb-category-name">未分类</span>
-              <span className="ik-kb-category-count">{exactCount(null)}</span>
-            </button>
-
             {categoryRows.map((row) => {
               const { category, childCount } = row;
               const active = activeCategory === category.id;
@@ -340,6 +340,16 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                 </div>
               );
             })}
+
+            <button
+              type="button"
+              className={`ik-kb-category-row ${activeCategory === UNCATEGORIZED ? 'is-active' : ''}`}
+              onClick={() => setActiveCategory(UNCATEGORIZED)}
+            >
+              <span className="ik-kb-category-icon"><Folder size={15} strokeWidth={2.05} /></span>
+              <span className="ik-kb-category-name">未分类</span>
+              <span className="ik-kb-category-count">{exactCount(null)}</span>
+            </button>
           </div>
         </aside>
 
@@ -347,7 +357,6 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
           <div className="ik-kb-section-head">
             <div>
               <span>{activeCategoryName}</span>
-              <b>{visibleKbs.length} 个知识库</b>
             </div>
           </div>
 
@@ -373,7 +382,44 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                       }
                     }}
                   >
-                    <RowActions onRename={() => renameKbAction(kb)} onDelete={() => deleteKbAction(kb)} />
+                    <RowActions onRename={() => renameKbAction(kb)} onDelete={() => deleteKbAction(kb)}>
+                      <details className="ik-kb-move-menu" onClick={(event) => event.stopPropagation()}>
+                        <summary title="移动分类" aria-label="移动分类"><Tags size={14} strokeWidth={2.15} /></summary>
+                        <div className="ik-kb-move-popover">
+                          <div className="ik-kb-move-title">移动到</div>
+                          {categoryOptions.map((option) => {
+                            const selected = option.value === currentCategoryValue;
+                            return (
+                              <button
+                                type="button"
+                                key={option.value || 'none'}
+                                className={`ik-kb-move-option ${selected ? 'is-selected' : ''}`}
+                                style={{ paddingLeft: 10 + option.depth * 14 } as CSSProperties}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  const menu = event.currentTarget.closest('details');
+                                  if (selected) {
+                                    menu?.removeAttribute('open');
+                                    return;
+                                  }
+                                  const next = option.value || null;
+                                  void moveKbToCategory(kb.id, next)
+                                    .then(() => {
+                                      menu?.removeAttribute('open');
+                                      toast('已移动知识库分类', 'success');
+                                    })
+                                    .catch((err) => toast('移动分类失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+                                }}
+                              >
+                                <span>{option.label}</span>
+                                {selected && <Check size={13} strokeWidth={2.2} />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    </RowActions>
                     <div className="ik-kb-tile"><LibraryBig size={22} strokeWidth={1.95} /></div>
                     <div className="ik-kb-name">{kb.name}</div>
                     <div className="ik-kb-card-category">
@@ -384,40 +430,6 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                       <span className="ik-kb-stat"><b>{fn}</b> 文件夹</span>
                       <span className="ik-kb-stat"><b>{n}</b> 知识点</span>
                     </div>
-                    <details className="ik-kb-move-menu" onClick={(event) => event.stopPropagation()}>
-                      <summary title="移动分类" aria-label="移动分类"><Tags size={14} strokeWidth={2.15} /></summary>
-                      <div className="ik-kb-move-popover">
-                        <div className="ik-kb-move-title">移动到</div>
-                        {categoryOptions.map((option) => {
-                          const selected = option.value === currentCategoryValue;
-                          return (
-                            <button
-                              type="button"
-                              key={option.value || 'none'}
-                              className={`ik-kb-move-option ${selected ? 'is-selected' : ''}`}
-                              style={{ paddingLeft: 10 + option.depth * 14 } as CSSProperties}
-                              onClick={(event) => {
-                                event.preventDefault();
-                                if (selected) {
-                                  event.currentTarget.closest('details')?.removeAttribute('open');
-                                  return;
-                                }
-                                const next = option.value || null;
-                                void moveKbToCategory(kb.id, next)
-                                  .then(() => {
-                                    event.currentTarget.closest('details')?.removeAttribute('open');
-                                    toast('已移动知识库分类', 'success');
-                                  })
-                                  .catch((err) => toast('移动分类失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
-                              }}
-                            >
-                              <span>{option.label}</span>
-                              {selected && <Check size={13} strokeWidth={2.2} />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </details>
                   </div>
                 );
               })}

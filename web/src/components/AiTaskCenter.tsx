@@ -37,6 +37,14 @@ export interface AiQuickAction {
   confirm?: boolean;
 }
 
+export interface AiContextCrumb {
+  key: string;
+  label: string;
+  title?: string;
+  current?: boolean;
+  onClick?: () => void;
+}
+
 interface Props {
   jobs: AiKnowledgeBaseJob[];
   open: boolean;
@@ -47,6 +55,7 @@ interface Props {
   onClearHistory: () => Promise<void>;
   actions?: AiQuickAction[];
   contextLabel?: string;
+  contextCrumbs?: AiContextCrumb[];
   onApplySuggestion?: (s: KbSuggestion) => void;
   onApplyAllSuggestions?: (list: KbSuggestion[]) => void;
   analysisAppliedIds?: Set<string>;
@@ -234,6 +243,7 @@ export default function AiTaskCenter({
   onClearHistory,
   actions = [],
   contextLabel,
+  contextCrumbs,
   onApplySuggestion,
   onApplyAllSuggestions,
   analysisAppliedIds,
@@ -276,6 +286,7 @@ export default function AiTaskCenter({
   const selectedKindLabel = selectedJob ? jobKindLabel(selectedJob) : 'AI 任务';
   const liveItems = selectedJob ? growthItems(selectedJob) : [];
   const retryText = selectedJob?.resumable ? '继续生成' : '重新生成';
+  const hasContextCrumbs = Boolean(contextCrumbs?.length);
 
   useEffect(() => {
     if (!taskKeys.length) {
@@ -323,7 +334,32 @@ export default function AiTaskCenter({
             <div>
               <span>AI Control</span>
               <strong>AI 控制台</strong>
-              {contextLabel && <small className="ik-ai-task-context">{contextLabel}</small>}
+              {hasContextCrumbs ? (
+                <nav className="ik-ai-task-context ik-ai-task-breadcrumb" aria-label="AI 执行位置">
+                  {contextCrumbs!.map((crumb, index) => {
+                    const clickable = Boolean(crumb.onClick) && !crumb.current;
+                    return (
+                      <span className="ik-ai-task-crumb-wrap" key={crumb.key}>
+                        {index > 0 && <span className="ik-ai-task-crumb-sep">/</span>}
+                        {clickable ? (
+                          <button
+                            type="button"
+                            className="ik-ai-task-crumb"
+                            title={crumb.title ?? `切换到 ${crumb.label}`}
+                            onClick={crumb.onClick}
+                          >
+                            {crumb.label}
+                          </button>
+                        ) : (
+                          <span className={`ik-ai-task-crumb is-current ${crumb.current ? 'is-active' : ''}`} title={crumb.title ?? crumb.label}>
+                            {crumb.label}
+                          </span>
+                        )}
+                      </span>
+                    );
+                  })}
+                </nav>
+              ) : contextLabel && <small className="ik-ai-task-context">{contextLabel}</small>}
             </div>
             <div className="ik-ai-task-head-actions">
               {historyCount > 0 && (

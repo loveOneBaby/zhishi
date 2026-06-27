@@ -13,11 +13,15 @@
 
 /* 知识库落地页:卡片网格 */
 .ik-kb-gallery {
+  --ik-page-gutter: clamp(16px, 2.4vw, 44px);
   flex: 1;
   min-height: 0;
   height: 100%;
-  overflow: auto;
-  padding: 18px 0 56px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  margin-right: calc(-1 * var(--ik-page-gutter));
+  padding: 18px var(--ik-page-gutter) 56px 0;
 }
 .ik-kb-gallery-head {
   display: flex;
@@ -54,24 +58,12 @@
 .ik-kb-category-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   padding: 2px 4px 10px;
   border-bottom: 0;
   font-size: 12px;
   color: var(--mut);
   font-weight: 740;
-}
-.ik-kb-category-title b {
-  min-width: 26px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg) 6%, var(--panel));
-  color: var(--fg);
-  font-size: 11px;
 }
 .ik-kb-category-list {
   padding: 0;
@@ -315,7 +307,7 @@
   font-weight: 740;
   letter-spacing: 0;
   margin-bottom: 9px;
-  padding-right: 68px;
+  padding-right: 104px;
 }
 .ik-kb-card-category {
   width: fit-content;
@@ -360,38 +352,26 @@
   color: var(--fg);
 }
 .ik-kb-move-menu {
-  position: absolute;
-  right: 18px;
-  bottom: 16px;
+  position: relative;
   z-index: 12;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(3px);
-  transition: opacity 140ms ease, transform 140ms ease;
-}
-.ik-kb-card:hover .ik-kb-move-menu,
-.ik-kb-card:focus-within .ik-kb-move-menu,
-.ik-kb-move-menu[open] {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
+  display: inline-flex;
 }
 .ik-kb-move-menu summary {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 1px solid color-mix(in srgb, var(--bd) 70%, transparent);
+  border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  background: transparent;
   color: var(--mut);
   font-size: 12px;
   font-weight: 650;
   list-style: none;
   cursor: pointer;
-  box-shadow: 0 8px 20px rgba(15,23,42,.05);
+  transition: background 130ms ease, color 130ms ease, transform 130ms ease;
 }
 .ik-kb-move-menu summary::-webkit-details-marker {
   display: none;
@@ -399,12 +379,13 @@
 .ik-kb-move-menu[open] summary,
 .ik-kb-move-menu summary:hover {
   color: var(--fg);
-  border-color: color-mix(in srgb, var(--accent) 26%, var(--bd));
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  transform: translateY(-1px);
 }
 .ik-kb-move-popover {
   position: absolute;
   right: 0;
-  bottom: 34px;
+  top: 34px;
   width: 210px;
   max-height: 280px;
   padding: 6px;

@@ -15,6 +15,43 @@ interface ImportLogicDeps {
   setPanelMode: (mode: 'detail' | 'create' | 'edit') => void;
 }
 
+type ImportFileObject = {
+  version?: string;
+  meta?: unknown;
+  package?: unknown;
+  schema?: unknown;
+  containers?: unknown[];
+  extensions?: unknown;
+  kbCategories?: unknown[];
+  kbs?: unknown[];
+  folders?: unknown[];
+  tree?: unknown[];
+  entries?: unknown[];
+  assets?: unknown[];
+};
+
+function hasImportContent(obj: ImportFileObject): boolean {
+  return (Array.isArray(obj?.tree) && obj.tree.length > 0)
+    || (Array.isArray(obj?.entries) && obj.entries.length > 0);
+}
+
+function baseImportPayload(obj: ImportFileObject): ImportPayload {
+  return {
+    version: obj.version,
+    meta: obj.meta,
+    package: obj.package,
+    schema: obj.schema,
+    containers: obj.containers,
+    extensions: obj.extensions,
+    kbCategories: obj.kbCategories,
+    kbs: obj.kbs,
+    folders: obj.folders,
+    tree: obj.tree,
+    entries: obj.entries,
+    assets: obj.assets,
+  };
+}
+
 // 导入流程：选文件 → 解析为 ImportPayload → 预览(previewImport) → 确认后 importAll 落库。
 // 右键文件夹「导入」会用隐藏 input 选文件，并把目标文件夹锁定为该文件夹。
 export function useImportLogic(deps: ImportLogicDeps) {
@@ -59,39 +96,13 @@ export function useImportLogic(deps: ImportLogicDeps) {
         toast('文件解析失败：' + (err instanceof Error ? err.message : String(err)), 'error');
         return;
       }
-      const obj = parsed as {
-        version?: string;
-        meta?: unknown;
-        package?: unknown;
-        schema?: unknown;
-        containers?: unknown[];
-        extensions?: unknown;
-        kbCategories?: unknown[];
-        kbs?: unknown[];
-        folders?: unknown[];
-        tree?: unknown[];
-        entries?: unknown[];
-        assets?: unknown[];
-      };
-      const hasTree = Array.isArray(obj?.tree) && obj.tree.length > 0;
-      const hasEntries = Array.isArray(obj?.entries) && obj.entries.length > 0;
-      if (!hasTree && !hasEntries) {
-        toast('文件需要 kb-package-2 的 entries 数组', 'error');
+      const obj = parsed as ImportFileObject;
+      if (!hasImportContent(obj)) {
+        toast('文件需要包含 entries 数组或 tree 结构', 'error');
         return;
       }
       const payload: ImportPayload = {
-        version: obj.version,
-        meta: obj.meta,
-        package: obj.package,
-        schema: obj.schema,
-        containers: obj.containers,
-        extensions: obj.extensions,
-        kbCategories: obj.kbCategories,
-        kbs: obj.kbs,
-        folders: obj.folders,
-        tree: obj.tree,
-        entries: obj.entries,
-        assets: obj.assets,
+        ...baseImportPayload(obj),
         targetKbId: currentKb?.id,
         targetKbName: currentKb?.name,
         targetFolderId,
@@ -101,6 +112,37 @@ export function useImportLogic(deps: ImportLogicDeps) {
     };
     reader.readAsText(file);
     e.target.value = '';
+  }
+
+  function handleKnowledgeBaseImport(e: ChangeEvent<HTMLInputElement>): void {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(String(reader.result));
+      } catch (err) {
+        toast('文件解析失败：' + (err instanceof Error ? err.message : String(err)), 'error');
+        return;
+      }
+      const obj = parsed as ImportFileObject;
+      if (!hasImportContent(obj)) {
+        toast('文件需要包含 entries 数组或 tree 结构', 'error');
+        return;
+      }
+      refreshImportPreview({
+        ...baseImportPayload(obj),
+        importBatchId: newImportBatchId(),
+      });
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }
+
+  function importKnowledgeBases(): void {
+    pendingImportFolderRef.current = undefined;
+    importInputRef.current?.click();
   }
 
   function importToFolder(folder: Folder): void {
@@ -126,7 +168,10 @@ export function useImportLogic(deps: ImportLogicDeps) {
     if (!importPreview) return;
     const { payload, preview } = importPreview;
     const previewFolders = preview.folders ?? [];
-    if (!Object.prototype.hasOwnProperty.call(payload, 'targetFolderId')) {
+    const isScopedImport = Object.prototype.hasOwnProperty.call(payload, 'targetKbId')
+      || Object.prototype.hasOwnProperty.call(payload, 'targetKbName')
+      || Object.prototype.hasOwnProperty.call(payload, 'targetFolderId');
+    if (isScopedImport && !Object.prototype.hasOwnProperty.call(payload, 'targetFolderId')) {
       toast('请选择导入位置', 'error');
       return;
     }
@@ -134,8 +179,14 @@ export function useImportLogic(deps: ImportLogicDeps) {
     try {
       const next = await importAll(payload, replace);
       onImported(next.entries, next.kbs, next.folders, next.kbCategories);
-      toast(`已导入 ${preview.valid} 条知识点，生成 ${previewFolders.length} 个文件夹`, 'success');
+      const importedKbCount = Array.isArray(payload.kbs) ? payload.kbs.length : 0;
+      const importedKbText = !isScopedImport && importedKbCount > 0 ? `${importedKbCount} 个知识库、` : '';
+      toast(`已导入 ${importedKbText}${preview.valid} 条知识点，生成 ${previewFolders.length} 个文件夹`, 'success');
       setImportPreview(null);
+      if (!isScopedImport) {
+        setPanelMode('detail');
+        return;
+      }
       const importedFolderIds = new Set(previewFolders.map((folder) => folder.id).filter((id): id is string => Boolean(id)));
       const firstImportedFolder = next.folders.find((folder) => importedFolderIds.has(folder.id) && folder.parentId === payload.targetFolderId)
         ?? next.folders.find((folder) => importedFolderIds.has(folder.id));
@@ -156,6 +207,8 @@ export function useImportLogic(deps: ImportLogicDeps) {
     importInputRef,
     pendingImportFolderRef,
     handleImport,
+    handleKnowledgeBaseImport,
+    importKnowledgeBases,
     importToFolder,
     importHere,
     refreshImportPreview,

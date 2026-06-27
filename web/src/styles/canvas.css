@@ -20,7 +20,7 @@
 .ik-free-stage {
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   padding: 14px 0 10px;
   background: transparent;
   display: flex;
