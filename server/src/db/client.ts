@@ -3,10 +3,17 @@ import type { Client, InArgs, InStatement, InValue, ResultSet, Transaction } fro
 import fs from 'node:fs';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { loadEnvFile } from '../env.js';
 import type { Entry, EntryRow, KnowledgeBase, Folder, KbRow, KbCategory, KbCategoryRow, FolderRow } from '../types.js';
 import { parseBodyToIndex, normalizeIndex } from '../index-tree.js';
 import { normalizeDocBlocks, splitDocToIndex, treeToDoc } from '../doc.js';
 import type { Block } from '../blocks.js';
+
+// 先加载 .env（TURSO_DATABASE_URL / DB_PATH 等），再解析连接 URL。
+// ESM 下 index.ts 的 loadEnvFile() 在函数体里、晚于 import 链执行；若不在 client.ts 此处先加载，
+// 本地会用 .env 里的 Turso 变量时，连接创建在变量加载之前 → 误回退到 file: 本地文件模式。
+// （线上 Render 由平台在进程启动前注入环境变量，不受影响。）
+loadEnvFile();
 
 // ───────────────────────── 连接 ─────────────────────────
 // 统一用 @libsql/client：本地场景 file:./data/knowledge.db（离线、可直接读现有库文件），
