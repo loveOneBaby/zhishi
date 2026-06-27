@@ -246,14 +246,16 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
             <span style={{ fontSize: 13, color: 'var(--mut)' }}>{entries.length} 条知识点 · {categories.length} 个分类</span>
           </div>
         </div>
-        <div className="ik-kb-gallery-actions">
+        <div className="ik-kb-gallery-actions" role="toolbar" aria-label="知识库操作">
           <button
+            type="button"
             className="ik-btn ik-btn-secondary ik-btn-size-md"
             onClick={onImportKnowledgeBases}
           >
             <span className="ik-btn-leading-icon"><Upload size={15} strokeWidth={2.3} /></span>导入知识库
           </button>
           <button
+            type="button"
             className="ik-btn ik-btn-secondary ik-btn-size-md"
             onClick={() => {
               void onExportAll();
@@ -261,10 +263,10 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
           >
             <span className="ik-btn-leading-icon"><Download size={15} strokeWidth={2.3} /></span>导出全部
           </button>
-          <button className="ik-btn ik-btn-secondary ik-btn-size-md" onClick={() => setCategoryCommand({ kind: 'create', parentId: null })}>
+          <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-md" onClick={() => setCategoryCommand({ kind: 'create', parentId: null })}>
             <span className="ik-btn-leading-icon"><FolderPlus size={15} strokeWidth={2.4} /></span>新建分类
           </button>
-          <button className="ik-btn ik-btn-default ik-btn-size-md" onClick={createKbInActiveCategory}>
+          <button type="button" className="ik-btn ik-btn-default ik-btn-size-md" onClick={createKbInActiveCategory}>
             <span className="ik-btn-leading-icon"><Plus size={15} strokeWidth={2.4} /></span>新建知识库
           </button>
         </div>

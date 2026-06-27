@@ -1,7 +1,7 @@
 import type { Block } from '../blocks.js';
 import { createDataAsset } from './asset.js';
 import { deriveDoc } from './client.js';
-import { splitDocToIndex } from '../doc.js';
+import { safeImageUrl, splitDocToIndex } from '../doc.js';
 import type { IndexTree } from '../index-tree.js';
 
 // 把图片块里的 data:base64 落库为 asset,只留站内 url(去重,避免 JSON 膨胀)
@@ -15,6 +15,9 @@ async function rewriteDocImages(doc: Block[]): Promise<Block[]> {
           const asset = await createDataAsset(url, String(props.caption ?? ''));
           if (asset) props.url = asset.url;
         }
+        const safe = safeImageUrl(props.url, false);
+        if (safe) props.url = safe;
+        else delete props.url;
         b.props = props;
       }
       if (Array.isArray(b.children)) await walk(b.children);

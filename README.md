@@ -107,6 +107,7 @@ turso db tokens create zhishi                # 得到 TURSO_AUTH_TOKEN
 | --- | --- | --- |
 | `TURSO_DATABASE_URL` | 上一步的 `libsql://...` | 是 |
 | `TURSO_AUTH_TOKEN` | 上一步的 token | 是 |
+| `AUTH_TOKEN` | 管理登录令牌，使用高强度随机串 | 是 |
 | `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` | 见「AI 问答接入」 | 否 |
 | `NODE_VERSION` | `22`（`render.yaml` 已默认） | — |
 
@@ -125,7 +126,7 @@ AI_BASE_URL=https://api.openai.com/v1   # 可换成任意 OpenAI 兼容服务
 AI_MODEL=gpt-4o-mini
 ```
 
-未配置时，AI 弹窗会提示「未配置」，其余功能不受影响。
+未配置时，AI 弹窗会提示「未配置」，其余功能不受影响。线上默认要求登录后才能调用 `/api/ask`，避免公开消耗额度；确认要开放给所有访客时再设置 `AI_PUBLIC_ASK=true`。
 
 ## 数据模型
 
@@ -153,7 +154,7 @@ AI_MODEL=gpt-4o-mini
 | POST | `/api/entries/reorder` | 拖拽排序，body `{ ids }` |
 | GET | `/api/export` | 导出全部（备份） |
 | POST | `/api/import` | 批量导入，body `{ entries, replace }` |
-| POST | `/api/ask` | AI 问答（预留） |
+| POST | `/api/ask` | AI 问答（默认需登录；`AI_PUBLIC_ASK=true` 时公开） |
 
 ## 测试
 

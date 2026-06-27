@@ -35,6 +35,7 @@ export async function askAI(query: string, context: Entry[]): Promise<AskResult>
           '当前未配置 AI（缺少环境变量 AI_API_KEY）。\n配置 server/.env 后，可用百炼 Qwen 生成问答和知识点。',
       };
     }
-    return { configured: true, answer: `调用 AI 失败：${err?.message || String(err)}` };
+    console.warn('[server] AI 问答调用失败:', err);
+    return { configured: true, answer: 'AI 调用失败，请稍后重试。' };
   }
 }

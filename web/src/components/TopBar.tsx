@@ -13,6 +13,7 @@ interface Props {
   setTheme: (t: ThemeKey) => void;
   searchSlot?: ReactNode;
   searchTools?: ReactNode;
+  trailing?: ReactNode;
 }
 
 const MODES: { key: AppMode; label: string }[] = [
@@ -45,7 +46,7 @@ function previewVars(k: ThemeKey): CSSProperties {
   } as CSSProperties;
 }
 
-export default function TopBar({ mode, setMode, theme, setTheme, searchSlot, searchTools }: Props) {
+export default function TopBar({ mode, setMode, theme, setTheme, searchSlot, searchTools, trailing }: Props) {
   const [themeOpen, setThemeOpen] = useState(false);
   const themeMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -66,7 +67,7 @@ export default function TopBar({ mode, setMode, theme, setTheme, searchSlot, sea
   }, [themeOpen]);
 
   return (
-    <div className="ik-topbar" style={{ position: 'sticky', top: 0, zIndex: 20, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 64, gap: 18, padding: '0 clamp(16px, 2.4vw, 44px)' }}>
+    <div className="ik-topbar" style={{ position: 'sticky', top: 0, zIndex: 20, flexShrink: 0, display: 'flex', alignItems: 'center', minHeight: 64, gap: 18, padding: '0 clamp(16px, 2.4vw, 44px)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flexShrink: 0 }}>
         <div className="ik-mode-switch" style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 9 }}>
           {MODES.map((m) => (
@@ -79,52 +80,55 @@ export default function TopBar({ mode, setMode, theme, setTheme, searchSlot, sea
         </div>
       </div>
       {searchSlot && <div style={{ flex: 1, minWidth: 0, maxWidth: 880 }}>{searchSlot}</div>}
-      {searchTools && <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 14 }}>{searchTools}</div>}
-      <div ref={themeMenuRef} className="ik-theme-picker" style={{ flexShrink: 0 }}>
-        <button
-          type="button"
-          className={`ik-theme-trigger ${themeOpen ? 'is-open' : ''}`}
-          aria-label={`当前主题：${THEMES[theme].name}`}
-          aria-haspopup="menu"
-          aria-expanded={themeOpen}
-          title={`当前主题：${THEMES[theme].name}`}
-          onClick={() => setThemeOpen((open) => !open)}
-          style={previewVars(theme)}
-        >
-          <SwatchBook size={15} strokeWidth={2.05} />
-          <span className="ik-theme-trigger-preview" aria-hidden="true">
-            <i />
-          </span>
-        </button>
-        {themeOpen && (
-          <div className="ik-theme-menu" role="menu" aria-label="切换主题">
-            {THEME_KEYS.map((k) => {
-              const active = theme === k;
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={active}
-                  className={`ik-theme-menu-item ${active ? 'is-active' : ''}`}
-                  onClick={() => {
-                    setTheme(k);
-                    setThemeOpen(false);
-                  }}
-                >
-                  <span className="ik-theme-menu-preview" style={previewVars(k)} aria-hidden="true">
-                    <i />
-                    <i />
-                  </span>
-                  <span className="ik-theme-menu-label">{THEMES[k].name}</span>
-                  <span className="ik-theme-menu-check" aria-hidden="true">
-                    {active && <Check size={13} strokeWidth={2.35} />}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+      <div style={{ marginLeft: 'auto', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+        {searchTools && <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>{searchTools}</div>}
+        {trailing && <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>{trailing}</div>}
+        <div ref={themeMenuRef} className="ik-theme-picker" style={{ flexShrink: 0 }}>
+          <button
+            type="button"
+            className={`ik-theme-trigger ${themeOpen ? 'is-open' : ''}`}
+            aria-label={`当前主题：${THEMES[theme].name}`}
+            aria-haspopup="menu"
+            aria-expanded={themeOpen}
+            title={`当前主题：${THEMES[theme].name}`}
+            onClick={() => setThemeOpen((open) => !open)}
+            style={previewVars(theme)}
+          >
+            <SwatchBook size={15} strokeWidth={2.05} />
+            <span className="ik-theme-trigger-preview" aria-hidden="true">
+              <i />
+            </span>
+          </button>
+          {themeOpen && (
+            <div className="ik-theme-menu" role="menu" aria-label="切换主题">
+              {THEME_KEYS.map((k) => {
+                const active = theme === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={active}
+                    className={`ik-theme-menu-item ${active ? 'is-active' : ''}`}
+                    onClick={() => {
+                      setTheme(k);
+                      setThemeOpen(false);
+                    }}
+                  >
+                    <span className="ik-theme-menu-preview" style={previewVars(k)} aria-hidden="true">
+                      <i />
+                      <i />
+                    </span>
+                    <span className="ik-theme-menu-label">{THEMES[k].name}</span>
+                    <span className="ik-theme-menu-check" aria-hidden="true">
+                      {active && <Check size={13} strokeWidth={2.35} />}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

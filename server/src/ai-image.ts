@@ -212,10 +212,27 @@ function dataUrlFromBase64(raw: string): string {
   return raw.startsWith('data:image/') ? raw : `data:image/png;base64,${raw}`;
 }
 
+// AI 返回的图片地址可能是任意 URL,服务端 fetch 存在 SSRF 风险(如指向云元数据 169.254.169.254 / 内网)。
+// 仅允许 http/https 且主机在白名单(默认阿里云 CDN),并禁止重定向与私有/回环地址。
+const PRIVATE_HOST_RE = /^(localhost$|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.|::1$|fc00:|fe80:)/i;
+function isAllowedFetchUrl(url: string): boolean {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return false; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  if (parsed.username || parsed.password) return false; // 携带凭据的 URL 风险高
+  const host = parsed.hostname.toLowerCase();
+  if (PRIVATE_HOST_RE.test(host)) return false;
+  const allow = (process.env.AI_IMAGE_FETCH_HOSTS || '.aliyuncs.com,.aliyun.com')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  return allow.some((s) => (s.startsWith('.') ? host.endsWith(s) : host === s));
+}
+
 async function downloadImageAsDataUrl(url: string, signal?: AbortSignal): Promise<string> {
   if (url.startsWith('data:image/')) return url;
   if (!/^https?:\/\//i.test(url)) return dataUrlFromBase64(url);
-  const resp = await fetch(url, { signal });
+  if (!isAllowedFetchUrl(url)) throw new Error('图解地址不在允许的主机白名单内');
+  // redirect: 'error' 防止白名单主机 302 到内网地址绕过校验
+  const resp = await fetch(url, { signal, redirect: 'error' });
   if (!resp.ok) throw new Error(`图解下载失败（${resp.status}）`);
   const contentType = resp.headers.get('content-type')?.split(';')[0]?.trim() || 'image/png';
   const bytes = Buffer.from(await resp.arrayBuffer());

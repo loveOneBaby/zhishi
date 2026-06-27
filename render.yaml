@@ -14,10 +14,15 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: NODE_ENV
+        value: production
       # 远程数据库（必填，见 README 建库步骤）
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN
+        sync: false
+      # 管理鉴权（必填；高强度随机串）
+      - key: AUTH_TOKEN
         sync: false
       # AI（可选；不填则 AI 问答 / 生成功能提示「未配置」，其余功能不受影响）
       - key: AI_API_KEY

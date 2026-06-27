@@ -1,9 +1,11 @@
 import { loadEnvFile } from './env.js';
 import { createApp } from './app.js';
+import { assertAuthConfiguredForProduction } from './auth.js';
 import { initDb, seedBuiltins } from './db.js';
 import { initAiJobs } from './services/ai-jobs.js';
 
 loadEnvFile();
+assertAuthConfiguredForProduction();
 
 const PORT = Number(process.env.PORT) || 5173;
 

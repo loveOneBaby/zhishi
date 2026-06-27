@@ -8,12 +8,30 @@ import { score, searchEntries } from './search.js';
 import { toSearchText } from './pinyin-search.js';
 import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc } from './assets.js';
 import { extractText, blocksToMarkdown as blockNoteToMarkdown } from './blocks.js';
-import { normalizeDocBlocks, splitDocToIndex, markdownToDocBlocks } from './doc.js';
+import { normalizeDocBlocks, splitDocToIndex, markdownToDocBlocks, safeImageUrl, safeLinkHref } from './doc.js';
+import { assertAuthConfiguredForProduction } from './auth.js';
 import { coerceGeneratedDraft, coerceGeneratedFolderTreeDraft, coerceGeneratedKbDraft, draftToMarkdown, extractJsonObject, kbQuestionToEntryInput, kbQuestionToMarkdown } from './ai-generate.js';
 import { ensureTags } from './ai/render.js';
 import type { Entry } from './types.js';
 
 const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+function withEnv(patch: Record<string, string | undefined>, fn: () => void): void {
+  const previous = new Map<string, string | undefined>();
+  for (const key of Object.keys(patch)) previous.set(key, process.env[key]);
+  try {
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fn();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
 
 function entry(over: Partial<Entry>): Entry {
   return {
@@ -143,6 +161,35 @@ test('doc.normalizeDocBlocks: 简写 content/image 归一为合法块', () => {
   assert.equal((blocks[2].props as any).url, 'https://cdn/x.png');
   assert.equal((blocks[2].props as any).caption, '流程');
   assert.equal(blocks[2].content, undefined);
+});
+
+test('doc URL safety: 清理危险链接与图片协议', () => {
+  assert.equal(safeLinkHref('javascript:alert(1)'), '');
+  assert.equal(safeLinkHref('https://example.com/a'), 'https://example.com/a');
+  assert.equal(safeImageUrl('data:image/svg+xml;base64,PHN2Zy8+', true), '');
+  assert.equal(safeImageUrl(PNG_1x1, true), PNG_1x1);
+
+  const blocks = normalizeDocBlocks([
+    { type: 'paragraph', content: [{ type: 'link', href: 'javascript:alert(1)', content: [{ type: 'text', text: '坏链接', styles: {} }] }] },
+    { type: 'image', props: { url: 'javascript:alert(1)', caption: '坏图' } },
+  ]);
+  assert.deepEqual(blocks[0].content, [{ type: 'text', text: '坏链接', styles: {} }]);
+  assert.equal((blocks[1].props as any).url, undefined);
+});
+
+test('auth: 线上环境必须配置 AUTH_TOKEN', () => {
+  withEnv({
+    NODE_ENV: 'production',
+    AUTH_TOKEN: undefined,
+    ALLOW_UNAUTHENTICATED_ADMIN: undefined,
+    TURSO_DATABASE_URL: undefined,
+    RENDER: undefined,
+  }, () => {
+    assert.throws(() => assertAuthConfiguredForProduction(), /AUTH_TOKEN/);
+  });
+  withEnv({ NODE_ENV: 'production', AUTH_TOKEN: 'secret' }, () => {
+    assert.doesNotThrow(() => assertAuthConfiguredForProduction());
+  });
 });
 
 test('doc.splitDocToIndex: 标题块切分为多级索引(顶层标题=二级索引)', () => {

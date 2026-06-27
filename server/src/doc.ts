@@ -8,9 +8,60 @@ let seq = 0;
 function blockId(): string { seq += 1; return `bk_${Date.now().toString(36)}_${seq}`; }
 function nodeId(): string { seq += 1; return `ix_${Date.now().toString(36)}_${seq}`; }
 
-// content 简写 → BlockNote 行内内容(字符串 → 单个 text run;已是数组则原样)
+function cleanUrlValue(value: unknown): string {
+  return String(value ?? '').trim().replace(/[\u0000-\u001f\u007f]/g, '');
+}
+
+export function safeLinkHref(value: unknown): string {
+  const href = cleanUrlValue(value);
+  if (!href) return '';
+  if (href.startsWith('/') && !href.startsWith('//')) return href;
+  try {
+    const url = new URL(href);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? href : '';
+  } catch {
+    return '';
+  }
+}
+
+export function safeImageUrl(value: unknown, allowDataImage = false): string {
+  const url = cleanUrlValue(value);
+  if (!url) return '';
+  if (allowDataImage && /^data:image\/(png|jpe?g|gif|webp|avif);/i.test(url)) return url;
+  return safeLinkHref(url);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sanitizeInlineContent(content: unknown): unknown[] {
+  if (!Array.isArray(content)) return [];
+  const out: unknown[] = [];
+  for (const item of content) {
+    if (!isRecord(item)) {
+      out.push(item);
+      continue;
+    }
+    if (item.type === 'link') {
+      const children = sanitizeInlineContent(item.content);
+      const href = safeLinkHref(item.href);
+      if (href) out.push({ ...item, href, content: children });
+      else out.push(...children);
+      continue;
+    }
+    if (typeof item.text === 'string') {
+      out.push({ ...item, text: item.text, styles: isRecord(item.styles) ? item.styles : {} });
+      continue;
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+// content 简写 → BlockNote 行内内容(字符串 → 单个 text run;数组则清理后保留)
 function toInline(content: unknown): unknown {
-  if (Array.isArray(content)) return content;
+  if (Array.isArray(content)) return sanitizeInlineContent(content);
   if (typeof content === 'string' && content) return [{ type: 'text', text: content, styles: {} }];
   return [];
 }
@@ -27,7 +78,12 @@ function parseInline(text: string): InlineRun[] {
     { re: /\*\*([^*\n]+?)\*\*/, make: (m) => ({ type: 'text', text: m[1], styles: { bold: true } }) },
     { re: /__([^_\n]+?)__/, make: (m) => ({ type: 'text', text: m[1], styles: { bold: true } }) },
     { re: /`([^`\n]+?)`/, make: (m) => ({ type: 'text', text: m[1], styles: { code: true } }) },
-    { re: /\[([^\]\n]+?)\]\(([^)\s]+?)\)/, make: (m) => ({ type: 'link', href: m[2], content: [{ type: 'text', text: m[1], styles: {} }] }) },
+    { re: /\[([^\]\n]+?)\]\(([^)\s]+?)\)/, make: (m) => {
+      const href = safeLinkHref(m[2]);
+      return href
+        ? { type: 'link', href, content: [{ type: 'text', text: m[1], styles: {} }] }
+        : { type: 'text', text: m[1], styles: {} };
+    } },
     { re: /\*([^*\n]+?)\*/, make: (m) => ({ type: 'text', text: m[1], styles: { italic: true } }) },
     { re: /(?<![A-Za-z0-9])_([^_\n]+?)_(?![A-Za-z0-9])/, make: (m) => ({ type: 'text', text: m[1], styles: { italic: true } }) },
   ];
@@ -58,8 +114,9 @@ export function normalizeDocBlocks(raw: unknown): Block[] {
     const props: Record<string, unknown> = { ...(b.props ?? {}) };
     if (type === 'image') {
       // 允许把 url/src/caption/alt 写在顶层或 props 里
-      const url = String(props.url ?? props.src ?? b.url ?? b.src ?? '');
+      const url = safeImageUrl(props.url ?? props.src ?? b.url ?? b.src, true);
       if (url) props.url = url;
+      else delete props.url;
       const caption = props.caption ?? b.caption ?? props.alt ?? b.alt;
       if (caption != null) props.caption = String(caption);
     }

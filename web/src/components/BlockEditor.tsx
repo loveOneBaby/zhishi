@@ -17,6 +17,18 @@ interface Props {
   onChangeMarkdown?: (md: string) => void;  // 同步导出 markdown(模式B:文档→标题派生索引)
 }
 
+function safeOpenHref(href: string): string {
+  const value = href.trim();
+  if (!value) return '';
+  if (value.startsWith('/') && !value.startsWith('//')) return value;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? value : '';
+  } catch {
+    return '';
+  }
+}
+
 // 基于 BlockNote 的块编辑器 / 只读视图(editable=false)。图片上传走 /api/assets。
 export default function BlockEditor({ initialBlocks, initialMarkdown, editable = true, dark = false, onChange, onChangeMarkdown }: Props) {
   // 只读预览:把纯文本里的裸 URL 转成可点击链接(编辑态保持原样,避免干扰输入)
@@ -59,7 +71,8 @@ export default function BlockEditor({ initialBlocks, initialMarkdown, editable =
     if (anchor && href) {
       e.preventDefault();
       e.stopPropagation();
-      window.open(href, '_blank', 'noopener,noreferrer');
+      const safe = safeOpenHref(href);
+      if (safe) window.open(safe, '_blank', 'noopener,noreferrer');
     }
   }
 

@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { LogOut } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase, KbCategory, ThemeKey } from './types';
 import { THEMES, themeVars } from './themes';
 import { filterEntries, suggestQueries, type SearchSuggestion } from './search';
@@ -35,6 +36,7 @@ import {
   type AiKnowledgeBaseJob,
   type EntryInput as ApiEntryInput,
 } from './api';
+import { fetchAuthStatus, logout, type AuthStatus } from './api';
 import TopBar, { type AppMode } from './components/TopBar';
 import SearchBox from './components/SearchBox';
 import SearchMode from './components/SearchMode';
@@ -43,6 +45,7 @@ import DetailModal from './components/DetailModal';
 import AskModal from './components/AskModal';
 import EntryEditor from './components/EntryEditor';
 import AiTaskCenter from './components/AiTaskCenter';
+import LoginPanel from './components/LoginPanel';
 import Toaster from './components/Toaster';
 import { toast } from './toast';
 
@@ -83,6 +86,8 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [aiJobs, setAiJobs] = useState<AiKnowledgeBaseJob[]>([]);
   const [aiTaskPanelOpen, setAiTaskPanelOpen] = useState(false);
+  // 鉴权状态:检索/浏览公开,知识库管理需登录。默认开放态,首屏后再由 /auth/status 校正。
+  const [auth, setAuth] = useState<AuthStatus>({ authRequired: false, authenticated: true });
 
   const [mode, setMode] = useState<AppMode>(initialRoute.mode);
   const [viewType, setViewType] = useState<'list' | 'canvas'>(initialRoute.viewType);
@@ -142,6 +147,7 @@ export default function App() {
   useEffect(() => {
     const saved = localStorage.getItem('ik_theme');
     if (saved && (saved in THEMES)) setThemeState(saved as ThemeKey);
+    fetchAuthStatus().then(setAuth).catch(() => { /* 取不到状态时按开放处理 */ });
     Promise.all([fetchEntries(), fetchKbs(), fetchFolders(), fetchKbCategories()])
       .then(([e, k, f, c]) => { setEntries(e); setKbs(k); setFolders(f); setKbCategories(c); })
       .catch(() => { setEntries([]); setKbs([]); setFolders([]); setKbCategories([]); })
@@ -204,6 +210,8 @@ export default function App() {
   }, [applyCompletedJobs]);
 
   useEffect(() => {
+    // 管理类接口需登录:未登录时不轮询 AI 任务,避免 401 刷屏。
+    if (auth.authRequired && !auth.authenticated) return;
     let stopped = false;
     const tick = (): void => {
       refreshAiJobs().catch(() => {
@@ -218,7 +226,7 @@ export default function App() {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [refreshAiJobs]);
+  }, [refreshAiJobs, auth.authRequired, auth.authenticated]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -542,6 +550,12 @@ export default function App() {
     if (nextMode === 'search') setTimeout(() => inputRef.current?.focus(), 40);
   }, [freeKb, mode]);
 
+  const handleLogout = useCallback(async (): Promise<void> => {
+    await logout().catch(() => {});
+    setAuth((prev) => ({ authRequired: prev.authRequired, authenticated: false }));
+    setAiJobs([]);
+  }, []);
+
   // 检索框上移到顶栏「知识检索」后面;输入 "/" 选择知识库限定范围
   const searchField = mode === 'search' ? (
     <SearchBox
@@ -567,7 +581,13 @@ export default function App() {
   return (
     <div className={`ik-theme-${theme}`} style={{ ...themeVars(t), height: '100vh', overflow: 'hidden', background: 'var(--app-bg, var(--bg))', color: 'var(--fg)', fontFamily: 'var(--font)', WebkitFontSmoothing: 'antialiased' }}>
       <div style={{ width: '100%', height: '100%', maxWidth: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <TopBar mode={mode} setMode={handleTopModeChange} theme={theme} setTheme={setTheme} searchSlot={searchField} searchTools={searchTools} />
+        <TopBar mode={mode} setMode={handleTopModeChange} theme={theme} setTheme={setTheme} searchSlot={searchField} searchTools={searchTools} trailing={
+          auth.authRequired && auth.authenticated && mode === 'free' ? (
+            <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-sm ik-topbar-logout" onClick={handleLogout}>
+              <span className="ik-btn-leading-icon"><LogOut size={15} strokeWidth={2.25} /></span>退出登录
+            </button>
+          ) : undefined
+        } />
 
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '0 clamp(16px, 2.4vw, 44px)' }}>
           {mode === 'search' && (
@@ -605,47 +625,51 @@ export default function App() {
 
           {mode === 'free' && (
             <div className="ik-free-stage">
-              <FreeMode
-                entries={entries}
-                kbs={kbs}
-                kbCategories={kbCategories}
-                folders={folders}
-                freeKb={freeKb}
-                freeFolder={freeFolder}
-                setFreeKb={setFreeKb}
-                setFreeFolder={setFreeFolder}
-                onNew={() => setFormOpen(true)}
-                onCreate={handleCreate}
-                onUpdate={handleUpdate}
-                onDelete={handleDelete}
-                onReorderEntries={handleReorder}
-                onImported={handleImported}
-                onGeneratedEntry={handleGeneratedEntry}
-                onStartKnowledgeBaseJob={handleStartKnowledgeBaseJob}
-                onStartFolderInitJob={handleStartFolderInitJob}
-                onStartFolderEntriesJob={handleStartFolderEntriesJob}
-                onStartAnalyzeJob={handleStartAnalyzeJob}
-                onStartAnalyzeEntryJob={handleStartAnalyzeEntryJob}
-                onCreateKb={handleCreateKb}
-                onCreateKbCategory={handleCreateKbCategory}
-                onRenameKbCategory={handleRenameKbCategory}
-                onDeleteKbCategory={handleDeleteKbCategory}
-                onMoveKbToCategory={handleMoveKbToCategory}
-                onCreateFolder={handleCreateFolder}
-                onRenameKb={handleRenameKb}
-                onDeleteKb={handleDeleteKb}
-                onRenameFolder={handleRenameFolder}
-                onDeleteFolder={handleDeleteFolder}
-                onMoveFolder={handleMoveFolder}
-                onReorderFolders={handleReorderFolders}
-                aiJobs={aiJobs}
-                aiTaskPanelOpen={aiTaskPanelOpen}
-                onAiTaskPanelOpenChange={setAiTaskPanelOpen}
-                onOpenAiJobResult={handleOpenAiJobResult}
-                onCancelAiJob={handleCancelAiJob}
-                onRetryAiJob={handleRetryAiJob}
-                onClearAiJobHistory={handleClearAiJobHistory}
-              />
+              {auth.authRequired && !auth.authenticated ? (
+                <LoginPanel onLoggedIn={setAuth} />
+              ) : (
+                <FreeMode
+                  entries={entries}
+                  kbs={kbs}
+                  kbCategories={kbCategories}
+                  folders={folders}
+                  freeKb={freeKb}
+                  freeFolder={freeFolder}
+                  setFreeKb={setFreeKb}
+                  setFreeFolder={setFreeFolder}
+                  onNew={() => setFormOpen(true)}
+                  onCreate={handleCreate}
+                  onUpdate={handleUpdate}
+                  onDelete={handleDelete}
+                  onReorderEntries={handleReorder}
+                  onImported={handleImported}
+                  onGeneratedEntry={handleGeneratedEntry}
+                  onStartKnowledgeBaseJob={handleStartKnowledgeBaseJob}
+                  onStartFolderInitJob={handleStartFolderInitJob}
+                  onStartFolderEntriesJob={handleStartFolderEntriesJob}
+                  onStartAnalyzeJob={handleStartAnalyzeJob}
+                  onStartAnalyzeEntryJob={handleStartAnalyzeEntryJob}
+                  onCreateKb={handleCreateKb}
+                  onCreateKbCategory={handleCreateKbCategory}
+                  onRenameKbCategory={handleRenameKbCategory}
+                  onDeleteKbCategory={handleDeleteKbCategory}
+                  onMoveKbToCategory={handleMoveKbToCategory}
+                  onCreateFolder={handleCreateFolder}
+                  onRenameKb={handleRenameKb}
+                  onDeleteKb={handleDeleteKb}
+                  onRenameFolder={handleRenameFolder}
+                  onDeleteFolder={handleDeleteFolder}
+                  onMoveFolder={handleMoveFolder}
+                  onReorderFolders={handleReorderFolders}
+                  aiJobs={aiJobs}
+                  aiTaskPanelOpen={aiTaskPanelOpen}
+                  onAiTaskPanelOpenChange={setAiTaskPanelOpen}
+                  onOpenAiJobResult={handleOpenAiJobResult}
+                  onCancelAiJob={handleCancelAiJob}
+                  onRetryAiJob={handleRetryAiJob}
+                  onClearAiJobHistory={handleClearAiJobHistory}
+                />
+              )}
             </div>
           )}
 

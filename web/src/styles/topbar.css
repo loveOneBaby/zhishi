@@ -15,19 +15,22 @@
 .ik-theme-picker {
   position: relative;
 }
+.ik-topbar-logout {
+  font-weight: 680;
+}
 .ik-theme-trigger {
-  height: 32px;
-  min-width: 42px;
+  height: 34px;
+  min-width: 48px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  border: 1px solid var(--bd);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-  color: var(--mut);
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 7%, var(--panel));
+  color: var(--fg);
   cursor: pointer;
-  padding: 0 7px;
+  padding: 0 9px;
   outline: none;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
@@ -37,15 +40,14 @@
 }
 .ik-theme-trigger:hover,
 .ik-theme-trigger.is-open {
-  border-color: color-mix(in srgb, var(--fg) 18%, var(--bd));
-  background: var(--sel);
+  background: color-mix(in srgb, var(--fg) 13%, var(--panel));
   color: var(--fg);
 }
 .ik-theme-trigger:active {
   transform: translateY(1px);
 }
 .ik-theme-trigger:focus-visible {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 .ik-theme-trigger-preview,
 .ik-theme-menu-preview {

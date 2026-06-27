@@ -79,3 +79,27 @@ export function classifyImageSrc(src: string): NormalizedImageRef | null {
   if (/^(https?:\/\/|\/)/i.test(s)) return { kind: 'external', url: s };
   return null; // 本地磁盘路径等不支持
 }
+
+// 资源仅允许图片 MIME。text/html 等会被 /raw 原样回吐 → 同源存储型 XSS,故拒绝。
+// 不含 image/svg+xml:SVG 可内嵌脚本,直接访问 /raw 会执行脚本,风险过高。
+const ALLOWED_IMAGE_MIMES = new Set([
+  'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/avif',
+]);
+export function isAllowedImageMime(mime: string): boolean {
+  return ALLOWED_IMAGE_MIMES.has(mime.toLowerCase());
+}
+
+// 外链资源仅允许 http/https 绝对地址或站内 / 相对路径;
+// 拒绝 javascript: / data: / 协议相对 //evil.com(后者经 res.redirect 会开放重定向)。
+export function isSafeExternalUrl(url: string): boolean {
+  const s = (url || '').trim();
+  if (!s) return false;
+  // 站内相对路径(单个 / 开头)安全;协议相对 //evil.com 会经 redirect 跳外站,必须拒绝
+  if (s.startsWith('/') && !s.startsWith('//')) return true;
+  try {
+    const u = new URL(s);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}

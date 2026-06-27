@@ -1,5 +1,5 @@
 import { db } from './client.js';
-import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc } from '../assets.js';
+import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc, isAllowedImageMime } from '../assets.js';
 
 export interface AssetMeta {
   id: string;
@@ -32,6 +32,8 @@ function assetRowToMeta(r: Record<string, unknown>): AssetMeta {
 export async function createDataAsset(dataUrl: string, alt = ''): Promise<AssetMeta | null> {
   const parsed = parseDataUrl(dataUrl);
   if (!parsed) return null;
+  // 仅允许图片:防止 data:text/html 等经 /raw 原样回吐造成同源存储型 XSS
+  if (!isAllowedImageMime(parsed.mime)) return null;
   const hash = sha256(parsed.bytes);
   const existing = await db.prepare('SELECT * FROM assets WHERE hash = ? AND kind = \'data\' LIMIT 1').get(hash) as Record<string, unknown> | undefined;
   if (existing) return assetRowToMeta(existing);

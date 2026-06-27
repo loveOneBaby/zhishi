@@ -33,7 +33,9 @@
 }
 .ik-kb-gallery-actions {
   display: flex;
+  align-items: center;
   gap: 10px;
+  row-gap: 8px;
   flex-wrap: wrap;
 }
 .ik-kb-library-layout {

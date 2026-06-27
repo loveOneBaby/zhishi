@@ -17,7 +17,13 @@ export default function AskModal({ query, onClose }: Props) {
     setLoading(true);
     askAI(query)
       .then((r) => { if (active) { setAnswer(r.answer); setConfigured(r.configured); } })
-      .catch((e) => { if (active) { setAnswer('请求失败：' + (e?.message || String(e))); setConfigured(false); } })
+      .catch((e) => {
+        if (active) {
+          const message = e?.message || String(e);
+          setAnswer(message.includes('未登录') ? 'AI 问答需要登录后使用。' : '请求失败：' + message);
+          setConfigured(false);
+        }
+      })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [query]);
@@ -39,13 +45,14 @@ export default function AskModal({ query, onClose }: Props) {
         </div>
         <div style={{ marginTop: 18, display: 'flex', gap: 10 }}>
           <button
+            type="button"
             onClick={() => setAnswer('')}
             disabled={loading || !answer}
-            style={{ padding: '9px 16px', fontSize: 13, fontFamily: 'inherit', cursor: loading || !answer ? 'default' : 'pointer', background: 'transparent', color: 'var(--mut)', border: '1px solid var(--bd)', borderRadius: 9, opacity: loading || !answer ? 0.55 : 1 }}
+            className="ik-btn ik-btn-secondary ik-btn-size-sm"
           >
             清空内容
           </button>
-          <button onClick={onClose} style={{ padding: '9px 16px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', background: 'var(--fg)', color: 'var(--bg)', border: 'none', borderRadius: 9 }}>好的</button>
+          <button type="button" onClick={onClose} className="ik-btn ik-btn-default ik-btn-size-sm">好的</button>
         </div>
       </div>
     </div>
