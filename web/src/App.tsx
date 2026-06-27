@@ -1,10 +1,11 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import type { Entry, EntryInput, Folder, KnowledgeBase, ThemeKey } from './types';
+import type { Entry, EntryInput, Folder, KnowledgeBase, KbCategory, ThemeKey } from './types';
 import { THEMES, themeVars } from './themes';
 import { filterEntries, suggestQueries, type SearchSuggestion } from './search';
 import {
   fetchEntries,
   fetchKbs,
+  fetchKbCategories,
   fetchFolders,
   fetchAiJobs,
   createEntry,
@@ -12,6 +13,10 @@ import {
   deleteEntry,
   reorderEntries,
   createKb,
+  createKbCategory,
+  renameKbCategory,
+  deleteKbCategory,
+  moveKbToCategory,
   renameKb,
   deleteKb,
   createFolder,
@@ -73,6 +78,7 @@ export default function App() {
   const initialRoute = parseRoute();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
+  const [kbCategories, setKbCategories] = useState<KbCategory[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [aiJobs, setAiJobs] = useState<AiKnowledgeBaseJob[]>([]);
@@ -136,9 +142,9 @@ export default function App() {
   useEffect(() => {
     const saved = localStorage.getItem('ik_theme');
     if (saved && (saved in THEMES)) setThemeState(saved as ThemeKey);
-    Promise.all([fetchEntries(), fetchKbs(), fetchFolders()])
-      .then(([e, k, f]) => { setEntries(e); setKbs(k); setFolders(f); })
-      .catch(() => { setEntries([]); setKbs([]); setFolders([]); })
+    Promise.all([fetchEntries(), fetchKbs(), fetchFolders(), fetchKbCategories()])
+      .then(([e, k, f, c]) => { setEntries(e); setKbs(k); setFolders(f); setKbCategories(c); })
+      .catch(() => { setEntries([]); setKbs([]); setFolders([]); setKbCategories([]); })
       .finally(() => { setLoaded(true); setTimeout(() => inputRef.current?.focus(), 60); });
   }, []);
 
@@ -367,11 +373,12 @@ export default function App() {
     const next = await reorderEntries(ids);
     setEntries(next);
   }, []);
-  const handleImported = useCallback((nextEntries: Entry[], nextKbs: KnowledgeBase[], nextFolders: Folder[]) => {
+  const handleImported = useCallback((nextEntries: Entry[], nextKbs: KnowledgeBase[], nextFolders: Folder[], nextCategories?: KbCategory[]) => {
     for (const kb of nextKbs) deletedKbIdsRef.current.delete(kb.id);
     setEntries(nextEntries);
     setKbs(nextKbs);
     setFolders(nextFolders);
+    if (nextCategories) setKbCategories(nextCategories);
   }, []);
   const handleGeneratedEntry = useCallback((entry: Entry) => {
     setEntries((prev) => [...prev.filter((item) => item.id !== entry.id), entry]);
@@ -440,8 +447,8 @@ export default function App() {
   }, [applyCompletedJobs]);
 
   // 知识库回调
-  const handleCreateKb = useCallback(async (name: string): Promise<KnowledgeBase> => {
-    const kb = await createKb(name);
+  const handleCreateKb = useCallback(async (name: string, categoryId?: string | null): Promise<KnowledgeBase> => {
+    const kb = await createKb(name, categoryId);
     setKbs((prev) => [...prev, kb]);
     return kb;
   }, []);
@@ -462,6 +469,28 @@ export default function App() {
     setSearchKb((cur) => (cur === id ? null : cur));
     setFreeKb((cur) => (cur === id ? null : cur));
     setFreeFolder(null);
+  }, []);
+
+  const handleCreateKbCategory = useCallback(async (input: { name: string; parentId?: string | null }): Promise<KbCategory> => {
+    const category = await createKbCategory(input);
+    setKbCategories((prev) => [...prev, category]);
+    return category;
+  }, []);
+
+  const handleRenameKbCategory = useCallback(async (id: string, name: string): Promise<void> => {
+    const category = await renameKbCategory(id, name);
+    setKbCategories((prev) => prev.map((item) => (item.id === id ? category : item)));
+  }, []);
+
+  const handleDeleteKbCategory = useCallback(async (id: string): Promise<void> => {
+    const next = await deleteKbCategory(id);
+    setKbCategories(next.categories);
+    setKbs(next.kbs);
+  }, []);
+
+  const handleMoveKbToCategory = useCallback(async (id: string, categoryId?: string | null): Promise<void> => {
+    const kb = await moveKbToCategory(id, categoryId);
+    setKbs((prev) => prev.map((item) => (item.id === id ? kb : item)));
   }, []);
 
   // 文件夹回调
@@ -579,6 +608,7 @@ export default function App() {
               <FreeMode
                 entries={entries}
                 kbs={kbs}
+                kbCategories={kbCategories}
                 folders={folders}
                 freeKb={freeKb}
                 freeFolder={freeFolder}
@@ -597,6 +627,10 @@ export default function App() {
                 onStartAnalyzeJob={handleStartAnalyzeJob}
                 onStartAnalyzeEntryJob={handleStartAnalyzeEntryJob}
                 onCreateKb={handleCreateKb}
+                onCreateKbCategory={handleCreateKbCategory}
+                onRenameKbCategory={handleRenameKbCategory}
+                onDeleteKbCategory={handleDeleteKbCategory}
+                onMoveKbToCategory={handleMoveKbToCategory}
                 onCreateFolder={handleCreateFolder}
                 onRenameKb={handleRenameKb}
                 onDeleteKb={handleDeleteKb}

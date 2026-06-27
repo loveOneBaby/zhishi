@@ -1,9 +1,10 @@
-import type { Entry, Folder, IndexNode, KnowledgeBase } from '../types';
+import type { Entry, Folder, IndexNode, KnowledgeBase, KbCategory } from '../types';
 import { apiGetJson, apiPostJson, apiPostKey } from './client';
 
 export interface ExportPayload {
   version: string;
   exportedAt: number;
+  kbCategories?: KbCategory[];
   kbs: KnowledgeBase[];
   folders: Folder[];
   entries: Entry[];
@@ -21,6 +22,7 @@ export interface ImportPayload {
   schema?: unknown;
   containers?: unknown[];
   extensions?: unknown;
+  kbCategories?: unknown[];
   kbs?: unknown[];
   folders?: unknown[];
   tree?: unknown[];
@@ -35,6 +37,7 @@ export interface ImportPayload {
 export interface ImportResult {
   ok: boolean;
   imported: number;
+  kbCategories?: KbCategory[];
   kbs: KnowledgeBase[];
   folders: Folder[];
   entries: Entry[];

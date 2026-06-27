@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { Entry, EntryInput, Folder, KnowledgeBase } from '../../types';
 import {
@@ -26,7 +26,7 @@ interface CommandSystemDeps {
     deleteEntryWithUndo: (entry: Entry, toastMessage?: string) => Promise<void>;
     clearFolderWithUndo: (folder: Folder) => Promise<void>;
   };
-  onCreateKb: (name: string) => Promise<KnowledgeBase>;
+  onCreateKb: (name: string, categoryId?: string | null) => Promise<KnowledgeBase>;
   onStartKnowledgeBaseJob: (domain: string) => Promise<void>;
   onStartFolderInitJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
   onCreateFolder: (input: { kbId: string; parentId?: string | null; name: string }) => Promise<Folder>;
@@ -52,6 +52,44 @@ export function useCommandSystem(deps: CommandSystemDeps) {
   const { setAiLiveLogs, setAiLivePlan, setAiLiveOutput, aiRawOutputRef, updateAiVisibleOutput } = aiLive;
   const { deleteKbWithUndo, deleteFolderWithUndo, deleteEntryWithUndo, clearFolderWithUndo } = deletes;
   const [command, setCommand] = useState<CommandState | null>(null);
+  const activeAbortRef = useRef<AbortController | null>(null);
+  const activeAbortRunIdRef = useRef(0);
+
+  function isAbortError(err: unknown): boolean {
+    return (
+      (err instanceof DOMException && err.name === 'AbortError')
+      || (err instanceof Error && (err.name === 'AbortError' || /abort|cancel/i.test(err.message)))
+    );
+  }
+
+  function startAbortableCommand(): { controller: AbortController; runId: number } {
+    const controller = new AbortController();
+    const runId = activeAbortRunIdRef.current + 1;
+    activeAbortRunIdRef.current = runId;
+    activeAbortRef.current = controller;
+    return { controller, runId };
+  }
+
+  function cancelRunningCommand(): void {
+    const controller = activeAbortRef.current;
+    if (!controller || controller.signal.aborted) return;
+    controller.abort();
+    setAiLiveLogs((current) => [...current, '正在取消当前 AI 请求…']);
+    setCommand(null);
+  }
+
+  function cancelMessage(next: CommandState): string {
+    switch (next.kind) {
+      case 'generate-entry':
+        return '已取消生成';
+      case 'rewrite-entry':
+        return '已取消改写';
+      case 'illustrate-entry':
+        return '已取消生成图解';
+      default:
+        return '已取消 AI 任务';
+    }
+  }
 
   function commandErrorPrefix(next: CommandState): string {
     switch (next.kind) {
@@ -90,10 +128,12 @@ export function useCommandSystem(deps: CommandSystemDeps) {
 
   async function confirmCommand(value: string): Promise<void> {
     if (!command) return;
+    let abortController: AbortController | null = null;
+    let abortRunId: number | null = null;
     try {
       switch (command.kind) {
         case 'create-kb': {
-          await onCreateKb(value);
+          await onCreateKb(value, command.categoryId ?? null);
           toast('已新建知识库', 'success');
           return;
         }
@@ -119,6 +159,9 @@ export function useCommandSystem(deps: CommandSystemDeps) {
           setAiLivePlan('');
           setAiLiveOutput('');
           aiRawOutputRef.current = '';
+          const started = startAbortableCommand();
+          abortController = started.controller;
+          abortRunId = started.runId;
           const input = await generateEntryDraftWithAIStream({ topic: value, kbId: command.kbId, folderId: command.folderId }, {
             onStage: (message) => setAiLiveLogs((current) => [...current, message]),
             onContext: (items) => setAiLiveLogs((current) => [
@@ -132,7 +175,7 @@ export function useCommandSystem(deps: CommandSystemDeps) {
               `解析完成：${payload.title || '未命名'} · ${payload.tags.length} 个标签 · ${payload.sections} 个小节`,
             ]),
             onImage: (payload) => setAiLiveLogs((current) => [...current, `图解已生成：${payload.caption || '知识点图解'}`]),
-          });
+          }, abortController.signal);
           setAiLiveLogs((current) => [...current, `草稿已生成：${input.title}`]);
           setCommand({ kind: 'confirm-generated-entry', kbId: command.kbId, folderId: command.folderId, input });
           toast('AI 草稿已生成，请确认写入', 'success');
@@ -157,6 +200,9 @@ export function useCommandSystem(deps: CommandSystemDeps) {
           setAiLivePlan('');
           setAiLiveOutput('');
           aiRawOutputRef.current = '';
+          const started = startAbortableCommand();
+          abortController = started.controller;
+          abortRunId = started.runId;
           const input = await rewriteEntryDraftWithAIStream(command.entry.id, {
             onStage: (message) => setAiLiveLogs((current) => [...current, message]),
             onDelta: (content) => updateAiVisibleOutput(`${aiRawOutputRef.current}${content}`),
@@ -166,7 +212,7 @@ export function useCommandSystem(deps: CommandSystemDeps) {
               `解析完成：${payload.title || '未命名'} · ${payload.tags.length} 个标签 · ${payload.sections} 个小节`,
             ]),
             onImage: (payload) => setAiLiveLogs((current) => [...current, `图解已生成：${payload.caption || '知识点图解'}`]),
-          });
+          }, undefined, abortController.signal);
           setAiLiveLogs((current) => [...current, `改写草稿已生成：${input.title}`]);
           setCommand({ kind: 'confirm-rewrite-entry', entry: command.entry, input });
           toast('AI 改写草稿已生成，请确认保存', 'success');
@@ -177,6 +223,9 @@ export function useCommandSystem(deps: CommandSystemDeps) {
           setAiLivePlan('');
           setAiLiveOutput('');
           aiRawOutputRef.current = '';
+          const started = startAbortableCommand();
+          abortController = started.controller;
+          abortRunId = started.runId;
           const entry = await generateEntryIllustrationWithAIStream(command.entry.id, {
             onStage: (message) => setAiLiveLogs((current) => [...current, message]),
             onImage: (payload) => {
@@ -185,7 +234,7 @@ export function useCommandSystem(deps: CommandSystemDeps) {
               setAiLiveOutput(JSON.stringify({ assetId: payload.assetId, url: payload.url, caption: payload.caption }, null, 2));
             },
             onSaved: (next) => setAiLiveLogs((current) => [...current, `已写回：${next.title}`]),
-          });
+          }, abortController.signal);
           setPanelMode('detail');
           dirtyRef.current = false;
           onGeneratedEntry(entry);
@@ -256,10 +305,20 @@ export function useCommandSystem(deps: CommandSystemDeps) {
         }
       }
     } catch (err) {
+      const wasCancelled = abortController?.signal.aborted || isAbortError(err);
+      if (wasCancelled) {
+        toast(cancelMessage(command), 'info');
+        setCommand(null);
+        return;
+      }
       toast(`${commandErrorPrefix(command)}：${err instanceof Error ? err.message : String(err)}`, 'error');
       throw err;
+    } finally {
+      if (abortRunId !== null && activeAbortRunIdRef.current === abortRunId) {
+        activeAbortRef.current = null;
+      }
     }
   }
 
-  return { command, setCommand, confirmCommand };
+  return { command, setCommand, confirmCommand, cancelRunningCommand };
 }

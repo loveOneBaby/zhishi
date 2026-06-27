@@ -1,7 +1,7 @@
 import type { Entry, EntryInput, Folder, KnowledgeBase } from '../../types';
 
 export type CommandState =
-  | { kind: 'create-kb' }
+  | { kind: 'create-kb'; categoryId?: string | null; categoryName?: string }
   | { kind: 'generate-kb' }
   | { kind: 'init-folders'; kbId: string; parentId: string | null; kbName: string; targetLabel: string }
   | { kind: 'create-folder'; kbId: string; parentId: string | null }

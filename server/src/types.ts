@@ -7,6 +7,17 @@ export type { Block } from './blocks.js';
 export interface KnowledgeBase {
   id: string;
   name: string;
+  categoryId: string | null;
+  sort: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// 知识库分类：管理知识库列表本身的上层树，不影响知识库内部文件夹树
+export interface KbCategory {
+  id: string;
+  parentId: string | null;
+  name: string;
   sort: number;
   createdAt: number;
   updatedAt: number;
@@ -59,6 +70,16 @@ export interface EntryRow {
 
 export interface KbRow {
   id: string;
+  name: string;
+  categoryId?: string | null;
+  sort: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface KbCategoryRow {
+  id: string;
+  parentId: string | null;
   name: string;
   sort: number;
   createdAt: number;

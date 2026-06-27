@@ -8,6 +8,7 @@ import type {
 import type { Entry, Theme, Folder, KnowledgeBase } from '../types';
 import { Minus, Plus, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
 import { highlightText } from '../highlight';
+import { matchesQuery } from '../pinyin-search';
 import DetailSidePanel from './DetailSidePanel';
 import {
   type GNode,
@@ -49,6 +50,7 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
   const [immersive, setImmersive] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [viewport, setViewport] = useState<Viewport>({ x: 48, y: 48, scale: 1.1 });
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [showFullTree, setShowFullTree] = useState(false);
   const [keyGridOpen, setKeyGridOpen] = useState(false);
@@ -83,6 +85,16 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
     () => graphRoot ? buildTreeLayout(model, graphRoot.id, visible) : null,
     [model, graphRoot, visible]
   );
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const update = (): void => setContainerSize({ width: node.clientWidth, height: node.clientHeight });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [graphRoot?.id, immersive]);
   const collapsibleNodeIds = useMemo(
     () => {
       if (!graphRoot) return [];
@@ -158,6 +170,24 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
     }
   }, [layout]);
 
+  const lastSearchFocusRef = useRef('');
+  useEffect(() => {
+    const trimmed = activeQuery.trim();
+    if (!searchActive || !trimmed || !layout) {
+      lastSearchFocusRef.current = '';
+      return;
+    }
+    const key = `${graphRoot?.id ?? ''}:${trimmed}:${layout.nodes.length}`;
+    if (lastSearchFocusRef.current === key) return;
+    const target = layout.nodes.find((placed) => placed.node.type === 'entry' && matchesQuery(placed.node.text, trimmed))
+      ?? layout.nodes.find((placed) => placed.depth > 0 && matchesQuery(placed.node.text, trimmed))
+      ?? layout.nodes.find((placed) => placed.depth > 0);
+    if (!target) return;
+    lastSearchFocusRef.current = key;
+    const timer = window.setTimeout(() => focusNode(target.node.id), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeQuery, graphRoot?.id, layout, searchActive]);
+
   // 收起/展开全部后,布局重算,需把视口复位到根节点(否则可能偏出可视区)
   const pendingResetRef = useRef(false);
   const collapseAllNodes = (): void => {
@@ -167,19 +197,10 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
     pendingResetRef.current = true;
   };
 
-  // 展开到知识点为止:把所有「知识点」节点折叠,避免展开其内部详情(详情看预览面板)
-  const entryCollapseIds = useMemo(() => {
-    const ids: string[] = [];
-    for (const id of collapsibleNodeIds) {
-      if (model.get(id)?.type === 'entry') ids.push(id);
-    }
-    return ids;
-  }, [collapsibleNodeIds, model]);
-
   const expandAllNodes = (): void => {
     setKeyGridOpen(false);
     setShowFullTree(true);
-    setCollapsed(new Set(entryCollapseIds));
+    setCollapsed(new Set());
     pendingResetRef.current = true;
   };
 
@@ -207,7 +228,7 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  // 点击节点：只有知识点根节点展示详情；索引 / 文件夹节点只负责展开收起。
+  // 点击节点：知识点展示详情；文件夹节点只负责展开收起。
   const activateNode = (node: GNode): void => {
     if (node.depth === 0) return; // 知识库根节点不处理
 
@@ -454,6 +475,105 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
     previewPath = labels.join(' / ');
   }
 
+  const miniWidth = 224;
+  const miniHeight = 144;
+  const miniPadding = 10;
+  const miniScale = Math.min(
+    (miniWidth - miniPadding * 2) / Math.max(1, layout.width),
+    (miniHeight - miniPadding * 2) / Math.max(1, layout.height),
+  );
+  const miniWorldWidth = layout.width * miniScale;
+  const miniWorldHeight = layout.height * miniScale;
+  const miniOffsetX = (miniWidth - miniWorldWidth) / 2;
+  const miniOffsetY = (miniHeight - miniWorldHeight) / 2;
+  const viewWorld = {
+    x: -viewport.x / viewport.scale,
+    y: -viewport.y / viewport.scale,
+    width: Math.max(1, containerSize.width) / viewport.scale,
+    height: Math.max(1, containerSize.height) / viewport.scale,
+  };
+  const handleMiniMapPointerDown = (event: ReactPointerEvent<SVGSVGElement>): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const worldX = (event.clientX - rect.left - miniOffsetX) / miniScale;
+    const worldY = (event.clientY - rect.top - miniOffsetY) / miniScale;
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return;
+    setViewport((current) => ({
+      ...current,
+      x: Math.max(1, containerSize.width) / 2 - worldX * current.scale,
+      y: Math.max(1, containerSize.height) / 2 - worldY * current.scale,
+    }));
+  };
+  const miniMap = (
+    <div
+      data-canvas-overlay
+      onPointerDown={(event) => event.stopPropagation()}
+      title="点击小地图定位"
+      style={{
+        position: 'absolute',
+        right: previewEntry ? 'calc(min(560px, 46%) + 24px)' : 12,
+        bottom: 12,
+        zIndex: 8,
+        width: miniWidth,
+        height: miniHeight,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        border: '1px solid color-mix(in srgb, var(--bd) 82%, transparent)',
+        borderRadius: 12,
+        background: 'color-mix(in srgb, var(--panel) 88%, transparent)',
+        boxShadow: '0 16px 36px rgba(0,0,0,.12)',
+        backdropFilter: 'blur(14px) saturate(1.2)',
+        WebkitBackdropFilter: 'blur(14px) saturate(1.2)',
+        cursor: 'crosshair',
+      }}
+    >
+      <svg
+        width={miniWidth}
+        height={miniHeight}
+        viewBox={`0 0 ${miniWidth} ${miniHeight}`}
+        onPointerDown={handleMiniMapPointerDown}
+        style={{ display: 'block', width: '100%', height: '100%' }}
+        aria-label="画布小地图"
+      >
+        <rect x={0} y={0} width={miniWidth} height={miniHeight} rx={12} fill="color-mix(in srgb, var(--panel) 88%, transparent)" />
+        {layout.nodes.map((placed) => {
+          const match = activeQuery.trim() && matchesQuery(placed.node.text, activeQuery.trim());
+          const root = placed.depth === 0;
+          const entry = placed.node.type === 'entry';
+          const active = previewId === placed.node.id;
+          const x = miniOffsetX + placed.x * miniScale;
+          const y = miniOffsetY + placed.y * miniScale;
+          const width = Math.max(3, placed.width * miniScale);
+          const height = Math.max(3, placed.height * miniScale);
+          return (
+            <rect
+              key={`mini-${placed.node.id}`}
+              x={x}
+              y={y}
+              width={width}
+              height={height}
+              rx={root ? 3.5 : 2.5}
+              fill={root ? t.fg : match || active ? t.accent : entry ? t.accent : t.bd}
+              opacity={root ? 0.82 : match || active ? 0.92 : entry ? 0.42 : 0.55}
+            />
+          );
+        })}
+        <rect
+          x={miniOffsetX + viewWorld.x * miniScale}
+          y={miniOffsetY + viewWorld.y * miniScale}
+          width={Math.max(10, viewWorld.width * miniScale)}
+          height={Math.max(10, viewWorld.height * miniScale)}
+          rx={4}
+          fill="transparent"
+          stroke={t.accent}
+          strokeWidth={2}
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    </div>
+  );
+
   const canvas = (
     <div
       ref={containerRef}
@@ -480,6 +600,7 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
       }}
     >
       {controls}
+      {miniMap}
       {previewEntry && (
         <div
           data-canvas-overlay

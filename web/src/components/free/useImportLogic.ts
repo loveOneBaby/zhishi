@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent, MutableRefObject } from 'react';
-import type { Entry, Folder, KnowledgeBase } from '../../types';
+import type { Entry, Folder, KnowledgeBase, KbCategory } from '../../types';
 import { importAll, previewImport, type ImportPayload, type ImportPreview } from '../../api';
 import { toast } from '../../toast';
 import { newImportBatchId } from './utils';
@@ -10,7 +10,7 @@ interface ImportLogicDeps {
   kbs: KnowledgeBase[];
   freeFolder: string | null;
   canImportJson: boolean;
-  onImported: (entries: Entry[], kbs: KnowledgeBase[], folders: Folder[]) => void;
+  onImported: (entries: Entry[], kbs: KnowledgeBase[], folders: Folder[], kbCategories?: KbCategory[]) => void;
   setFreeFolder: (id: string | null) => void;
   setPanelMode: (mode: 'detail' | 'create' | 'edit') => void;
 }
@@ -66,6 +66,7 @@ export function useImportLogic(deps: ImportLogicDeps) {
         schema?: unknown;
         containers?: unknown[];
         extensions?: unknown;
+        kbCategories?: unknown[];
         kbs?: unknown[];
         folders?: unknown[];
         tree?: unknown[];
@@ -85,6 +86,7 @@ export function useImportLogic(deps: ImportLogicDeps) {
         schema: obj.schema,
         containers: obj.containers,
         extensions: obj.extensions,
+        kbCategories: obj.kbCategories,
         kbs: obj.kbs,
         folders: obj.folders,
         tree: obj.tree,
@@ -131,7 +133,7 @@ export function useImportLogic(deps: ImportLogicDeps) {
     setImporting(true);
     try {
       const next = await importAll(payload, replace);
-      onImported(next.entries, next.kbs, next.folders);
+      onImported(next.entries, next.kbs, next.folders, next.kbCategories);
       toast(`已导入 ${preview.valid} 条知识点，生成 ${previewFolders.length} 个文件夹`, 'success');
       setImportPreview(null);
       const importedFolderIds = new Set(previewFolders.map((folder) => folder.id).filter((id): id is string => Boolean(id)));

@@ -27,6 +27,8 @@ interface Props {
   liveOutputLabel?: string;
   preview?: ReactNode;
   closeOnConfirm?: boolean;
+  submittingCancelText?: string;
+  onCancelSubmitting?: () => void;
   onOpenChange: (open: boolean) => void;
   onConfirm: (value: string) => Promise<void> | void;
 }
@@ -52,6 +54,8 @@ export default function CommandDialog({
   liveOutputLabel = '模型输出',
   preview,
   closeOnConfirm = true,
+  submittingCancelText,
+  onCancelSubmitting,
   onOpenChange,
   onConfirm,
 }: Props): ReactNode {
@@ -61,6 +65,7 @@ export default function CommandDialog({
   const [submitting, setSubmitting] = useState(false);
   const hasInput = Boolean(inputLabel);
   const disabled = submitting || (hasInput && !draft.trim());
+  const canCancelSubmitting = Boolean(onCancelSubmitting);
   const activeProgressSteps = progressSteps?.filter(Boolean) ?? [];
   const activeLiveLogs = liveLogs?.filter(Boolean) ?? [];
   const showLive = submitting && (activeLiveLogs.length > 0 || Boolean(livePlan) || Boolean(liveOutput));
@@ -92,8 +97,29 @@ export default function CommandDialog({
 
   const visualIcon = icon ?? (tone === 'danger' ? <AlertTriangle size={18} strokeWidth={2.1} /> : <Check size={18} strokeWidth={2.2} />);
 
+  function requestClose(): void {
+    if (submitting && onCancelSubmitting) {
+      onCancelSubmitting();
+      return;
+    }
+    if (!submitting) onOpenChange(false);
+  }
+
+  const closeButton = submitting && canCancelSubmitting ? (
+    <button type="button" className="ik-command-close" onClick={requestClose} aria-label="取消当前操作">
+      <X size={16} strokeWidth={2.2} />
+    </button>
+  ) : (
+    <Dialog.Close className="ik-command-close" disabled={submitting} aria-label="关闭">
+      <X size={16} strokeWidth={2.2} />
+    </Dialog.Close>
+  );
+
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => { if (!submitting) onOpenChange(next); }}>
+    <Dialog.Root open={open} onOpenChange={(next) => {
+      if (!next) requestClose();
+      else if (!submitting) onOpenChange(next);
+    }}>
       <Dialog.Portal>
         <Dialog.Overlay className="ik-command-overlay" />
         <Dialog.Content
@@ -108,9 +134,7 @@ export default function CommandDialog({
                 <Dialog.Title className="ik-command-title">{title}</Dialog.Title>
                 {description && <Dialog.Description className="ik-command-desc">{description}</Dialog.Description>}
               </div>
-              <Dialog.Close className="ik-command-close" disabled={submitting} aria-label="关闭">
-                <X size={16} strokeWidth={2.2} />
-              </Dialog.Close>
+              {closeButton}
             </div>
 
             {hasInput && (
@@ -168,9 +192,15 @@ export default function CommandDialog({
             )}
 
             <div className="ik-command-actions">
-              <Dialog.Close className="ik-command-btn ik-command-btn-ghost" disabled={submitting}>
-                {cancelText}
-              </Dialog.Close>
+              {submitting && canCancelSubmitting ? (
+                <button type="button" className="ik-command-btn ik-command-btn-ghost is-cancel-running" onClick={requestClose}>
+                  {submittingCancelText ?? cancelText}
+                </button>
+              ) : (
+                <Dialog.Close className="ik-command-btn ik-command-btn-ghost" disabled={submitting}>
+                  {cancelText}
+                </Dialog.Close>
+              )}
               <button
                 type="submit"
                 className={`ik-command-btn ik-command-btn-primary ${tone === 'danger' ? 'is-danger' : ''}`}

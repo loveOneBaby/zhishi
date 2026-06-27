@@ -214,8 +214,8 @@ test('ai-generate: 知识库 JSON 转目录与 Q&A markdown', () => {
   assert.equal(draft.kbName, 'Redis 面试知识库');
   assert.deepEqual(draft.folders.map((folder) => folder.path), [['数据结构'], ['数据结构', 'String']]);
   const md = kbQuestionToMarkdown(draft.questions[0]);
-  assert.ok(md.includes('## Q'));
-  assert.ok(md.includes('## A'));
+  assert.ok(md.includes('## 一句话结论'));
+  assert.ok(md.includes('## 面试题'));
   assert.ok(md.includes('## 高频追问'));
 });
 

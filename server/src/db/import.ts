@@ -1,10 +1,11 @@
 import { db, deriveDoc, kbNameOf } from './client.js';
-import { listKbs, resolveKbId, defaultKbId, ensureKb } from './kb.js';
+import { listKbs, resolveKbId, defaultKbId, ensureKb, updateKbCategory } from './kb.js';
+import { listKbCategories } from './kb-category.js';
 import { listFolders, getFolder, ensureFolder } from './folder.js';
 import { listEntries, deriveSummary } from './entry.js';
 import { buildDocIdx } from './doc-write.js';
 import { splitDocToIndex } from '../doc.js';
-import type { KnowledgeBase, Folder, Entry, IndexNode } from '../types.js';
+import type { KnowledgeBase, KbCategory, Folder, Entry, IndexNode } from '../types.js';
 import type { Block } from '../blocks.js';
 
 // ───────────────────────── 导入 / 导出 ─────────────────────────
@@ -24,9 +25,11 @@ export interface ImportEntry {
   doc?: Block[];         // BlockNote 块文档(canonical;优先于 intro/nodes/body)
 }
 
-export interface ImportKb { id?: string; name: string; sort?: number; }
+export interface ImportKbCategory { id?: string; parentId?: string | null; name: string; sort?: number; }
+export interface ImportKb { id?: string; name: string; categoryId?: string | null; sort?: number; }
 export interface ImportFolder { id?: string; kbId?: string; parentId?: string | null; name: string; sort?: number; }
 export interface ImportPayload {
+  kbCategories?: ImportKbCategory[];
   kbs?: ImportKb[];
   folders?: ImportFolder[];
   entries: ImportEntry[];
@@ -40,6 +43,7 @@ export interface ImportPayload {
 export interface ExportPayload {
   version: string;
   exportedAt: number;
+  kbCategories: KbCategory[];
   kbs: KnowledgeBase[];
   folders: Folder[];
   entries: Entry[];
@@ -49,6 +53,7 @@ export function exportData(): ExportPayload {
   return {
     version: 'kb-export-2',
     exportedAt: Date.now(),
+    kbCategories: listKbCategories(),
     kbs: listKbs(),
     folders: listFolders(),
     entries: listEntries(),
@@ -179,7 +184,10 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
     `UPDATE entries SET cat=:cat, kbId=:kbId, folderId=:folderId, title=:title, py=:py, tags=:tags, summary=:summary, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
   );
   const insertKb = db.prepare(
-    'INSERT OR IGNORE INTO knowledge_bases (id, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)'
+    'INSERT OR IGNORE INTO knowledge_bases (id, name, categoryId, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  const insertCategory = db.prepare(
+    'INSERT OR IGNORE INTO kb_categories (id, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)'
   );
   const insertFolder = db.prepare(
     'INSERT OR IGNORE INTO folders (id, kbId, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -193,24 +201,46 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
       db.exec('DELETE FROM entries');
       db.exec('DELETE FROM folders');
       db.exec('DELETE FROM knowledge_bases');
+      db.exec('DELETE FROM kb_categories');
     }
 
-    // 1) 知识库
+    // 1) 知识库分类
+    const categoryIdMap = new Map<string, string>(); // 载荷原 id/name → 实际入库 id
+    const rawCategories = payload.kbCategories ?? [];
+    for (let i = 0; i < rawCategories.length; i++) {
+      const c = rawCategories[i];
+      if (!c.name || !c.name.trim()) continue;
+      const id = c.id || `kbc_${Date.now().toString(36)}_${i}`;
+      if (c.id) categoryIdMap.set(c.id, id);
+      categoryIdMap.set(c.name, id);
+    }
+    for (const c of rawCategories) {
+      if (!c.name || !c.name.trim()) continue;
+      const id = (c.id && categoryIdMap.get(c.id)) || categoryIdMap.get(c.name);
+      if (!id) continue;
+      const parentId = c.parentId ? (categoryIdMap.get(c.parentId) ?? null) : null;
+      const now = Date.now();
+      insertCategory.run(id, parentId, c.name.trim(), c.sort ?? 0, now, now);
+    }
+
+    // 2) 知识库
     const kbIdMap = new Map<string, string>();   // 载荷原 id → 实际入库 id
     for (const k of payload.kbs ?? []) {
       const now = Date.now();
+      const categoryId = k.categoryId ? (categoryIdMap.get(k.categoryId) ?? k.categoryId) : null;
       if (k.id) {
-        insertKb.run(k.id, k.name, k.sort ?? 0, now, now);
+        insertKb.run(k.id, k.name, categoryId, k.sort ?? 0, now, now);
         kbIdMap.set(k.id, k.id);
       } else {
         const kb = ensureKb(k.name);
+        if (categoryId) updateKbCategory(kb.id, categoryId);
         kbIdMap.set(k.name, kb.id);
       }
     }
     // 兜底知识库：在导入的知识库就绪后再取，避免 replace 清空后凭空多建一个默认库
     const fallbackKbId = defaultKbId();
 
-    // 2) 文件夹：按依赖多趟建入（先建父、再建子），未就绪的父降级为根
+    // 3) 文件夹：按依赖多趟建入（先建父、再建子），未就绪的父降级为根
     const pending = [...(payload.folders ?? [])];
     const folderIdMap = new Map<string, string>(); // 载荷原 id → 实际 id
     let progress = true;
@@ -241,7 +271,7 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
       else { const folder = ensureFolder(kbId, f.name, null); folderIdMap.set(f.name + '::', folder.id); }
     }
 
-    // 3) 知识点
+    // 4) 知识点
     let maxSort = Number((db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM entries').get() as { m: number }).m);
     for (const raw of payload.entries) {
       if (!raw || typeof raw.title !== 'string' || !raw.title.trim()) continue;

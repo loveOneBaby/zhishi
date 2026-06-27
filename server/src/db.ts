@@ -4,6 +4,7 @@
 export * from './db/client.js';
 export * from './db/asset.js';
 export * from './db/doc-write.js';
+export * from './db/kb-category.js';
 export * from './db/kb.js';
 export * from './db/folder.js';
 export * from './db/entry.js';

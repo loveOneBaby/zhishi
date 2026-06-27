@@ -6,10 +6,15 @@ import {
 } from '../ai-generate.js';
 import {
   listKbs,
+  listKbCategories,
+  createKbCategory,
+  renameKbCategory,
+  deleteKbCategory,
   getKb,
   createKb,
   renameKb,
   deleteKb,
+  updateKbCategory,
   reorderKbs,
   getFolder,
   listFolders,
@@ -20,6 +25,34 @@ import { discardAiJobResultsForKb, jobSnapshot, startAnalyzeJob, startFolderEntr
 import { folderPathLabel, sendSse } from '../services/utils.js';
 
 export function registerKbRoutes(api: Router): void {
+  // ───────────── 知识库分类 ─────────────
+  api.get('/kb-categories', (_req, res) => {
+    res.json({ categories: listKbCategories() });
+  });
+
+  api.post('/kb-categories', (req, res) => {
+    const name = String(req.body?.name ?? '').trim();
+    const parentId = req.body?.parentId == null ? null : String(req.body.parentId).trim() || null;
+    if (!name) return res.status(400).json({ error: 'name 不能为空' });
+    const category = createKbCategory(name, parentId);
+    if (!category) return res.status(400).json({ error: '父分类不存在' });
+    res.status(201).json({ category });
+  });
+
+  api.put('/kb-categories/:id', (req, res) => {
+    const name = String(req.body?.name ?? '').trim();
+    if (!name) return res.status(400).json({ error: 'name 不能为空' });
+    const category = renameKbCategory(req.params.id, name);
+    if (!category) return res.status(404).json({ error: 'not found' });
+    res.json({ category });
+  });
+
+  api.delete('/kb-categories/:id', (req, res) => {
+    const ok = deleteKbCategory(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true, categories: listKbCategories(), kbs: listKbs() });
+  });
+
   // ───────────── 知识库 ─────────────
   api.get('/kbs', (_req, res) => {
     res.json({ kbs: listKbs() });
@@ -27,8 +60,9 @@ export function registerKbRoutes(api: Router): void {
 
   api.post('/kbs', (req, res) => {
     const name = String(req.body?.name ?? '').trim();
+    const categoryId = req.body?.categoryId == null ? null : String(req.body.categoryId).trim() || null;
     if (!name) return res.status(400).json({ error: 'name 不能为空' });
-    const kb = createKb(name);
+    const kb = createKb(name, categoryId);
     res.status(201).json({ kb });
   });
 
@@ -129,6 +163,13 @@ export function registerKbRoutes(api: Router): void {
     const name = String(req.body?.name ?? '').trim();
     if (!name) return res.status(400).json({ error: 'name 不能为空' });
     const kb = renameKb(req.params.id, name);
+    if (!kb) return res.status(404).json({ error: 'not found' });
+    res.json({ kb });
+  });
+
+  api.put('/kbs/:id/category', (req, res) => {
+    const categoryId = req.body?.categoryId == null ? null : String(req.body.categoryId).trim() || null;
+    const kb = updateKbCategory(req.params.id, categoryId);
     if (!kb) return res.status(404).json({ error: 'not found' });
     res.json({ kb });
   });

@@ -20,6 +20,17 @@ export interface IndexNode {
 export interface KnowledgeBase {
   id: string;
   name: string;
+  categoryId?: string | null;
+  sort: number;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+// 知识库分类：管理知识库列表本身的上层树
+export interface KbCategory {
+  id: string;
+  parentId: string | null;
+  name: string;
   sort: number;
   createdAt?: number;
   updatedAt?: number;

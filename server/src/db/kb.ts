@@ -1,5 +1,6 @@
 import { db, genId, DEFAULT_KB_NAME, rowToKb } from './client.js';
 import type { KnowledgeBase, KbRow } from '../types.js';
+import { getKbCategory } from './kb-category.js';
 
 // 取首个知识库 id；无则创建默认库（用于兜底归属）
 export function defaultKbId(): string {
@@ -30,12 +31,27 @@ export function getKb(id: string): KnowledgeBase | null {
   return row ? rowToKb(row) : null;
 }
 
-export function createKb(name: string): KnowledgeBase {
+function normalizeCategoryId(categoryId?: string | null): string | null {
+  if (categoryId == null) return null;
+  const trimmed = String(categoryId).trim();
+  if (!trimmed) return null;
+  return getKbCategory(trimmed) ? trimmed : null;
+}
+
+export function createKb(name: string, categoryId?: string | null): KnowledgeBase {
   const now = Date.now();
   const id = genId('kb');
   const maxRow = db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM knowledge_bases').get() as { m: number };
-  const kb: KnowledgeBase = { id, name: name.trim() || '未命名知识库', sort: Number(maxRow.m) + 1, createdAt: now, updatedAt: now };
-  db.prepare('INSERT INTO knowledge_bases (id, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)').run(id, kb.name, kb.sort, now, now);
+  const kb: KnowledgeBase = {
+    id,
+    name: name.trim() || '未命名知识库',
+    categoryId: normalizeCategoryId(categoryId),
+    sort: Number(maxRow.m) + 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  db.prepare('INSERT INTO knowledge_bases (id, name, categoryId, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, kb.name, kb.categoryId, kb.sort, now, now);
   return kb;
 }
 
@@ -43,6 +59,14 @@ export function renameKb(id: string, name: string): KnowledgeBase | null {
   if (!name.trim()) return null;
   const now = Date.now();
   db.prepare('UPDATE knowledge_bases SET name = ?, updatedAt = ? WHERE id = ?').run(name.trim(), now, id);
+  return getKb(id);
+}
+
+export function updateKbCategory(id: string, categoryId?: string | null): KnowledgeBase | null {
+  if (!getKb(id)) return null;
+  const now = Date.now();
+  db.prepare('UPDATE knowledge_bases SET categoryId = ?, updatedAt = ? WHERE id = ?')
+    .run(normalizeCategoryId(categoryId), now, id);
   return getKb(id);
 }
 

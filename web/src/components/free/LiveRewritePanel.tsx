@@ -6,13 +6,13 @@ interface Props {
   title: string;
   raw: string;
   stage?: string;
-  mode?: 'rewrite' | 'generate';
+  mode?: 'rewrite' | 'generate' | 'illustrate';
   onCancel?: () => void;
 }
 
 // 详情区里的“实时改写”视图:把流式输出逐字渲染成标题/正文,完成后由外层替换为最终 doc。
 export default function LiveRewritePanel({ title, raw, stage, mode = 'rewrite', onCancel }: Props) {
-  const verb = mode === 'generate' ? '生成' : '改写';
+  const verb = mode === 'rewrite' ? '改写' : mode === 'illustrate' ? '生成图解' : '生成';
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const view = useMemo(() => parseLiveRewrite(raw), [raw]);
 
@@ -33,7 +33,7 @@ export default function LiveRewritePanel({ title, raw, stage, mode = 'rewrite', 
         </div>
         {onCancel ? (
           <button type="button" className="ik-live-rewrite-cancel" onClick={onCancel}>
-            <X size={14} strokeWidth={2.4} />取消改写
+            <X size={14} strokeWidth={2.4} />取消{verb}
           </button>
         ) : (
           <span className="ik-live-rewrite-dots" aria-hidden="true"><i /><i /><i /></span>

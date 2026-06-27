@@ -1,0 +1,40 @@
+# 依赖
+node_modules/
+*/node_modules/
+
+# 构建产物
+dist/
+*/dist/
+build/
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+!.env.example.*
+
+# 数据库与数据文件
+server/data/
+*.db
+*.db-shm
+*.db-wal
+*.db.bak*
+
+# 日志
+.logs/
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 临时文件
+output/
+.thumbnail
+*.tmp

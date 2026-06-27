@@ -11,7 +11,7 @@ export interface LiveTask {
   entryId: string;
   title: string;
   label: string;
-  mode: 'rewrite' | 'generate';
+  mode: 'rewrite' | 'generate' | 'illustrate';
   status: 'running' | 'succeeded' | 'failed' | 'cancelled';
   stage: string;
   raw: string;
@@ -54,6 +54,7 @@ interface Props {
   analysisApplyingAll?: boolean;
   liveTasks?: LiveTask[];
   onCancelLiveTask?: (id: string) => void;
+  onClearLiveHistory?: () => void;
 }
 
 function statusLabel(status: AiKnowledgeBaseJob['status']): string {
@@ -199,45 +200,58 @@ export default function AiTaskCenter({
   analysisApplyingAll,
   liveTasks = [],
   onCancelLiveTask,
+  onClearLiveHistory,
 }: Props): ReactNode {
-  const runningLive = liveTasks.find((t) => t.status === 'running') ?? null;
   const sortedLive = useMemo(() => [...liveTasks].sort((a, b) => b.createdAt - a.createdAt), [liveTasks]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [promptId, setPromptId] = useState<string | null>(null);
   const [promptValue, setPromptValue] = useState('');
   const closePrompt = () => { setPromptId(null); setPromptValue(''); };
   const sortedJobs = useMemo(() => [...jobs].sort((a, b) => b.createdAt - a.createdAt), [jobs]);
-  const runningCount = sortedJobs.filter((job) => job.status === 'queued' || job.status === 'running').length;
-  const historyCount = sortedJobs.length - runningCount;
-  const failedCount = sortedJobs.filter((job) => job.status === 'failed').length;
-  const selectedJob = sortedJobs.find((job) => job.id === selectedId) ?? sortedJobs[0] ?? null;
+  const liveId = (id: string): string => `live:${id}`;
+  const taskKeys = useMemo(() => [
+    ...sortedLive.map((task) => ({ id: liveId(task.id), createdAt: task.createdAt })),
+    ...sortedJobs.map((job) => ({ id: job.id, createdAt: job.createdAt })),
+  ].sort((a, b) => b.createdAt - a.createdAt), [sortedJobs, sortedLive]);
+  const taskRows = useMemo(() => [
+    ...sortedLive.map((task) => ({ kind: 'live' as const, id: liveId(task.id), createdAt: task.createdAt, task })),
+    ...sortedJobs.map((job) => ({ kind: 'job' as const, id: job.id, createdAt: job.createdAt, job })),
+  ].sort((a, b) => b.createdAt - a.createdAt), [sortedJobs, sortedLive]);
+  const runningJobCount = sortedJobs.filter((job) => job.status === 'queued' || job.status === 'running').length;
+  const runningLiveCount = sortedLive.filter((task) => task.status === 'running').length;
+  const runningCount = runningJobCount + runningLiveCount;
+  const historyCount = (sortedJobs.length - runningJobCount) + sortedLive.filter((task) => task.status !== 'running').length;
+  const failedCount = sortedJobs.filter((job) => job.status === 'failed').length + sortedLive.filter((task) => task.status === 'failed').length;
+  const recordCount = sortedJobs.length + sortedLive.length;
+  const selectedLive = sortedLive.find((task) => selectedId === liveId(task.id)) ?? null;
+  const selectedJob = selectedLive ? null : (sortedJobs.find((job) => job.id === selectedId) ?? sortedJobs[0] ?? null);
   const output = splitModelOutput(selectedJob?.modelOutput ?? '');
   const selectedKindLabel = selectedJob ? jobKindLabel(selectedJob) : 'AI 任务';
   const liveItems = selectedJob ? growthItems(selectedJob) : [];
   const retryText = selectedJob?.resumable ? '继续生成' : '重新生成';
 
   useEffect(() => {
-    if (!sortedJobs.length) {
+    if (!taskKeys.length) {
       setSelectedId(null);
       return;
     }
-    if (!selectedId || !sortedJobs.some((job) => job.id === selectedId)) {
-      setSelectedId(sortedJobs[0].id);
+    if (!selectedId || !taskKeys.some((item) => item.id === selectedId)) {
+      setSelectedId(taskKeys[0].id);
     }
-  }, [selectedId, sortedJobs]);
+  }, [selectedId, taskKeys]);
 
   // 新建任务时自动定位过去:监测最新任务 id,出现更新的任务就选中它
   const lastTopIdRef = useRef<string | null>(null);
   useEffect(() => {
-    const top = sortedJobs[0];
+    const top = taskKeys[0];
     if (!top) { lastTopIdRef.current = null; return; }
     if (lastTopIdRef.current !== null && top.id !== lastTopIdRef.current) {
       setSelectedId(top.id);
     }
     lastTopIdRef.current = top.id;
-  }, [sortedJobs]);
+  }, [taskKeys]);
 
-  if (!sortedJobs.length && !actions.length) return null;
+  if (!recordCount && !actions.length) return null;
 
   return (
     <>
@@ -252,7 +266,7 @@ export default function AiTaskCenter({
         </span>
         <span>
           <b>{runningCount ? `${runningCount} 个运行中` : 'AI 控制台'}</b>
-          <small>{failedCount ? `${failedCount} 个失败` : sortedJobs.length ? `${sortedJobs.length} 个记录` : `${actions.length} 个快捷动作`}</small>
+          <small>{failedCount ? `${failedCount} 个失败` : recordCount ? `${recordCount} 个记录` : `${actions.length} 个快捷动作`}</small>
         </span>
       </button>
 
@@ -266,7 +280,12 @@ export default function AiTaskCenter({
             </div>
             <div className="ik-ai-task-head-actions">
               {historyCount > 0 && (
-                <button type="button" className="ik-ai-task-clear" onClick={() => { void onClearHistory(); }}>
+                <button type="button" className="ik-ai-task-clear" onClick={() => {
+                  void (async () => {
+                    await onClearHistory();
+                    onClearLiveHistory?.();
+                  })();
+                }}>
                   <Trash2 size={14} strokeWidth={2.2} />清除历史
                 </button>
               )}
@@ -351,40 +370,86 @@ export default function AiTaskCenter({
           {(sortedJobs.length > 0 || liveTasks.length > 0) ? (
           <div className="ik-ai-task-panel-body">
             <div className="ik-ai-task-list">
-              {sortedLive.map((task) => (
-                <div key={task.id} className={`ik-ai-task-row is-${task.status === 'running' ? 'live-active' : task.status} ${task.status === 'running' ? 'is-active' : ''}`}>
-                  <span className="ik-ai-task-row-icon">{statusIcon(task.status)}</span>
-                  <span className="ik-ai-task-row-main">
-                    <b>{task.title}</b>
-                    <small>{task.label} · {task.stage || liveStatusLabel(task.status)}</small>
-                  </span>
-                  {task.status === 'running' && onCancelLiveTask && (
-                    <button type="button" className="ik-ai-task-row-cancel" onClick={() => onCancelLiveTask(task.id)} aria-label="取消"><X size={14} strokeWidth={2.3} /></button>
-                  )}
-                </div>
-              ))}
-              {sortedJobs.map((job) => (
-                <button
-                  key={job.id}
-                  type="button"
-                  className={`ik-ai-task-row ${!runningLive && selectedJob?.id === job.id ? 'is-active' : ''} is-${job.status}`}
-                  onClick={() => setSelectedId(job.id)}
-                >
-                  <span className="ik-ai-task-row-icon">{statusIcon(job.status)}</span>
-                  <span className="ik-ai-task-row-main">
-                    <b>{job.domain}</b>
-                    <small>{jobKindLabel(job)} · {runningText(job)} · {formatTime(job.updatedAt)}</small>
-                  </span>
-                  {job.parsed && (
-                    <span className="ik-ai-task-row-count">{job.kind === 'folder-init' ? job.parsed.folders : job.parsed.questions}</span>
-                  )}
-                </button>
-              ))}
+              {taskRows.map((row) => {
+                if (row.kind === 'live') {
+                  const task = row.task;
+                  return (
+                    <div
+                      key={row.id}
+                      className={`ik-ai-task-row is-${task.status === 'running' ? 'live-active' : task.status} ${selectedLive?.id === task.id ? 'is-active' : ''}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedId(row.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedId(row.id);
+                        }
+                      }}
+                    >
+                      <span className="ik-ai-task-row-icon">{statusIcon(task.status)}</span>
+                      <span className="ik-ai-task-row-main">
+                        <b>{task.title}</b>
+                        <small>{task.label} · {task.stage || liveStatusLabel(task.status)}</small>
+                      </span>
+                      {task.status === 'running' && onCancelLiveTask && (
+                        <button
+                          type="button"
+                          className="ik-ai-task-row-cancel"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onCancelLiveTask(task.id);
+                          }}
+                          aria-label="取消"
+                        >
+                          <X size={14} strokeWidth={2.3} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+                const job = row.job;
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className={`ik-ai-task-row ${selectedJob?.id === job.id ? 'is-active' : ''} is-${job.status}`}
+                    onClick={() => setSelectedId(job.id)}
+                  >
+                    <span className="ik-ai-task-row-icon">{statusIcon(job.status)}</span>
+                    <span className="ik-ai-task-row-main">
+                      <b>{job.domain}</b>
+                      <small>{jobKindLabel(job)} · {runningText(job)} · {formatTime(job.updatedAt)}</small>
+                    </span>
+                    {job.parsed && (
+                      <span className="ik-ai-task-row-count">{job.kind === 'folder-init' ? job.parsed.folders : job.parsed.questions}</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
-            {runningLive ? (
+            {selectedLive && selectedLive.status === 'running' ? (
               <section className="ik-ai-task-detail ik-ai-task-detail-live">
-                <LiveRewritePanel title={runningLive.title} raw={runningLive.raw} stage={runningLive.stage} mode={runningLive.mode} onCancel={() => onCancelLiveTask?.(runningLive.id)} />
+                <LiveRewritePanel title={selectedLive.title} raw={selectedLive.raw} stage={selectedLive.stage} mode={selectedLive.mode} onCancel={() => onCancelLiveTask?.(selectedLive.id)} />
+              </section>
+            ) : selectedLive ? (
+              <section className="ik-ai-task-detail">
+                <div className={`ik-ai-task-status is-${selectedLive.status}`}>
+                  <span>{statusIcon(selectedLive.status)}</span>
+                  <div>
+                    <b>{selectedLive.title}</b>
+                    <small>{selectedLive.label} · {liveStatusLabel(selectedLive.status)} · {selectedLive.stage}</small>
+                  </div>
+                </div>
+                {selectedLive.raw.trim() && (
+                  <div className="ik-ai-task-output">
+                    <div>
+                      <span>{selectedLive.mode === 'illustrate' ? '图片资源' : '模型输出'}</span>
+                      <pre>{selectedLive.raw}</pre>
+                    </div>
+                  </div>
+                )}
               </section>
             ) : selectedJob && selectedJob.kind === 'analyze' ? (
               <section className="ik-ai-task-detail">

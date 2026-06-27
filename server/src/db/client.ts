@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Entry, EntryRow, IndexNode, KnowledgeBase, Folder, KbRow, FolderRow } from '../types.js';
+import type { Entry, EntryRow, IndexNode, KnowledgeBase, Folder, KbRow, KbCategory, KbCategoryRow, FolderRow } from '../types.js';
 import { parseBodyToIndex, normalizeIndex } from '../index-tree.js';
 import { normalizeDocBlocks, splitDocToIndex, treeToDoc } from '../doc.js';
 import type { Block } from '../blocks.js';
@@ -16,9 +16,19 @@ export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS kb_categories (
+    id        TEXT PRIMARY KEY,
+    parentId  TEXT,
+    name      TEXT NOT NULL,
+    sort      INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_kb_categories_parent ON kb_categories(parentId);
   CREATE TABLE IF NOT EXISTS knowledge_bases (
     id        TEXT PRIMARY KEY,
     name      TEXT NOT NULL,
+    categoryId TEXT,
     sort      INTEGER NOT NULL DEFAULT 0,
     createdAt INTEGER NOT NULL,
     updatedAt INTEGER NOT NULL
@@ -69,7 +79,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_assets_hash ON assets(hash);
 `);
 
-// 迁移旧库：补 sort / idx / kbId / folderId 列
+// 迁移旧库：补 categoryId / sort / idx / kbId / folderId 列
+const kbColumns = db.prepare('PRAGMA table_info(knowledge_bases)').all() as { name: string }[];
+if (!kbColumns.some((c) => c.name === 'categoryId')) {
+  db.exec('ALTER TABLE knowledge_bases ADD COLUMN categoryId TEXT');
+}
+
 const entryColumns = db.prepare('PRAGMA table_info(entries)').all() as { name: string }[];
 if (!entryColumns.some((c) => c.name === 'sort')) {
   db.exec('ALTER TABLE entries ADD COLUMN sort INTEGER NOT NULL DEFAULT 0');
@@ -116,7 +131,11 @@ function docOf(r: EntryRow): Block[] {
 }
 
 export function rowToKb(r: KbRow): KnowledgeBase {
-  return { id: r.id, name: r.name, sort: r.sort, createdAt: r.createdAt, updatedAt: r.updatedAt };
+  return { id: r.id, name: r.name, categoryId: r.categoryId ?? null, sort: r.sort, createdAt: r.createdAt, updatedAt: r.updatedAt };
+}
+
+export function rowToKbCategory(r: KbCategoryRow): KbCategory {
+  return { id: r.id, parentId: r.parentId ?? null, name: r.name, sort: r.sort, createdAt: r.createdAt, updatedAt: r.updatedAt };
 }
 
 export function rowToFolder(r: FolderRow): Folder {

@@ -1,4 +1,4 @@
-import type { Entry, Folder, KnowledgeBase } from '../types';
+import type { Entry, Folder, KnowledgeBase, KbCategory } from '../types';
 import { apiDelJson, apiGetKey, apiPostKey, apiPutKey, runSseStream } from './client';
 import type { AiKnowledgeBaseJob, GenerateKnowledgeBaseResult } from './aiJobs';
 
@@ -16,14 +16,33 @@ export async function startAnalyzeEntryJob(entryId: string): Promise<AiKnowledge
 
 // ───────────── 知识库 CRUD ─────────────
 
+export async function fetchKbCategories(): Promise<KbCategory[]> {
+  return apiGetKey<KbCategory[]>('/kb-categories', 'categories');
+}
+
+export async function createKbCategory(input: { name: string; parentId?: string | null }): Promise<KbCategory> {
+  return apiPostKey<KbCategory>('/kb-categories', input, 'category');
+}
+
+export async function renameKbCategory(id: string, name: string): Promise<KbCategory> {
+  return apiPutKey<KbCategory>(`/kb-categories/${encodeURIComponent(id)}`, { name }, 'category');
+}
+
+export async function deleteKbCategory(id: string): Promise<{ categories: KbCategory[]; kbs: KnowledgeBase[] }> {
+  return apiDelJson(`/kb-categories/${encodeURIComponent(id)}`);
+}
+
 export async function fetchKbs(): Promise<KnowledgeBase[]> {
   return apiGetKey<KnowledgeBase[]>('/kbs', 'kbs');
 }
-export async function createKb(name: string): Promise<KnowledgeBase> {
-  return apiPostKey<KnowledgeBase>('/kbs', { name }, 'kb');
+export async function createKb(name: string, categoryId?: string | null): Promise<KnowledgeBase> {
+  return apiPostKey<KnowledgeBase>('/kbs', { name, categoryId }, 'kb');
 }
 export async function renameKb(id: string, name: string): Promise<KnowledgeBase> {
   return apiPutKey<KnowledgeBase>(`/kbs/${encodeURIComponent(id)}`, { name }, 'kb');
+}
+export async function moveKbToCategory(id: string, categoryId?: string | null): Promise<KnowledgeBase> {
+  return apiPutKey<KnowledgeBase>(`/kbs/${encodeURIComponent(id)}/category`, { categoryId }, 'kb');
 }
 export async function deleteKb(id: string): Promise<{ kbs: KnowledgeBase[]; folders: Folder[]; entries: Entry[] }> {
   return apiDelJson(`/kbs/${encodeURIComponent(id)}`);

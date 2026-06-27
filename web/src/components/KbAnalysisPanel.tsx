@@ -47,7 +47,7 @@ export default function KbAnalysisPanel({ kbName, analysis, appliedIds, runningI
   const pending = analysis.status === 'ready'
     ? analysis.data.suggestions.filter((s) => s.kind !== 'note' && !appliedIds.has(s.id))
     : [];
-  // 二次确认:点击「应用」先进入待确认态,再点一次才执行,避免误触;4 秒后自动撤销
+  // 单条建议保留二次确认;批量应用直接执行,避免“一键应用全部”看起来没有反应。
   const [armedId, setArmedId] = useState<string | null>(null);
   useEffect(() => {
     if (!armedId) return;
@@ -104,13 +104,10 @@ export default function KbAnalysisPanel({ kbName, analysis, appliedIds, runningI
                 type="button"
                 className="ik-segbtn ik-segbtn-primary"
                 disabled={busy}
-                onClick={() => {
-                  if (armedId === '__all__') { setArmedId(null); onApplyAll(pending); }
-                  else setArmedId('__all__');
-                }}
+                onClick={() => onApplyAll(pending)}
               >
                 {applyingAll ? <RefreshCw size={14} style={{ animation: 'ik-spin 1s linear infinite' }} /> : <Zap size={14} strokeWidth={2.2} />}
-                {applyingAll ? '应用中…' : armedId === '__all__' ? `确认应用全部 (${pending.length})？` : `一键应用全部 (${pending.length})`}
+                {applyingAll ? '应用中…' : `应用全部 (${pending.length})`}
               </button>
             )}
           </div>

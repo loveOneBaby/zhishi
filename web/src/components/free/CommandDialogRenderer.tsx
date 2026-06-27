@@ -18,6 +18,7 @@ interface CommandDialogRendererProps {
   onResetAiLive: () => void;
   pendingGuardRef: MutableRefObject<(() => void) | null>;
   onConfirm: (value: string) => Promise<void>;
+  onCancelRunning?: () => void;
 }
 
 function inlineText(value: unknown): string {
@@ -77,7 +78,7 @@ function DraftPreview({ input, mode }: { input: EntryInput; mode: 'create' | 're
 export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactNode {
   const {
     command, folders, entries, entriesOfKb, currentKb,
-    aiLiveLogs, aiLivePlan, aiLiveOutput, onSetCommand, onResetAiLive, pendingGuardRef, onConfirm,
+    aiLiveLogs, aiLivePlan, aiLiveOutput, onSetCommand, onResetAiLive, pendingGuardRef, onConfirm, onCancelRunning,
   } = props;
 
   if (!command) return null;
@@ -86,7 +87,7 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
       <CommandDialog
         open
         title="新建知识库"
-        description="创建一个新的知识库入口，用于承载独立主题的文件夹和知识点。"
+        description={command.categoryName ? `创建到「${command.categoryName}」分类下，用于承载独立主题的文件夹和知识点。` : '创建一个新的知识库入口，用于承载独立主题的文件夹和知识点。'}
         inputLabel="知识库名称"
         placeholder="例如：AI Agent"
         confirmText="创建"
@@ -163,6 +164,7 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
         placeholder="例如：ReAct 工作模式、RAG 多路召回、MCP 协议"
         helper="会自动生成知识内容、面试考点、常见追问和易错点。"
         confirmText="生成"
+        submittingCancelText="取消生成"
         icon={<Sparkles size={18} strokeWidth={2.15} />}
         liveLogs={aiLiveLogs}
         livePlan={aiLivePlan}
@@ -170,6 +172,7 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
         liveOutput={aiLiveOutput}
         liveOutputLabel="结构化 JSON"
         closeOnConfirm={false}
+        onCancelSubmitting={onCancelRunning}
         onOpenChange={(open) => {
           if (!open) {
             onSetCommand(null);
@@ -188,6 +191,7 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
         description={`将基于「${command.entry.title}」当前 doc 内容原地改写。`}
         helper="会保留当前知识库和文件夹，重写正文结构、面试考点、追问和易错点。"
         confirmText="开始改写"
+        submittingCancelText="取消改写"
         icon={<Sparkles size={18} strokeWidth={2.15} />}
         liveLogs={aiLiveLogs}
         livePlan={aiLivePlan}
@@ -195,6 +199,7 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
         liveOutput={aiLiveOutput}
         liveOutputLabel="结构化 JSON"
         closeOnConfirm={false}
+        onCancelSubmitting={onCancelRunning}
         onOpenChange={(open) => {
           if (!open) {
             onSetCommand(null);
@@ -213,6 +218,7 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
         description={`将基于「${command.entry.title}」当前 doc 内容生成一张中文技术图解，并追加到正文末尾。`}
         helper="使用 qwen-image-2.0-pro，图片会下载到本地资源库，刷新后仍可查看。"
         confirmText="生成图解"
+        submittingCancelText="取消图解"
         icon={<ImagePlus size={18} strokeWidth={2.15} />}
         liveLogs={aiLiveLogs}
         livePlan={aiLivePlan}
@@ -220,6 +226,7 @@ export function CommandDialogRenderer(props: CommandDialogRendererProps): ReactN
         liveOutput={aiLiveOutput}
         liveOutputLabel="图片资源"
         closeOnConfirm={false}
+        onCancelSubmitting={onCancelRunning}
         onOpenChange={(open) => {
           if (!open) {
             onSetCommand(null);

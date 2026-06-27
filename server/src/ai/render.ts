@@ -26,7 +26,13 @@ export function bulletLines(items: string[]): string[] {
 }
 
 export function draftToMarkdown(draft: GeneratedDraft): string {
-  const lines: string[] = [draft.summary, ''];
+  const lines: string[] = [];
+  if (draft.summary) {
+    lines.push('## 一句话结论', draft.summary, '');
+  }
+  if (draft.answerTemplate) {
+    lines.push('## 30 秒面试回答', draft.answerTemplate, '');
+  }
   for (const section of draft.sections) {
     if (section.title) lines.push(`## ${section.title}`);
     if (section.content) lines.push(section.content);
@@ -35,11 +41,8 @@ export function draftToMarkdown(draft: GeneratedDraft): string {
   if (draft.interviewPoints.length) {
     lines.push('## 面试考点', ...bulletLines(draft.interviewPoints), '');
   }
-  if (draft.answerTemplate) {
-    lines.push('## 面试回答模板', draft.answerTemplate, '');
-  }
   if (draft.commonQuestions.length) {
-    lines.push('## 高频追问', ...bulletLines(draft.commonQuestions), '');
+    lines.push('## 高频追问（带答题抓手）', ...bulletLines(draft.commonQuestions), '');
   }
   if (draft.pitfalls.length) {
     lines.push('## 易错点', ...bulletLines(draft.pitfalls), '');
@@ -51,27 +54,20 @@ export function draftToMarkdown(draft: GeneratedDraft): string {
 }
 
 export function kbQuestionToMarkdown(question: GeneratedKbQuestion): string {
-  const lines: string[] = [
-    question.summary,
-    '',
-    '## Q',
-    question.question,
-    '',
-    '## A',
-    question.shortAnswer || question.answer || '先给结论，再补充原理、场景和边界。',
-    '',
-  ];
-  if (question.answer && question.answer !== question.shortAnswer) {
-    lines.push('## 展开回答', question.answer, '');
-  }
+  const lines: string[] = [];
+  lines.push('## 一句话结论', question.shortAnswer || question.summary || '先给结论，再补充原理、场景和边界。', '');
   if (question.answerTemplate) {
-    lines.push('## 面试表达模板', question.answerTemplate, '');
+    lines.push('## 30 秒面试回答', question.answerTemplate, '');
+  }
+  lines.push('## 面试题', question.question, '');
+  if (question.answer && question.answer !== question.shortAnswer) {
+    lines.push('## 展开理解', question.answer, '');
   }
   if (question.keyPoints.length) {
     lines.push('## 关键知识点', ...bulletLines(question.keyPoints), '');
   }
   if (question.followUps.length) {
-    lines.push('## 高频追问', ...bulletLines(question.followUps), '');
+    lines.push('## 高频追问（带答题抓手）', ...bulletLines(question.followUps), '');
   }
   if (question.pitfalls.length) {
     lines.push('## 易错点', ...bulletLines(question.pitfalls), '');

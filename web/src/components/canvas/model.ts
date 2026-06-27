@@ -3,7 +3,7 @@ import { toSearchText, matchesQuery } from '../../pinyin-search';
 
 // 画布的纯逻辑层：图模型构建、可见集合计算、布局、连线路径。无 React 依赖，便于测试与维护。
 
-export type NType = 'cat' | 'folder' | 'entry' | 'section';
+export type NType = 'cat' | 'folder' | 'entry';
 
 export interface GNode {
   id: string;
@@ -178,6 +178,13 @@ export function buildModel(
     const entryDepth = parentDepth + 1;
 
     const entryId = `ent::${entry.id}`;
+    const sectionText = (nodes: IndexNode[]): string => nodes
+      .map((node) => [
+        node.title,
+        node.content,
+        sectionText(node.children),
+      ].filter(Boolean).join(' '))
+      .join(' ');
     map.set(entryId, {
       id: entryId,
       label: entry.title,
@@ -189,32 +196,11 @@ export function buildModel(
       children: [],
       text: [
         toSearchText(kbNameOf.get(entry.kbId) ?? entry.cat, entry.title, entry.py, entry.tags.join(' ')),
-        toSearchText(entry.summary, entry.intro),
+        toSearchText(entry.summary, entry.intro, sectionText(entry.nodes)),
       ].join(' '),
       meta: entry.tags,
     });
     map.get(parentId)!.children.push(entryId);
-
-    // 直接用结构化的多级索引节点构建画布层级
-    const addNodes = (nodes: IndexNode[], pid: string, depth: number): void => {
-      nodes.forEach((node) => {
-        const nodeId = `${entryId}#${node.id}`;
-        map.set(nodeId, {
-          id: nodeId,
-          label: node.title,
-          type: 'section',
-          depth,
-          sub: node.content,
-          entryId: entry.id,
-          parentId: pid,
-          children: [],
-          text: toSearchText(node.title, node.content),
-        });
-        map.get(pid)!.children.push(nodeId);
-        addNodes(node.children, nodeId, depth + 1);
-      });
-    };
-    addNodes(entry.nodes, entryId, entryDepth + 1);
   }
 
   return { map, kbs: kbNodeIds };

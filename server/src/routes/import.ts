@@ -6,11 +6,13 @@ import {
   importEntries,
   buildImportPreview,
   listKbs,
+  listKbCategories,
   listFolders,
   listEntries,
   getFolder,
   getKb,
   type ImportPayload,
+  type ImportKbCategory,
   type ImportKb,
   type ImportFolder,
 } from '../db.js';
@@ -28,6 +30,7 @@ function requestToImportPayload(body: unknown): ImportPayload {
     containers?: unknown;
     extensions?: unknown;
     kbs?: unknown;
+    kbCategories?: unknown;
     folders?: unknown;
     targetKbId?: unknown;
     targetKbName?: unknown;
@@ -70,6 +73,17 @@ function requestToImportPayload(body: unknown): ImportPayload {
     const assets = Array.isArray(b.assets) ? b.assets : [];
     // kb-export-2 备份：原样转发知识库与文件夹（folders 含 parentId 多级嵌套），
     // 由 importEntries 按依赖拓扑建入，保证文件夹/子文件夹结构能完整还原。
+    const kbCategories: ImportKbCategory[] | undefined = Array.isArray(b.kbCategories)
+      ? b.kbCategories
+          .map((c) => (c && typeof c === 'object' ? (c as Record<string, unknown>) : null))
+          .filter((c): c is Record<string, unknown> => !!c && typeof c.name === 'string')
+          .map((c) => ({
+            id: cleanText(c.id),
+            parentId: cleanText(c.parentId) ?? (Object.prototype.hasOwnProperty.call(c, 'parentId') ? null : undefined),
+            name: String(c.name),
+            sort: typeof c.sort === 'number' ? c.sort : 0,
+          }))
+      : undefined;
     const kbs: ImportKb[] | undefined = Array.isArray(b.kbs)
       ? b.kbs
           .map((k) => (k && typeof k === 'object' ? (k as Record<string, unknown>) : null))
@@ -77,6 +91,7 @@ function requestToImportPayload(body: unknown): ImportPayload {
           .map((k) => ({
             id: typeof k.id === 'string' ? k.id : undefined,
             name: String(k.name),
+            categoryId: cleanText(k.categoryId) ?? (Object.prototype.hasOwnProperty.call(k, 'categoryId') ? null : undefined),
             sort: typeof k.sort === 'number' ? k.sort : 0,
           }))
       : undefined;
@@ -132,6 +147,7 @@ function requestToImportPayload(body: unknown): ImportPayload {
       return entry;
     });
     return {
+      kbCategories: routed ? undefined : kbCategories,
       kbs: routed ? undefined : kbs,
       folders: routedFolders,
       entries,
@@ -156,7 +172,7 @@ export function registerImportRoutes(api: Router): void {
       const payload = requestToImportPayload(req.body);
       if (payload.entries.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
       const { imported } = importEntries(payload, Boolean(req.body?.replace));
-      res.json({ ok: true, imported, kbs: listKbs(), folders: listFolders(), entries: listEntries() });
+      res.json({ ok: true, imported, kbCategories: listKbCategories(), kbs: listKbs(), folders: listFolders(), entries: listEntries() });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }

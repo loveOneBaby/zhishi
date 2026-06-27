@@ -69,12 +69,13 @@ test('canvas model: buildModel / collectVisible / layout', () => {
   assert.equal(kbs.length, 1);
   const kbId = kbs[0];
   assert.equal(map.get(kbId)!.type, 'cat');
-  // 默认可见（depth 限制内）应含知识点与二级/三级
+  // 画布最小节点是知识点；知识点内部标题只参与检索，不再作为画布节点展开
   const visible = collectVisible(map, kbId, '', false, new Set(), false);
   assert.ok(visible.has('ent::k1'));
-  assert.ok([...visible].some((id) => map.get(id)!.label === '二级A'));
+  assert.ok(![...visible].some((id) => map.get(id)!.label === '二级A'));
+  assert.ok(collectVisible(map, kbId, '二级A', true, new Set(), false).has('ent::k1'));
   const layout = buildTreeLayout(map, kbId, visible);
-  assert.ok(layout.nodes.length >= 3);
+  assert.ok(layout.nodes.length >= 2);
   assert.ok(layout.width > 0 && layout.height > 0);
   // 根在最左
   const root = layout.byId.get(kbId)!;

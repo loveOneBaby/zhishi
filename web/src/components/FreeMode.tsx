@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { FileText, FolderPlus, History, ImagePlus, LibraryBig, Pencil, Sparkles, Trash2 } from 'lucide-react';
-import type { Entry, EntryInput, Folder, KnowledgeBase } from '../types';
+import type { Entry, EntryInput, Folder, KnowledgeBase, KbCategory } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import DetailSidePanel from './DetailSidePanel';
 import LiveRewritePanel from './free/LiveRewritePanel';
@@ -25,6 +25,7 @@ import type { AiKnowledgeBaseJob } from '../api';
 interface Props {
   entries: Entry[];
   kbs: KnowledgeBase[];
+  kbCategories: KbCategory[];
   folders: Folder[];
   freeKb: string | null;
   freeFolder: string | null;
@@ -35,14 +36,18 @@ interface Props {
   onUpdate: (id: string, input: EntryInput) => Promise<Entry>;
   onDelete: (id: string) => Promise<void>;
   onReorderEntries: (ids: string[]) => Promise<void>;
-  onImported: (entries: Entry[], kbs: KnowledgeBase[], folders: Folder[]) => void;
+  onImported: (entries: Entry[], kbs: KnowledgeBase[], folders: Folder[], kbCategories?: KbCategory[]) => void;
   onGeneratedEntry: (entry: Entry) => void;
   onStartKnowledgeBaseJob: (domain: string) => Promise<void>;
   onStartFolderInitJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
   onStartFolderEntriesJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
   onStartAnalyzeJob: (kbId: string) => Promise<void>;
   onStartAnalyzeEntryJob: (entryId: string) => Promise<void>;
-  onCreateKb: (name: string) => Promise<KnowledgeBase>;
+  onCreateKb: (name: string, categoryId?: string | null) => Promise<KnowledgeBase>;
+  onCreateKbCategory: (input: { name: string; parentId?: string | null }) => Promise<KbCategory>;
+  onRenameKbCategory: (id: string, name: string) => Promise<void>;
+  onDeleteKbCategory: (id: string) => Promise<void>;
+  onMoveKbToCategory: (id: string, categoryId?: string | null) => Promise<void>;
   onCreateFolder: (input: { kbId: string; parentId?: string | null; name: string }) => Promise<Folder>;
   onRenameKb: (id: string, name: string) => Promise<void>;
   onDeleteKb: (id: string) => Promise<void>;
@@ -60,9 +65,9 @@ interface Props {
 }
 
 export default function FreeMode(props: Props): ReactNode {
-  const { entries, kbs, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
+  const { entries, kbs, kbCategories, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
     onCreate, onUpdate, onDelete, onImported, onGeneratedEntry, onStartKnowledgeBaseJob, onStartFolderInitJob,
-    onStartFolderEntriesJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onCreateKb, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
+    onStartFolderEntriesJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
     aiJobs, aiTaskPanelOpen, onAiTaskPanelOpenChange, onOpenAiJobResult, onCancelAiJob, onRetryAiJob, onClearAiJobHistory } = props;
 
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(() => localStorage.getItem('ik_free_entry') || null);
@@ -106,7 +111,7 @@ export default function FreeMode(props: Props): ReactNode {
   const importLogic = useImportLogic({
     freeKb, kbs, freeFolder, canImportJson, onImported, setFreeFolder, setPanelMode,
   });
-  const { command, setCommand, confirmCommand } = useCommandSystem({
+  const { command, setCommand, confirmCommand, cancelRunningCommand } = useCommandSystem({
     aiLive, deletes, onCreateKb, onStartKnowledgeBaseJob, onStartFolderInitJob,
     onCreateFolder, onCreate, onRenameKb, onRenameFolder, onGeneratedEntry,
     setSelectedEntryId, setFreeFolder, setPanelMode, dirtyRef, pendingGuardRef,
@@ -152,8 +157,8 @@ export default function FreeMode(props: Props): ReactNode {
   }
 
   // ── 新建操作 ──
-  function newKb(): void {
-    setCommand({ kind: 'create-kb' });
+  function newKb(categoryId?: string | null, categoryName?: string): void {
+    setCommand({ kind: 'create-kb', categoryId: categoryId ?? null, categoryName });
   }
   function startGenerateKnowledgeBase(): void {
     aiLive.resetAiLive();
@@ -255,6 +260,7 @@ export default function FreeMode(props: Props): ReactNode {
   const patchLive = (id: string, patch: Partial<LiveTask>): void =>
     setLiveTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   function cancelLiveTask(id: string): void {
+    patchLive(id, { status: 'cancelled', stage: '已取消' });
     liveAbortRef.current.get(id)?.abort();
     applyAllRef.current = false; // 同时中断"一键应用全部"的后续条目
   }
@@ -267,7 +273,8 @@ export default function FreeMode(props: Props): ReactNode {
   function beginLiveTask(task: Omit<LiveTask, 'status' | 'raw' | 'createdAt'> & { raw?: string }): AbortController {
     const controller = new AbortController();
     liveAbortRef.current.set(task.id, controller);
-    setLiveTasks((prev) => [{ ...task, raw: task.raw ?? '', status: 'running', createdAt: Date.now() }, ...prev].slice(0, 30));
+    const liveTask: LiveTask = { ...task, raw: task.raw ?? '', status: 'running', createdAt: Date.now() };
+    setLiveTasks((prev) => [liveTask, ...prev].slice(0, 30));
     return controller;
   }
 
@@ -320,10 +327,15 @@ export default function FreeMode(props: Props): ReactNode {
     setSelectedEntryId(target.id);
     setPanelMode('detail');
     const id = `live_${Date.now().toString(36)}`;
-    const controller = beginLiveTask({ id, entryId: target.id, title: target.title, label: 'AI 生成图解', mode: 'generate', stage: '调用 qwen-image 生成中文技术图解…' });
+    const controller = beginLiveTask({ id, entryId: target.id, title: target.title, label: 'AI 生成图解', mode: 'illustrate', stage: '调用 qwen-image 生成中文技术图解…' });
     try {
       const entry = await generateEntryIllustrationWithAIStream(target.id, {
         onStage: (message) => patchLive(id, { stage: message }),
+        onImage: (payload) => patchLive(id, {
+          stage: `图解已生成：${payload.caption || '知识点图解'}`,
+          raw: JSON.stringify({ assetId: payload.assetId, url: payload.url, caption: payload.caption }, null, 2),
+        }),
+        onSaved: (next) => patchLive(id, { stage: `已写回：${next.title}` }),
       }, controller.signal);
       if (controller.signal.aborted) throw new DOMException('aborted', 'AbortError');
       onGeneratedEntry(entry);
@@ -339,8 +351,8 @@ export default function FreeMode(props: Props): ReactNode {
   }
 
   // 改写当前/指定知识点,流式驱动实时预览,完成后落库返回最新 entry
-  async function runLiveRewrite(entry: Entry, instruction?: string): Promise<void> {
-    if (liveBusy()) { toast('已有 AI 任务进行中，请稍候', 'info'); return; }
+  async function runLiveRewrite(entry: Entry, instruction?: string): Promise<boolean> {
+    if (liveBusy()) { toast('已有 AI 任务进行中，请稍候', 'info'); return false; }
     setSelectedEntryId(entry.id);
     setPanelMode('detail');
     const id = `live_${Date.now().toString(36)}`;
@@ -360,8 +372,9 @@ export default function FreeMode(props: Props): ReactNode {
       onGeneratedEntry(saved);
       setSelectedEntryId(saved.id);
       patchLive(id, { status: 'succeeded', stage: '已改写' });
+      return true;
     } catch (err) {
-      if (controller.signal.aborted || isAbortError(err)) { patchLive(id, { status: 'cancelled', stage: '已取消' }); toast('已取消改写', 'info'); return; }
+      if (controller.signal.aborted || isAbortError(err)) { patchLive(id, { status: 'cancelled', stage: '已取消' }); toast('已取消改写', 'info'); return false; }
       patchLive(id, { status: 'failed', stage: '改写失败' });
       throw err;
     } finally {
@@ -386,83 +399,94 @@ export default function FreeMode(props: Props): ReactNode {
     applyAllRef.current = true;
     let ok = 0;
     let fail = 0;
-
-    const pending = list.filter((s) => s.kind !== 'note' && !appliedIds.has(s.id));
-    // 把指向同一知识点的改写建议合并成一次改写,避免反复"构思 + 写入"
-    const entryGroups = new Map<string, KbSuggestion[]>();
-    const others: KbSuggestion[] = [];
-    for (const s of pending) {
-      if ((s.kind === 'refine-entry' || s.kind === 'rewrite-entry') && s.entryId) {
-        const group = entryGroups.get(s.entryId) ?? [];
-        group.push(s);
-        entryGroups.set(s.entryId, group);
-      } else {
-        others.push(s);
+    try {
+      const pending = list.filter((s) => s.kind !== 'note' && !appliedIds.has(s.id));
+      // 把指向同一知识点的改写建议合并成一次改写,避免反复"构思 + 写入"
+      const entryGroups = new Map<string, KbSuggestion[]>();
+      const others: KbSuggestion[] = [];
+      for (const s of pending) {
+        if ((s.kind === 'refine-entry' || s.kind === 'rewrite-entry') && s.entryId) {
+          const group = entryGroups.get(s.entryId) ?? [];
+          group.push(s);
+          entryGroups.set(s.entryId, group);
+        } else {
+          others.push(s);
+        }
       }
-    }
 
-    for (const [entryId, group] of entryGroups) {
-      if (!applyAllRef.current) break;
-      const entry = entries.find((e) => e.id === entryId);
-      if (!entry) { fail += group.length; continue; }
-      try {
-        // 仅有一条「整篇改写」时走默认改写;否则把多条建议合成一份改写指令,一次成稿
-        const onlyFullRewrite = group.length === 1 && group[0].kind === 'rewrite-entry';
-        const instruction = onlyFullRewrite
-          ? undefined
-          : group.map((s, i) => `${i + 1}. ${[s.title, s.detail].filter(Boolean).join('：')}`).join('\n');
-        await runLiveRewrite(entry, instruction);
-        for (const s of group) markApplied(s.id);
-        ok += group.length;
-      } catch {
-        fail += group.length;
+      for (const [entryId, group] of entryGroups) {
+        if (!applyAllRef.current) break;
+        const entry = entries.find((e) => e.id === entryId);
+        if (!entry) { fail += group.length; continue; }
+        try {
+          // 仅有一条「整篇改写」时走默认改写;否则把多条建议合成一份改写指令,一次成稿
+          const onlyFullRewrite = group.length === 1 && group[0].kind === 'rewrite-entry';
+          const instruction = onlyFullRewrite
+            ? undefined
+            : group.map((s, i) => `${i + 1}. ${[s.title, s.detail].filter(Boolean).join('：')}`).join('\n');
+          const saved = await runLiveRewrite(entry, instruction);
+          if (!saved) { fail += group.length; continue; }
+          for (const s of group) markApplied(s.id);
+          ok += group.length;
+        } catch {
+          fail += group.length;
+        }
       }
-    }
 
-    for (const s of others) {
-      if (!applyAllRef.current) break;
-      try {
-        await applyOne(s);
-        ok += 1;
-      } catch {
-        fail += 1;
+      for (const s of others) {
+        if (!applyAllRef.current) break;
+        try {
+          const applied = await applyOne(s);
+          if (applied) ok += 1;
+          else fail += 1;
+        } catch {
+          fail += 1;
+        }
       }
+    } finally {
+      setApplyingAll(false);
+      applyAllRef.current = false;
     }
-
-    setApplyingAll(false);
-    applyAllRef.current = false;
     toast(`一键应用完成：成功 ${ok} 条${fail ? `，失败 ${fail} 条` : ''}`, fail ? 'info' : 'success');
   }
   // 单条应用的核心逻辑(供单点应用与一键应用复用)
-  async function applyOne(s: KbSuggestion): Promise<void> {
-    if (!freeKb) return;
+  async function applyOne(s: KbSuggestion): Promise<boolean> {
+    if (!freeKb) return false;
     setRunningId(s.id);
     try {
       if (s.kind === 'create-folder' && s.name) {
         await onCreateFolder({ kbId: freeKb, parentId: s.folderId ?? null, name: s.name });
         markApplied(s.id);
+        return true;
       } else if (s.kind === 'rename-folder' && s.folderId && s.name) {
         await onRenameFolder(s.folderId, s.name);
         markApplied(s.id);
+        return true;
       } else if (s.kind === 'create-entry' && s.name) {
         const draft = await generateEntryDraftWithAIStream({ topic: s.name, kbId: freeKb, folderId: s.folderId ?? null });
         const entry = await onCreate({ ...draft, kbId: freeKb, folderId: s.folderId ?? null });
         onGeneratedEntry(entry);
         setSelectedEntryId(entry.id);
         markApplied(s.id);
+        return true;
       } else if (s.kind === 'rewrite-entry' && s.entryId) {
         const entry = entries.find((e) => e.id === s.entryId);
-        if (!entry) return;
-        await runLiveRewrite(entry);
+        if (!entry) return false;
+        const saved = await runLiveRewrite(entry);
+        if (!saved) return false;
         markApplied(s.id);
+        return true;
       } else if (s.kind === 'refine-entry' && s.entryId) {
         const entry = entries.find((e) => e.id === s.entryId);
-        if (!entry) return;
+        if (!entry) return false;
         // 按建议改写:把建议标题 + 说明作为改写指令传给后端
         const instruction = [s.title, s.detail].filter(Boolean).join('：');
-        await runLiveRewrite(entry, instruction);
+        const saved = await runLiveRewrite(entry, instruction);
+        if (!saved) return false;
         markApplied(s.id);
+        return true;
       }
+      return false;
     } finally {
       setRunningId(null);
     }
@@ -470,8 +494,8 @@ export default function FreeMode(props: Props): ReactNode {
   async function applySuggestion(s: KbSuggestion): Promise<void> {
     if (!freeKb || runningId || applyingAll) return;
     try {
-      await applyOne(s);
-      toast('已应用该建议', 'success');
+      const applied = await applyOne(s);
+      if (applied) toast('已应用该建议', 'success');
     } catch (err) {
       toast('应用失败：' + (err instanceof Error ? err.message : String(err)), 'error');
     }
@@ -613,6 +637,7 @@ export default function FreeMode(props: Props): ReactNode {
       onResetAiLive={aiLive.resetAiLive}
       pendingGuardRef={pendingGuardRef}
       onConfirm={confirmCommand}
+      onCancelRunning={cancelRunningCommand}
     />
   );
   const runAiAction = (action: () => void): void => {
@@ -719,6 +744,7 @@ export default function FreeMode(props: Props): ReactNode {
       analysisApplyingAll={applyingAll}
       liveTasks={liveTasks}
       onCancelLiveTask={cancelLiveTask}
+      onClearLiveHistory={() => setLiveTasks((prev) => prev.filter((task) => task.status === 'running'))}
     />
   );
 
@@ -728,10 +754,15 @@ export default function FreeMode(props: Props): ReactNode {
       <>
         <KbGallery
           kbs={kbs}
+          categories={kbCategories}
           entries={entries}
           folders={folders}
           entriesOfKb={entriesOfKb}
           newKb={newKb}
+          createCategory={onCreateKbCategory}
+          renameCategory={onRenameKbCategory}
+          deleteCategory={onDeleteKbCategory}
+          moveKbToCategory={onMoveKbToCategory}
           openKb={openKb}
           renameKbAction={renameKbAction}
           deleteKbAction={deleteKbAction}

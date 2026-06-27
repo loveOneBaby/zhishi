@@ -67,8 +67,8 @@ function headingBlock(text: string): Block {
   return { type: 'heading', props: { level: 2 }, content: inline(text), children: [] };
 }
 
-function imageBlock(url: string, caption: string): Block {
-  return { type: 'image', props: { url, caption }, children: [] };
+function imageBlock(url: string): Block {
+  return { type: 'image', props: { url, caption: '' }, children: [] };
 }
 
 function mergeTags(tags: string[] | undefined, extra: string[]): string[] {
@@ -163,8 +163,6 @@ function inferDiagramPattern(seed: string): string {
 function buildIllustrationPrompt(input: EntryInput, ctx: IllustrationContext): string {
   const doc = inputDoc(input);
   const title = compactText(ctx.title || input.title, 30);
-  const kbName = compactText(ctx.kbName || '技术面试知识库', 18);
-  const folderPath = compactText(ctx.folderPath || '根层级', 36);
   const summary = compactText(ctx.summary || input.summary || extractText(doc), 90);
   const tags = uniqueList(ctx.tags || input.tags || [], 8);
   const headings = collectHeadings(doc);
@@ -173,20 +171,19 @@ function buildIllustrationPrompt(input: EntryInput, ctx: IllustrationContext): s
   const pattern = inferDiagramPattern([title, summary, tags.join(' '), concepts.join(' ')].join(' '));
 
   return [
-    '生成一张横向 16:9 的中文技术图解海报。目标是“课程级技术示意图”，不是文档截图，也不是文章排版。',
+    '生成一张横向 16:9 的中文技术流程图。目标是“面试复习用核心示意图”，不是文档截图，也不是文章排版。',
     '',
     `画面标题文案：${title}`,
-    `画面副标题文案：${kbName}｜${folderPath}`,
     `理解用摘要（不要整句排版）：${summary || title}`,
     `候选关键词（选择少量使用）：${concepts.join(' / ') || tags.join(' / ') || title}`,
     '',
-    `中心图设计：${pattern}。中心图要占画面主体，使用节点、箭头、分层结构、流程线、对比块等可视化元素表达技术关系。`,
-    '四周信息卡：放 4 个圆角卡片，标题分别为「核心原理」「工程选型」「面试考点」「易错点」。每张卡最多 3 行短句，每行不超过 12 个中文字符。',
-    '版式参考：顶部居中大标题和副标题；中间是清晰主体图；左右两侧或四角是简洁说明卡；留白充足，层次像高质量技术课件。',
+    `中心图设计：${pattern}。中心图必须占画面 65% 以上，优先表达“流程/阶段/对比/取舍”，用 3-5 个大节点、箭头、分层结构或天平表达技术关系。`,
+    '信息卡：最多放 3 个小卡片，标题可用「结论」「面试抓手」「易错点」。每张卡最多 2 行短句，每行不超过 10 个中文字符。',
+    '版式参考：顶部只放大标题，不放副标题；中间是清晰主体图；说明卡放边缘；留白充足，层次像高质量技术课件。',
     '视觉风格：白色或极浅蓝背景，深色大标题，蓝灰主线，少量浅绿/浅橙节点，细边框圆角卡片，柔和阴影，清爽、现代、专业。',
-    '文字要求：只使用关键词和短句，中文必须清晰可读；全图文字总量控制在 120 个中文字以内；不要把正文原文排进图里；不要生成小字号密集文字。',
+    '文字要求：只使用关键词和短句，中文必须清晰可读；全图文字总量控制在 70 个中文字以内；不要把正文原文排进图里；不要生成小字号密集文字。',
     '严禁内容：大段正文、密集表格、灰色文档块堆叠、网页截图、代码块、二维码、水印、品牌 logo、真实人物、乱码、英文长句。',
-    '严禁把这些字段名画进图片：知识库、目录、摘要、标签、内容参考、画面标题文案、画面副标题文案、候选关键词。',
+    '严禁把这些字段名画进图片：知识库、目录、摘要、标签、内容参考、画面标题文案、候选关键词。',
   ].join('\n');
 }
 
@@ -295,7 +292,7 @@ export async function appendAiIllustration(
       doc: [
         ...doc,
         headingBlock('图解'),
-        imageBlock(illustration.url, illustration.caption),
+        imageBlock(illustration.url),
       ],
     };
   } catch (err) {

@@ -373,6 +373,21 @@
   font-weight: 760;
   text-align: center;
 }
+.ik-ai-task-row-cancel {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--danger) 36%, var(--bd));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: var(--danger);
+  cursor: pointer;
+}
+.ik-ai-task-row-cancel:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
 .ik-ai-task-detail {
   min-width: 0;
   min-height: 0;
