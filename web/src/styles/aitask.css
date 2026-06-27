@@ -436,6 +436,44 @@
   color: var(--mut);
   font-size: 12px;
 }
+.ik-ai-task-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+}
+.ik-ai-task-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--mut);
+  font-size: 12px;
+}
+.ik-ai-task-stat b {
+  font-size: 12px;
+  font-weight: 600;
+}
+.ik-ai-task-stat small {
+  color: var(--mut);
+  font-size: 12px;
+}
+.ik-ai-task-stat.is-token small em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--accent);
+  font-size: 13px;
+  margin-right: 2px;
+}
+.ik-ai-task-stat.is-token small i {
+  font-style: normal;
+  color: var(--mut);
+  font-size: 11px;
+}
 .ik-ai-task-open {
   width: 100%;
   height: 42px;

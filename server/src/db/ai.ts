@@ -1,4 +1,4 @@
-import { db } from './client.js';
+import { db, tryAlter } from './client.js';
 
 export type StoredAiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type StoredAiJobKind = 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze';
@@ -24,41 +24,51 @@ export interface StoredAiJob {
   abortRequested?: boolean;
   createdAt: number;
   updatedAt: number;
+  startedAt: number;
+  durationMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
 }
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS ai_jobs (
-    id              TEXT PRIMARY KEY,
-    kind            TEXT NOT NULL,
-    domain          TEXT NOT NULL,
-    questionCount   INTEGER NOT NULL DEFAULT 0,
-    kbId            TEXT,
-    kbName          TEXT,
-    parentId        TEXT,
-    targetPath      TEXT,
-    status          TEXT NOT NULL,
-    logs            TEXT NOT NULL DEFAULT '[]',
-    modelOutput     TEXT NOT NULL DEFAULT '',
-    parsed          TEXT,
-    plan            TEXT,
-    result          TEXT,
-    error           TEXT,
-    abortRequested  INTEGER NOT NULL DEFAULT 0,
-    createdAt       INTEGER NOT NULL,
-    updatedAt       INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_ai_jobs_updated ON ai_jobs(updatedAt DESC);
-`);
-
-const aiJobColumns = db.prepare('PRAGMA table_info(ai_jobs)').all() as { name: string }[];
-if (!aiJobColumns.some((c) => c.name === 'plan')) {
-  db.exec('ALTER TABLE ai_jobs ADD COLUMN plan TEXT');
-}
-if (!aiJobColumns.some((c) => c.name === 'analysis')) {
-  db.exec('ALTER TABLE ai_jobs ADD COLUMN analysis TEXT');
-}
-if (!aiJobColumns.some((c) => c.name === 'entryId')) {
-  db.exec('ALTER TABLE ai_jobs ADD COLUMN entryId TEXT');
+export async function ensureAiJobsTable(): Promise<void> {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS ai_jobs (
+      id              TEXT PRIMARY KEY,
+      kind            TEXT NOT NULL,
+      domain          TEXT NOT NULL,
+      questionCount   INTEGER NOT NULL DEFAULT 0,
+      kbId            TEXT,
+      kbName          TEXT,
+      parentId        TEXT,
+      targetPath      TEXT,
+      status          TEXT NOT NULL,
+      logs            TEXT NOT NULL DEFAULT '[]',
+      modelOutput     TEXT NOT NULL DEFAULT '',
+      parsed          TEXT,
+      plan            TEXT,
+      result          TEXT,
+      error           TEXT,
+      abortRequested  INTEGER NOT NULL DEFAULT 0,
+      createdAt       INTEGER NOT NULL,
+      updatedAt       INTEGER NOT NULL,
+      startedAt       INTEGER NOT NULL DEFAULT 0,
+      durationMs      INTEGER NOT NULL DEFAULT 0,
+      promptTokens    INTEGER NOT NULL DEFAULT 0,
+      completionTokens INTEGER NOT NULL DEFAULT 0,
+      totalTokens     INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_jobs_updated ON ai_jobs(updatedAt DESC);
+  `);
+  // 列迁移：列已存在则忽略（去掉对 PRAGMA table_info 的依赖）
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN plan TEXT');
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN analysis TEXT');
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN entryId TEXT');
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN startedAt INTEGER NOT NULL DEFAULT 0');
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN durationMs INTEGER NOT NULL DEFAULT 0');
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN promptTokens INTEGER NOT NULL DEFAULT 0');
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN completionTokens INTEGER NOT NULL DEFAULT 0');
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN totalTokens INTEGER NOT NULL DEFAULT 0');
 }
 
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
@@ -94,17 +104,24 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
     abortRequested: Number(row.abortRequested ?? 0) === 1,
     createdAt: Number(row.createdAt ?? 0),
     updatedAt: Number(row.updatedAt ?? 0),
+    startedAt: Number(row.startedAt ?? 0),
+    durationMs: Number(row.durationMs ?? 0),
+    promptTokens: Number(row.promptTokens ?? 0),
+    completionTokens: Number(row.completionTokens ?? 0),
+    totalTokens: Number(row.totalTokens ?? 0),
   };
 }
 
-export function saveAiJob(job: StoredAiJob): void {
-  db.prepare(`
+export async function saveAiJob(job: StoredAiJob): Promise<void> {
+  await db.prepare(`
     INSERT INTO ai_jobs (
       id, kind, domain, questionCount, kbId, kbName, entryId, parentId, targetPath, status,
-      logs, modelOutput, parsed, plan, result, analysis, error, abortRequested, createdAt, updatedAt
+      logs, modelOutput, parsed, plan, result, analysis, error, abortRequested, createdAt, updatedAt,
+      startedAt, durationMs, promptTokens, completionTokens, totalTokens
     ) VALUES (
       :id, :kind, :domain, :questionCount, :kbId, :kbName, :entryId, :parentId, :targetPath, :status,
-      :logs, :modelOutput, :parsed, :plan, :result, :analysis, :error, :abortRequested, :createdAt, :updatedAt
+      :logs, :modelOutput, :parsed, :plan, :result, :analysis, :error, :abortRequested, :createdAt, :updatedAt,
+      :startedAt, :durationMs, :promptTokens, :completionTokens, :totalTokens
     )
     ON CONFLICT(id) DO UPDATE SET
       kind=excluded.kind,
@@ -124,7 +141,12 @@ export function saveAiJob(job: StoredAiJob): void {
       analysis=excluded.analysis,
       error=excluded.error,
       abortRequested=excluded.abortRequested,
-      updatedAt=excluded.updatedAt
+      updatedAt=excluded.updatedAt,
+      startedAt=excluded.startedAt,
+      durationMs=excluded.durationMs,
+      promptTokens=excluded.promptTokens,
+      completionTokens=excluded.completionTokens,
+      totalTokens=excluded.totalTokens
   `).run({
     ...job,
     logs: JSON.stringify(job.logs ?? []),
@@ -142,18 +164,18 @@ export function saveAiJob(job: StoredAiJob): void {
   });
 }
 
-export function listStoredAiJobs(limit = 30): StoredAiJob[] {
-  const rows = db.prepare('SELECT * FROM ai_jobs ORDER BY createdAt DESC LIMIT ?').all(limit) as Record<string, unknown>[];
+export async function listStoredAiJobs(limit = 30): Promise<StoredAiJob[]> {
+  const rows = await db.prepare('SELECT * FROM ai_jobs ORDER BY createdAt DESC LIMIT ?').all(limit) as Record<string, unknown>[];
   return rows.map(rowToJob);
 }
 
-export function getStoredAiJob(id: string): StoredAiJob | null {
-  const row = db.prepare('SELECT * FROM ai_jobs WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+export async function getStoredAiJob(id: string): Promise<StoredAiJob | null> {
+  const row = await db.prepare('SELECT * FROM ai_jobs WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   return row ? rowToJob(row) : null;
 }
 
-export function markInterruptedAiJobs(): StoredAiJob[] {
-  const rows = db.prepare("SELECT * FROM ai_jobs WHERE status IN ('queued','running')").all() as Record<string, unknown>[];
+export async function markInterruptedAiJobs(): Promise<StoredAiJob[]> {
+  const rows = await db.prepare("SELECT * FROM ai_jobs WHERE status IN ('queued','running')").all() as Record<string, unknown>[];
   const jobs = rows.map(rowToJob);
   const now = Date.now();
   const stmt = db.prepare(`
@@ -163,7 +185,7 @@ export function markInterruptedAiJobs(): StoredAiJob[] {
   `);
   for (const job of jobs) {
     const logs = [...job.logs, '服务重启，任务将从已有进度继续'];
-    stmt.run({
+    await stmt.run({
       id: job.id,
       logs: JSON.stringify(logs.slice(-60)),
       updatedAt: now,
@@ -172,8 +194,8 @@ export function markInterruptedAiJobs(): StoredAiJob[] {
   return jobs;
 }
 
-export function pruneStoredAiJobs(limit = 30): void {
-  const rows = db.prepare(`
+export async function pruneStoredAiJobs(limit = 30): Promise<void> {
+  const rows = await db.prepare(`
     SELECT id FROM ai_jobs
     WHERE status NOT IN ('queued','running')
     ORDER BY createdAt DESC
@@ -181,10 +203,10 @@ export function pruneStoredAiJobs(limit = 30): void {
   `).all(limit) as { id: string }[];
   if (!rows.length) return;
   const stmt = db.prepare('DELETE FROM ai_jobs WHERE id = ?');
-  for (const row of rows) stmt.run(row.id);
+  for (const row of rows) await stmt.run(row.id);
 }
 
-export function clearStoredAiJobHistory(): number {
-  const info = db.prepare("DELETE FROM ai_jobs WHERE status NOT IN ('queued','running')").run();
+export async function clearStoredAiJobHistory(): Promise<number> {
+  const info = await db.prepare("DELETE FROM ai_jobs WHERE status NOT IN ('queued','running')").run();
   return Number(info.changes ?? 0);
 }

@@ -10,6 +10,7 @@ import {
   type GeneratedKbDraft,
 } from '../ai-generate.js';
 import { appendAiIllustration } from '../ai-image.js';
+import type { AiTokenUsage } from '../ai/types.js';
 import { kbDraftFromModelOutput } from '../ai/parse.js';
 import { createFoldersFromDraft, createKnowledgeBaseWriterFromDraft, createKnowledgeBaseWriterFromExisting, type GeneratedKnowledgeBaseResult } from './kb-draft-writer.js';
 import { folderPathLabel } from './utils.js';
@@ -41,12 +42,14 @@ export interface AiKnowledgeBaseJob {
   abortRequested?: boolean;
   createdAt: number;
   updatedAt: number;
+  startedAt: number;
+  durationMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
 }
 
-markInterruptedAiJobs();
-export const aiJobs = new Map<string, AiKnowledgeBaseJob>(
-  listStoredAiJobs().map((job) => [job.id, job as AiKnowledgeBaseJob]),
-);
+export const aiJobs = new Map<string, AiKnowledgeBaseJob>();
 
 const MAX_JOB_OUTPUT = 160_000;
 const MAX_JOBS = 30;
@@ -56,33 +59,58 @@ function trimJobOutput(value: string): string {
   return value.length > MAX_JOB_OUTPUT ? value.slice(-MAX_JOB_OUTPUT) : value;
 }
 
-function persistJob(job: AiKnowledgeBaseJob): void {
-  saveAiJob(job);
+async function persistJob(job: AiKnowledgeBaseJob): Promise<void> {
+  await saveAiJob(job);
 }
 
-function touchJob(job: AiKnowledgeBaseJob): void {
+async function touchJob(job: AiKnowledgeBaseJob): Promise<void> {
   job.updatedAt = Date.now();
-  persistJob(job);
+  await persistJob(job);
 }
 
-function pushJobLog(job: AiKnowledgeBaseJob, message: string): void {
+// 仅更新内存日志并异步落库（流式回调中无法 await，内存状态即时可见即可）
+function pushJobLog(job: AiKnowledgeBaseJob, message: string): Promise<void> {
   const next = message.trim();
-  if (!next) return;
+  if (!next) return Promise.resolve();
   if (job.logs[job.logs.length - 1] !== next) job.logs.push(next);
   if (job.logs.length > 60) job.logs = job.logs.slice(-60);
-  touchJob(job);
+  return touchJob(job);
 }
 
-export function jobSnapshot(job: AiKnowledgeBaseJob): AiKnowledgeBaseJob {
+// 进入 running 时重置本次执行的计时与 token 累计(覆盖首次 / 重试 / 服务重启恢复)
+function resetJobStats(job: AiKnowledgeBaseJob): void {
+  job.startedAt = Date.now();
+  job.durationMs = 0;
+  job.promptTokens = 0;
+  job.completionTokens = 0;
+  job.totalTokens = 0;
+}
+
+// 累加单次 AI 调用的 token 消耗并异步落库(流式回调中以 void 调用，与 pushJobLog 一致)
+function recordUsage(job: AiKnowledgeBaseJob, usage: AiTokenUsage): Promise<void> {
+  job.promptTokens += usage.promptTokens;
+  job.completionTokens += usage.completionTokens;
+  job.totalTokens += usage.totalTokens;
+  return touchJob(job);
+}
+
+// 记录本次执行耗时(从 startedAt 起；未进入过 running 则回退到 createdAt)
+function finishJobTimer(job: AiKnowledgeBaseJob): void {
+  job.durationMs = Math.max(0, Date.now() - (job.startedAt || job.createdAt));
+}
+
+export async function jobSnapshot(job: AiKnowledgeBaseJob): Promise<AiKnowledgeBaseJob> {
   // 分析任务不绑定知识库结果(否则会误显示「进入知识库 / 实时写入」)
-  const result = job.kind === 'analyze' ? null : hydrateKnowledgeBaseResult(job);
+  const result = job.kind === 'analyze' ? null : await hydrateKnowledgeBaseResult(job);
+  const kbExists = job.kbId ? Boolean(await getKb(job.kbId)) : false;
+  const resumable = job.kind === 'analyze'
+    ? (Boolean(job.entryId) || (Boolean(job.kbId && job.kbName) && kbExists))
+    : job.kind === 'folder-init' || job.kind === 'folder-entries'
+      ? (Boolean(job.kbId && job.kbName) && kbExists)
+      : await canResumeKnowledgeBaseJob(job);
   return {
     ...job,
-    resumable: job.kind === 'analyze'
-      ? (Boolean(job.entryId) || Boolean(job.kbId && job.kbName && getKb(job.kbId)))
-      : job.kind === 'folder-init' || job.kind === 'folder-entries'
-        ? Boolean(job.kbId && job.kbName && getKb(job.kbId))
-        : canResumeKnowledgeBaseJob(job),
+    resumable,
     logs: [...job.logs],
     result: result ? {
       kb: result.kb,
@@ -92,25 +120,24 @@ export function jobSnapshot(job: AiKnowledgeBaseJob): AiKnowledgeBaseJob {
   };
 }
 
-export function listJobSnapshots(): AiKnowledgeBaseJob[] {
-  return [...aiJobs.values()]
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map(jobSnapshot);
+export async function listJobSnapshots(): Promise<AiKnowledgeBaseJob[]> {
+  const jobs = [...aiJobs.values()].sort((a, b) => b.createdAt - a.createdAt);
+  return Promise.all(jobs.map(jobSnapshot));
 }
 
-export function clearAiJobHistory(): AiKnowledgeBaseJob[] {
+export async function clearAiJobHistory(): Promise<AiKnowledgeBaseJob[]> {
   for (const [id, job] of aiJobs) {
     if (job.status !== 'queued' && job.status !== 'running') aiJobs.delete(id);
   }
-  clearStoredAiJobHistory();
+  await clearStoredAiJobHistory();
   return listJobSnapshots();
 }
 
-function pruneJobs(): void {
+async function pruneJobs(): Promise<void> {
   const jobs = [...aiJobs.values()].sort((a, b) => b.createdAt - a.createdAt);
   const removable = jobs.slice(MAX_JOBS).filter((job) => job.status !== 'running' && job.status !== 'queued');
   for (const job of removable) aiJobs.delete(job.id);
-  pruneStoredAiJobs(MAX_JOBS);
+  await pruneStoredAiJobs(MAX_JOBS);
 }
 
 function createBaseJob(input: {
@@ -141,6 +168,11 @@ function createBaseJob(input: {
     abortRequested: false,
     createdAt: now,
     updatedAt: now,
+    startedAt: 0,
+    durationMs: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
   };
 }
 
@@ -153,16 +185,14 @@ function scheduleJob(job: AiKnowledgeBaseJob): void {
   }, 0);
 }
 
-function hydrateKnowledgeBaseResult(job: AiKnowledgeBaseJob): GeneratedKnowledgeBaseResult | null {
+async function hydrateKnowledgeBaseResult(job: AiKnowledgeBaseJob): Promise<GeneratedKnowledgeBaseResult | null> {
   const kbId = job.result?.kb?.id ?? job.kbId;
   if (!kbId) return null;
-  const kb = getKb(kbId);
+  const kb = await getKb(kbId);
   if (!kb) return null;
-  return {
-    kb,
-    folders: listFolders().filter((folder) => folder.kbId === kb.id),
-    entries: listEntries().filter((entry) => entry.kbId === kb.id),
-  };
+  const folders = (await listFolders()).filter((folder) => folder.kbId === kb.id);
+  const entries = (await listEntries()).filter((entry) => entry.kbId === kb.id);
+  return { kb, folders, entries };
 }
 
 function extractPlanFromOutput(job: AiKnowledgeBaseJob): GeneratedKbDraft | null {
@@ -175,27 +205,27 @@ function extractPlanFromOutput(job: AiKnowledgeBaseJob): GeneratedKbDraft | null
   }
 }
 
-function canResumeKnowledgeBaseJob(job: AiKnowledgeBaseJob): boolean {
-  if (job.kbId && !getKb(job.kbId)) return false;
+async function canResumeKnowledgeBaseJob(job: AiKnowledgeBaseJob): Promise<boolean> {
+  if (job.kbId && !await getKb(job.kbId)) return false;
   return Boolean(job.plan || extractPlanFromOutput(job));
 }
 
-export function discardAiJobResultsForKb(kbId: string): void {
+export async function discardAiJobResultsForKb(kbId: string): Promise<void> {
   for (const job of aiJobs.values()) {
     const matches = job.kbId === kbId || job.result?.kb?.id === kbId;
     if (!matches) continue;
     if (job.status === 'queued' || job.status === 'running') {
       runningControllers.get(job.id)?.abort();
-      stopJobForDeletedKb(job);
+      await stopJobForDeletedKb(job);
     }
     if (job.result?.kb?.id === kbId) {
       job.result = undefined;
-      touchJob(job);
+      await touchJob(job);
     }
   }
 }
 
-export function startKnowledgeBaseJob(domain: string, questionCount: number): AiKnowledgeBaseJob {
+export async function startKnowledgeBaseJob(domain: string, questionCount: number): Promise<AiKnowledgeBaseJob> {
   const job = createBaseJob({
     kind: 'kb-generate',
     domain,
@@ -203,20 +233,20 @@ export function startKnowledgeBaseJob(domain: string, questionCount: number): Ai
     logs: ['任务已创建，等待后台执行'],
   });
   aiJobs.set(job.id, job);
-  persistJob(job);
-  pruneJobs();
+  await persistJob(job);
+  await pruneJobs();
   scheduleJob(job);
   return job;
 }
 
-export function startFolderInitJob(input: {
+export async function startFolderInitJob(input: {
   kbId: string;
   kbName: string;
   parentId: string | null;
   targetPath: string;
   domain: string;
   folderCount: number;
-}): AiKnowledgeBaseJob {
+}): Promise<AiKnowledgeBaseJob> {
   const job = createBaseJob({
     kind: 'folder-init',
     domain: input.domain,
@@ -228,19 +258,19 @@ export function startFolderInitJob(input: {
     logs: ['目录初始化任务已创建，等待后台执行'],
   });
   aiJobs.set(job.id, job);
-  persistJob(job);
-  pruneJobs();
+  await persistJob(job);
+  await pruneJobs();
   scheduleJob(job);
   return job;
 }
 
-export function startFolderEntriesJob(input: {
+export async function startFolderEntriesJob(input: {
   kbId: string;
   kbName: string;
   parentId: string | null;
   targetPath: string;
   domain: string;
-}): AiKnowledgeBaseJob {
+}): Promise<AiKnowledgeBaseJob> {
   const job = createBaseJob({
     kind: 'folder-entries',
     domain: input.domain,
@@ -252,13 +282,13 @@ export function startFolderEntriesJob(input: {
     logs: ['目录知识点生成任务已创建，等待后台执行'],
   });
   aiJobs.set(job.id, job);
-  persistJob(job);
-  pruneJobs();
+  await persistJob(job);
+  await pruneJobs();
   scheduleJob(job);
   return job;
 }
 
-export function startAnalyzeJob(input: { kbId: string; kbName: string }): AiKnowledgeBaseJob {
+export async function startAnalyzeJob(input: { kbId: string; kbName: string }): Promise<AiKnowledgeBaseJob> {
   const job = createBaseJob({
     kind: 'analyze',
     domain: input.kbName,
@@ -267,13 +297,13 @@ export function startAnalyzeJob(input: { kbId: string; kbName: string }): AiKnow
     logs: ['知识库分析任务已创建，等待后台执行'],
   });
   aiJobs.set(job.id, job);
-  persistJob(job);
-  pruneJobs();
+  await persistJob(job);
+  await pruneJobs();
   scheduleJob(job);
   return job;
 }
 
-export function startAnalyzeEntryJob(input: { entryId: string; entryTitle: string; kbId?: string }): AiKnowledgeBaseJob {
+export async function startAnalyzeEntryJob(input: { entryId: string; entryTitle: string; kbId?: string }): Promise<AiKnowledgeBaseJob> {
   const job = createBaseJob({
     kind: 'analyze',
     domain: input.entryTitle,
@@ -282,10 +312,27 @@ export function startAnalyzeEntryJob(input: { entryId: string; entryTitle: strin
     logs: ['知识点分析任务已创建，等待后台执行'],
   });
   aiJobs.set(job.id, job);
-  persistJob(job);
-  pruneJobs();
+  await persistJob(job);
+  await pruneJobs();
   scheduleJob(job);
   return job;
+}
+
+// 启动时恢复：把上次中断的 queued/running 任务重置为 queued，重建内存表，并继续调度。
+export async function initAiJobs(): Promise<void> {
+  await markInterruptedAiJobs();
+  const stored = await listStoredAiJobs();
+  for (const job of stored) aiJobs.set(job.id, job as AiKnowledgeBaseJob);
+  for (const job of aiJobs.values()) {
+    if (job.status === 'queued') {
+      await pushJobLog(job, job.kind === 'folder-init'
+        ? '服务已恢复，继续目录初始化任务'
+        : job.kind === 'folder-entries'
+          ? '服务已恢复，继续目录知识点生成任务'
+          : '服务已恢复，继续 AI 建库任务');
+      scheduleJob(job);
+    }
+  }
 }
 
 async function runAnalyzeJob(jobId: string): Promise<void> {
@@ -296,54 +343,58 @@ async function runAnalyzeJob(jobId: string): Promise<void> {
   runningControllers.set(jobId, controller);
   job.status = 'running';
   job.abortRequested = false;
-  pushJobLog(job, '后台分析已启动');
+  resetJobStats(job);
+  await pushJobLog(job, '后台分析已启动');
   try {
     let analysis: KbAnalysis;
     if (job.entryId) {
-      pushJobLog(job, '汇总知识点正文，提交大模型诊断结构 / 内容 / 排版');
-      analysis = await analyzeEntry(job.entryId, controller.signal);
+      await pushJobLog(job, '汇总知识点正文，提交大模型诊断结构 / 内容 / 排版');
+      analysis = await analyzeEntry(job.entryId, controller.signal, (usage) => void recordUsage(job, usage));
     } else {
       if (!job.kbId) throw new Error('知识库不存在');
-      if (!getKb(job.kbId)) throw new Error('知识库不存在');
-      pushJobLog(job, '汇总目录与知识点，提交大模型诊断');
-      analysis = await analyzeKnowledgeBase(job.kbId, controller.signal);
+      if (!await getKb(job.kbId)) throw new Error('知识库不存在');
+      await pushJobLog(job, '汇总目录与知识点，提交大模型诊断');
+      analysis = await analyzeKnowledgeBase(job.kbId, controller.signal, (usage) => void recordUsage(job, usage));
     }
     if (isJobCancelled(jobId)) return;
     job.analysis = analysis;
     job.parsed = { kbName: job.kbName ?? job.domain, folders: 0, questions: analysis.suggestions.length };
     job.status = 'succeeded';
     job.abortRequested = false;
-    pushJobLog(job, `分析完成：${analysis.suggestions.length} 条建议`);
-    touchJob(job);
+    await pushJobLog(job, `分析完成：${analysis.suggestions.length} 条建议`);
+    await touchJob(job);
   } catch (err) {
     if (isJobCancelled(jobId) || isAbortError(err)) {
       job.status = 'cancelled';
       job.error = '用户已取消任务';
-      pushJobLog(job, '任务已取消');
+      await pushJobLog(job, '任务已取消');
     } else {
       job.status = 'failed';
       job.error = err instanceof Error ? err.message : String(err);
-      pushJobLog(job, job.error);
+      await pushJobLog(job, job.error);
     }
-    touchJob(job);
+    await touchJob(job);
   } finally {
+    finishJobTimer(job);
+    await touchJob(job);
     runningControllers.delete(jobId);
   }
 }
 
-export function cancelAiJob(id: string): AiKnowledgeBaseJob | null {
+export async function cancelAiJob(id: string): Promise<AiKnowledgeBaseJob | null> {
   const job = aiJobs.get(id);
   if (!job) return null;
   if (job.status !== 'queued' && job.status !== 'running') return jobSnapshot(job);
   job.status = 'cancelled';
   job.error = '用户已取消任务';
   job.abortRequested = true;
-  pushJobLog(job, '任务已取消');
+  finishJobTimer(job);
+  await pushJobLog(job, '任务已取消');
   runningControllers.get(id)?.abort();
   return jobSnapshot(job);
 }
 
-export function retryAiJob(id: string): AiKnowledgeBaseJob | null {
+export async function retryAiJob(id: string): Promise<AiKnowledgeBaseJob | null> {
   const job = aiJobs.get(id);
   if (!job) return null;
   if (job.status === 'queued' || job.status === 'running') return jobSnapshot(job);
@@ -352,7 +403,7 @@ export function retryAiJob(id: string): AiKnowledgeBaseJob | null {
     job.status = 'queued';
     job.error = undefined;
     job.abortRequested = false;
-    pushJobLog(job, '重新提交分析任务');
+    await pushJobLog(job, '重新提交分析任务');
     scheduleJob(job);
     return jobSnapshot(job);
   }
@@ -361,30 +412,19 @@ export function retryAiJob(id: string): AiKnowledgeBaseJob | null {
     job.status = 'queued';
     job.error = undefined;
     job.abortRequested = false;
-    pushJobLog(job, job.kind === 'folder-init' ? '重新提交目录初始化任务' : '重新提交目录知识点生成任务');
+    await pushJobLog(job, job.kind === 'folder-init' ? '重新提交目录初始化任务' : '重新提交目录知识点生成任务');
     scheduleJob(job);
     return jobSnapshot(job);
   }
-  if (canResumeKnowledgeBaseJob(job)) {
+  if (await canResumeKnowledgeBaseJob(job)) {
     job.status = 'queued';
     job.error = undefined;
     job.abortRequested = false;
-    pushJobLog(job, '重新提交任务，将从已有进度继续');
+    await pushJobLog(job, '重新提交任务，将从已有进度继续');
     scheduleJob(job);
     return jobSnapshot(job);
   }
   return startKnowledgeBaseJob(job.domain, job.questionCount || 18);
-}
-
-for (const job of aiJobs.values()) {
-  if (job.status === 'queued') {
-    pushJobLog(job, job.kind === 'folder-init'
-      ? '服务已恢复，继续目录初始化任务'
-      : job.kind === 'folder-entries'
-        ? '服务已恢复，继续目录知识点生成任务'
-        : '服务已恢复，继续 AI 建库任务');
-    scheduleJob(job);
-  }
 }
 
 function isAbortError(err: unknown): boolean {
@@ -395,13 +435,13 @@ function isJobCancelled(jobId: string): boolean {
   return aiJobs.get(jobId)?.status === 'cancelled';
 }
 
-function updateJobResult(job: AiKnowledgeBaseJob, result: GeneratedKnowledgeBaseResult): void {
+async function updateJobResult(job: AiKnowledgeBaseJob, result: GeneratedKnowledgeBaseResult): Promise<void> {
   job.result = {
     kb: result.kb,
     folders: [...result.folders],
     entries: [...result.entries],
   };
-  touchJob(job);
+  await touchJob(job);
 }
 
 function mergedTags(primary: string[] | undefined, fallback: string[] | undefined): string[] {
@@ -414,11 +454,12 @@ function mergedTags(primary: string[] | undefined, fallback: string[] | undefine
   return out;
 }
 
-function stopJobForDeletedKb(job: AiKnowledgeBaseJob): void {
+async function stopJobForDeletedKb(job: AiKnowledgeBaseJob): Promise<void> {
   job.status = 'cancelled';
   job.error = '知识库已删除';
   job.abortRequested = true;
-  pushJobLog(job, '知识库已删除，任务已停止');
+  finishJobTimer(job);
+  await pushJobLog(job, '知识库已删除，任务已停止');
 }
 
 async function runKnowledgeBaseJob(jobId: string): Promise<void> {
@@ -429,7 +470,8 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
   runningControllers.set(jobId, controller);
   job.status = 'running';
   job.abortRequested = false;
-  pushJobLog(job, '后台任务已启动');
+  resetJobStats(job);
+  await pushJobLog(job, '后台任务已启动');
   try {
     let plan = job.plan ?? extractPlanFromOutput(job);
     const recoveredPlan = Boolean(plan);
@@ -437,7 +479,7 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
       job.plan = plan;
       job.questionCount = plan.questions.length;
       job.parsed = { kbName: plan.kbName, folders: plan.folders.length, questions: plan.questions.length };
-      pushJobLog(job, `已恢复规划：${plan.kbName} · ${plan.folders.length} 个目录 · ${plan.questions.length} 道题`);
+      await pushJobLog(job, `已恢复规划：${plan.kbName} · ${plan.folders.length} 个目录 · ${plan.questions.length} 道题`);
     } else {
       plan = await generateKnowledgeBasePlanStream({
         domain: job.domain,
@@ -446,41 +488,42 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
       }, (event: GenerateKnowledgeBaseEvent) => {
         const current = aiJobs.get(jobId);
         if (!current || current.status === 'cancelled') return;
-        if (event.type === 'stage') pushJobLog(current, event.message);
+        if (event.type === 'stage') void pushJobLog(current, event.message);
         if (event.type === 'model-delta') {
           current.modelOutput = trimJobOutput(`${current.modelOutput}${event.content}`);
-          touchJob(current);
+          void touchJob(current);
         }
         if (event.type === 'model-output') {
           current.modelOutput = trimJobOutput(event.content);
-          touchJob(current);
+          void touchJob(current);
         }
         if (event.type === 'parsed-kb') {
           current.parsed = { kbName: event.kbName, folders: event.folders, questions: event.questions };
-          pushJobLog(current, `解析完成：${event.kbName} · ${event.folders} 个目录 · ${event.questions} 道题`);
+          void pushJobLog(current, `解析完成：${event.kbName} · ${event.folders} 个目录 · ${event.questions} 道题`);
         }
+        if (event.type === 'usage') void recordUsage(current, event.usage);
       });
       job.plan = plan;
       job.questionCount = plan.questions.length;
-      touchJob(job);
+      await touchJob(job);
     }
     if (isJobCancelled(jobId)) return;
 
-    pushJobLog(job, recoveredPlan ? 'LangChain Agent 第 2 步：恢复知识库和目录骨架' : 'LangChain Agent 第 2 步：创建知识库和目录骨架');
-    const existingResult = recoveredPlan ? hydrateKnowledgeBaseResult(job) : null;
+    await pushJobLog(job, recoveredPlan ? 'LangChain Agent 第 2 步：恢复知识库和目录骨架' : 'LangChain Agent 第 2 步：创建知识库和目录骨架');
+    const existingResult = recoveredPlan ? await hydrateKnowledgeBaseResult(job) : null;
     if (recoveredPlan && job.kbId && !existingResult) {
-      stopJobForDeletedKb(job);
+      await stopJobForDeletedKb(job);
       return;
     }
     const writer = existingResult
-      ? createKnowledgeBaseWriterFromExisting(existingResult)
-      : createKnowledgeBaseWriterFromDraft(plan);
-    for (const folder of plan.folders) writer.ensurePath(folder.path);
+      ? await createKnowledgeBaseWriterFromExisting(existingResult)
+      : await createKnowledgeBaseWriterFromDraft(plan);
+    for (const folder of plan.folders) await writer.ensurePath(folder.path);
     job.kbId = writer.kb.id;
     job.kbName = writer.kb.name;
     job.parsed = { kbName: writer.kb.name, folders: writer.folders.length, questions: writer.entries.length };
-    updateJobResult(job, writer);
-    pushJobLog(job, existingResult
+    await updateJobResult(job, writer);
+    await pushJobLog(job, existingResult
       ? `已恢复写入进度：${writer.entries.length}/${plan.questions.length} 条知识点`
       : `目录骨架已写入：${writer.folders.length} 个目录`);
 
@@ -489,22 +532,22 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
     if (startIndex >= total) {
       job.status = 'succeeded';
       job.abortRequested = false;
-      pushJobLog(job, `已完成：${writer.kb.name} · ${writer.folders.length} 个目录 · ${writer.entries.length} 条知识点`);
-      touchJob(job);
+      await pushJobLog(job, `已完成：${writer.kb.name} · ${writer.folders.length} 个目录 · ${writer.entries.length} 条知识点`);
+      await touchJob(job);
       return;
     }
-    if (startIndex > 0) pushJobLog(job, `从第 ${startIndex + 1}/${total} 个知识点继续生成`);
+    if (startIndex > 0) await pushJobLog(job, `从第 ${startIndex + 1}/${total} 个知识点继续生成`);
     for (let index = startIndex; index < plan.questions.length; index += 1) {
       if (isJobCancelled(jobId)) return;
-      if (!getKb(writer.kb.id)) {
-        stopJobForDeletedKb(job);
+      if (!await getKb(writer.kb.id)) {
+        await stopJobForDeletedKb(job);
         return;
       }
       const question = plan.questions[index];
       const targetPath = question.folderPath.join(' / ') || '根层级';
-      pushJobLog(job, `LangChain Agent 第 3 步：生成知识点 ${index + 1}/${total} · ${question.title}`);
+      await pushJobLog(job, `LangChain Agent 第 3 步：生成知识点 ${index + 1}/${total} · ${question.title}`);
       job.modelOutput = trimJobOutput(`${job.modelOutput}\n\n---ENTRY ${index + 1}/${total}: ${question.title}---\n`);
-      touchJob(job);
+      await touchJob(job);
       const input = await generateEntryInputStream({
         topic: `${question.title}\n${question.question || question.summary}`,
         kbName: writer.kb.name,
@@ -514,17 +557,18 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
       }, (event: GenerateEntryEvent) => {
         const current = aiJobs.get(jobId);
         if (!current || current.status === 'cancelled') return;
-        if (event.type === 'stage') pushJobLog(current, `知识点 ${index + 1}/${total}：${event.message}`);
+        if (event.type === 'stage') void pushJobLog(current, `知识点 ${index + 1}/${total}：${event.message}`);
         if (event.type === 'model-delta') {
           current.modelOutput = trimJobOutput(`${current.modelOutput}${event.content}`);
-          touchJob(current);
+          void touchJob(current);
         }
         if (event.type === 'model-output') {
-          touchJob(current);
+          void touchJob(current);
         }
         if (event.type === 'parsed') {
-          pushJobLog(current, `知识点 ${index + 1}/${total} 解析完成：${event.title}`);
+          void pushJobLog(current, `知识点 ${index + 1}/${total} 解析完成：${event.title}`);
         }
+        if (event.type === 'usage') void recordUsage(current, event.usage);
       });
       if (isJobCancelled(jobId)) return;
       const illustrated = await appendAiIllustration({
@@ -541,35 +585,37 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
       }, controller.signal, (event) => {
         const current = aiJobs.get(jobId);
         if (!current || current.status === 'cancelled') return;
-        if (event.type === 'image-stage') pushJobLog(current, `知识点 ${index + 1}/${total}：${event.message}`);
-        if (event.type === 'image') pushJobLog(current, `知识点 ${index + 1}/${total} 图解已生成`);
+        if (event.type === 'image-stage') void pushJobLog(current, `知识点 ${index + 1}/${total}：${event.message}`);
+        if (event.type === 'image') void pushJobLog(current, `知识点 ${index + 1}/${total} 图解已生成`);
       });
-      if (!getKb(writer.kb.id)) {
-        stopJobForDeletedKb(job);
+      if (!await getKb(writer.kb.id)) {
+        await stopJobForDeletedKb(job);
         return;
       }
-      const entry = writer.addEntry(illustrated, question.folderPath);
+      const entry = await writer.addEntry(illustrated, question.folderPath);
       job.parsed = { kbName: writer.kb.name, folders: writer.folders.length, questions: writer.entries.length };
-      updateJobResult(job, writer);
-      pushJobLog(job, `已新增知识点 ${index + 1}/${total}：${entry.title}`);
+      await updateJobResult(job, writer);
+      await pushJobLog(job, `已新增知识点 ${index + 1}/${total}：${entry.title}`);
     }
 
     job.status = 'succeeded';
     job.abortRequested = false;
-    pushJobLog(job, `已完成：${writer.kb.name} · ${writer.folders.length} 个目录 · ${writer.entries.length} 条知识点`);
-    touchJob(job);
+    await pushJobLog(job, `已完成：${writer.kb.name} · ${writer.folders.length} 个目录 · ${writer.entries.length} 条知识点`);
+    await touchJob(job);
   } catch (err) {
     if (isJobCancelled(jobId) || isAbortError(err)) {
       job.status = 'cancelled';
       job.error = '用户已取消任务';
-      pushJobLog(job, '任务已取消');
+      await pushJobLog(job, '任务已取消');
     } else {
       job.status = 'failed';
       job.error = err instanceof Error ? err.message : String(err);
-      pushJobLog(job, job.error);
+      await pushJobLog(job, job.error);
     }
-    touchJob(job);
+    await touchJob(job);
   } finally {
+    finishJobTimer(job);
+    await touchJob(job);
     runningControllers.delete(jobId);
   }
 }
@@ -590,9 +636,9 @@ function folderDepth(folder: Folder, byId: Map<string, Folder>): number {
   return folderPathParts(folder, byId).length;
 }
 
-function collectFolderEntryTargets(kbId: string, parentId: string | null): Array<{ folder: Folder; path: string[] }> {
-  const folders = listFolders().filter((folder) => folder.kbId === kbId);
-  const entries = listEntries().filter((entry) => entry.kbId === kbId);
+async function collectFolderEntryTargets(kbId: string, parentId: string | null): Promise<Array<{ folder: Folder; path: string[] }>> {
+  const folders = (await listFolders()).filter((folder) => folder.kbId === kbId);
+  const entries = (await listEntries()).filter((entry) => entry.kbId === kbId);
   const byId = new Map(folders.map((folder) => [folder.id, folder]));
   const childrenByParent = new Map<string | null, Folder[]>();
   for (const folder of folders) {
@@ -636,37 +682,38 @@ async function runFolderEntriesJob(jobId: string): Promise<void> {
   runningControllers.set(jobId, controller);
   job.status = 'running';
   job.abortRequested = false;
-  pushJobLog(job, '后台目录知识点生成已启动');
+  resetJobStats(job);
+  await pushJobLog(job, '后台目录知识点生成已启动');
   try {
     if (!job.kbId) throw new Error('知识库不存在');
-    const kb = getKb(job.kbId);
+    const kb = await getKb(job.kbId);
     if (!kb) throw new Error('知识库不存在');
-    const result = hydrateKnowledgeBaseResult(job);
+    const result = await hydrateKnowledgeBaseResult(job);
     if (!result) throw new Error('知识库不存在');
 
-    const writer = createKnowledgeBaseWriterFromExisting(result);
-    let targets = collectFolderEntryTargets(kb.id, job.parentId ?? null);
+    const writer = await createKnowledgeBaseWriterFromExisting(result);
+    let targets = await collectFolderEntryTargets(kb.id, job.parentId ?? null);
     job.questionCount = targets.length;
     job.parsed = { kbName: kb.name, folders: writer.folders.length, questions: writer.entries.length };
-    updateJobResult(job, writer);
+    await updateJobResult(job, writer);
     if (!targets.length) {
       job.status = 'succeeded';
       job.abortRequested = false;
-      pushJobLog(job, '当前目录范围没有需要补全的空叶子目录');
-      touchJob(job);
+      await pushJobLog(job, '当前目录范围没有需要补全的空叶子目录');
+      await touchJob(job);
       return;
     }
 
-    pushJobLog(job, `准备按目录补全 ${targets.length} 条知识点`);
+    await pushJobLog(job, `准备按目录补全 ${targets.length} 条知识点`);
     const total = targets.length;
     let completed = 0;
     while (completed < total) {
       if (isJobCancelled(jobId)) return;
-      if (!getKb(kb.id)) {
-        stopJobForDeletedKb(job);
+      if (!await getKb(kb.id)) {
+        await stopJobForDeletedKb(job);
         return;
       }
-      targets = collectFolderEntryTargets(kb.id, job.parentId ?? null);
+      targets = await collectFolderEntryTargets(kb.id, job.parentId ?? null);
       const target = targets[0];
       if (!target) break;
       const pathLabel = target.path.join(' / ') || target.folder.name;
@@ -677,11 +724,11 @@ async function runFolderEntriesJob(jobId: string): Promise<void> {
         '请从目录名推断最高频、最值得复习的核心知识点；标题要适合放入该目录，避免泛泛重复目录名。',
       ].join('\n');
       const currentIndex = completed + 1;
-      pushJobLog(job, `LangChain Agent：按目录生成知识点 ${currentIndex}/${total} · ${pathLabel}`);
+      await pushJobLog(job, `LangChain Agent：按目录生成知识点 ${currentIndex}/${total} · ${pathLabel}`);
       job.modelOutput = trimJobOutput(`${job.modelOutput}\n\n---FOLDER ENTRY ${currentIndex}/${total}: ${pathLabel}---\n`);
-      touchJob(job);
+      await touchJob(job);
 
-      const context = searchEntries(listEntries().filter((entry) => entry.kbId === kb.id), `${pathLabel} ${target.folder.name}`);
+      const context = searchEntries((await listEntries()).filter((entry) => entry.kbId === kb.id), `${pathLabel} ${target.folder.name}`);
       const input = await generateEntryInputStream({
         topic,
         kbName: kb.name,
@@ -691,17 +738,18 @@ async function runFolderEntriesJob(jobId: string): Promise<void> {
       }, (event: GenerateEntryEvent) => {
         const current = aiJobs.get(jobId);
         if (!current || current.status === 'cancelled') return;
-        if (event.type === 'stage') pushJobLog(current, `目录知识点 ${currentIndex}/${total}：${event.message}`);
+        if (event.type === 'stage') void pushJobLog(current, `目录知识点 ${currentIndex}/${total}：${event.message}`);
         if (event.type === 'model-delta') {
           current.modelOutput = trimJobOutput(`${current.modelOutput}${event.content}`);
-          touchJob(current);
+          void touchJob(current);
         }
         if (event.type === 'model-output') {
-          touchJob(current);
+          void touchJob(current);
         }
         if (event.type === 'parsed') {
-          pushJobLog(current, `目录知识点 ${currentIndex}/${total} 解析完成：${event.title}`);
+          void pushJobLog(current, `目录知识点 ${currentIndex}/${total} 解析完成：${event.title}`);
         }
+        if (event.type === 'usage') void recordUsage(current, event.usage);
       });
       if (isJobCancelled(jobId)) return;
 
@@ -714,37 +762,39 @@ async function runFolderEntriesJob(jobId: string): Promise<void> {
       }, controller.signal, (event) => {
         const current = aiJobs.get(jobId);
         if (!current || current.status === 'cancelled') return;
-        if (event.type === 'image-stage') pushJobLog(current, `目录知识点 ${currentIndex}/${total}：${event.message}`);
-        if (event.type === 'image') pushJobLog(current, `目录知识点 ${currentIndex}/${total} 图解已生成`);
+        if (event.type === 'image-stage') void pushJobLog(current, `目录知识点 ${currentIndex}/${total}：${event.message}`);
+        if (event.type === 'image') void pushJobLog(current, `目录知识点 ${currentIndex}/${total} 图解已生成`);
       });
-      if (!getKb(kb.id)) {
-        stopJobForDeletedKb(job);
+      if (!await getKb(kb.id)) {
+        await stopJobForDeletedKb(job);
         return;
       }
 
-      const entry = writer.addEntry(illustrated, target.path);
+      const entry = await writer.addEntry(illustrated, target.path);
       job.parsed = { kbName: kb.name, folders: writer.folders.length, questions: writer.entries.length };
-      updateJobResult(job, writer);
-      pushJobLog(job, `已写入目录知识点 ${currentIndex}/${total}：${entry.title}`);
+      await updateJobResult(job, writer);
+      await pushJobLog(job, `已写入目录知识点 ${currentIndex}/${total}：${entry.title}`);
       completed += 1;
     }
 
     job.status = 'succeeded';
     job.abortRequested = false;
-    pushJobLog(job, `已完成：${kb.name} · ${writer.folders.length} 个目录 · ${writer.entries.length} 条知识点`);
-    touchJob(job);
+    await pushJobLog(job, `已完成：${kb.name} · ${writer.folders.length} 个目录 · ${writer.entries.length} 条知识点`);
+    await touchJob(job);
   } catch (err) {
     if (isJobCancelled(jobId) || isAbortError(err)) {
       job.status = 'cancelled';
       job.error = '用户已取消任务';
-      pushJobLog(job, '任务已取消');
+      await pushJobLog(job, '任务已取消');
     } else {
       job.status = 'failed';
       job.error = err instanceof Error ? err.message : String(err);
-      pushJobLog(job, job.error);
+      await pushJobLog(job, job.error);
     }
-    touchJob(job);
+    await touchJob(job);
   } finally {
+    finishJobTimer(job);
+    await touchJob(job);
     runningControllers.delete(jobId);
   }
 }
@@ -756,14 +806,16 @@ async function runFolderInitJob(jobId: string, folderCount: number): Promise<voi
   runningControllers.set(jobId, controller);
   job.status = 'running';
   job.abortRequested = false;
-  pushJobLog(job, '后台目录初始化已启动');
+  resetJobStats(job);
+  await pushJobLog(job, '后台目录初始化已启动');
   try {
     if (!job.kbId) throw new Error('知识库不存在');
-    const kb = getKb(job.kbId);
+    const kb = await getKb(job.kbId);
     if (!kb) throw new Error('知识库不存在');
-    const existingFolders = listFolders()
-      .filter((folder) => folder.kbId === kb.id)
-      .map((folder) => folderPathLabel(folder.id));
+    const existingFolders: string[] = [];
+    for (const folder of (await listFolders()).filter((folder) => folder.kbId === kb.id)) {
+      existingFolders.push(await folderPathLabel(folder.id));
+    }
     const draft = await generateFolderTreeDraftStream({
       domain: job.domain,
       kbName: kb.name,
@@ -774,41 +826,44 @@ async function runFolderInitJob(jobId: string, folderCount: number): Promise<voi
     }, (event: GenerateFolderTreeEvent) => {
       const current = aiJobs.get(jobId);
       if (!current || current.status === 'cancelled') return;
-      if (event.type === 'stage') pushJobLog(current, event.message);
+      if (event.type === 'stage') void pushJobLog(current, event.message);
       if (event.type === 'model-delta') {
         current.modelOutput = trimJobOutput(`${current.modelOutput}${event.content}`);
-        touchJob(current);
+        void touchJob(current);
       }
       if (event.type === 'model-output') {
         current.modelOutput = trimJobOutput(event.content);
-        touchJob(current);
+        void touchJob(current);
       }
       if (event.type === 'parsed-folders') {
         current.parsed = { kbName: kb.name, folders: event.folders, questions: 0 };
-        pushJobLog(current, `解析完成：${event.title} · ${event.folders} 个目录路径`);
+        void pushJobLog(current, `解析完成：${event.title} · ${event.folders} 个目录路径`);
       }
+      if (event.type === 'usage') void recordUsage(current, event.usage);
     });
     if (isJobCancelled(jobId)) return;
 
-    pushJobLog(job, '开始写入文件目录');
-    const result = createFoldersFromDraft(kb, job.parentId ?? null, draft);
+    await pushJobLog(job, '开始写入文件目录');
+    const result = await createFoldersFromDraft(kb, job.parentId ?? null, draft);
     job.result = result;
     job.status = 'succeeded';
     job.abortRequested = false;
-    pushJobLog(job, `已完成：${kb.name} · ${result.folders.length} 个目录`);
-    touchJob(job);
+    await pushJobLog(job, `已完成：${kb.name} · ${result.folders.length} 个目录`);
+    await touchJob(job);
   } catch (err) {
     if (isJobCancelled(jobId) || isAbortError(err)) {
       job.status = 'cancelled';
       job.error = '用户已取消任务';
-      pushJobLog(job, '任务已取消');
+      await pushJobLog(job, '任务已取消');
     } else {
       job.status = 'failed';
       job.error = err instanceof Error ? err.message : String(err);
-      pushJobLog(job, job.error);
+      await pushJobLog(job, job.error);
     }
-    touchJob(job);
+    await touchJob(job);
   } finally {
+    finishJobTimer(job);
+    await touchJob(job);
     runningControllers.delete(jobId);
   }
 }

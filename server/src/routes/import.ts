@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Router } from 'express';
+import { asyncHandler } from '../app.js';
 import { convertEntry } from '../blocks-import.js';
 import {
   exportData,
@@ -20,7 +21,7 @@ import { isKbPackage2, kbPackage2ToImportPayload } from '../kb-package-2.js';
 import { knowledgeTreeToImportPayload } from '../knowledge-tree-import.js';
 import { stableImportId } from '../services/utils.js';
 
-function requestToImportPayload(body: unknown): ImportPayload {
+async function requestToImportPayload(body: unknown): Promise<ImportPayload> {
   const b = (body ?? {}) as {
     tree?: unknown;
     entries?: unknown;
@@ -44,12 +45,12 @@ function requestToImportPayload(body: unknown): ImportPayload {
   };
   const targetFolderProvided = Object.prototype.hasOwnProperty.call(b, 'targetFolderId');
   const requestedFolderId = cleanText(b.targetFolderId);
-  const targetFolder = requestedFolderId ? getFolder(requestedFolderId) : null;
+  const targetFolder = requestedFolderId ? await getFolder(requestedFolderId) : null;
   if (requestedFolderId && !targetFolder) throw new Error('目标文件夹不存在');
 
   const requestedKbId = cleanText(b.targetKbId);
   const targetKbId = requestedKbId || targetFolder?.kbId;
-  const targetKb = targetKbId ? getKb(targetKbId) : null;
+  const targetKb = targetKbId ? await getKb(targetKbId) : null;
   if (targetKbId && !targetKb) throw new Error('目标知识库不存在');
   if (targetFolder && targetKbId && targetFolder.kbId !== targetKbId) throw new Error('目标文件夹不属于目标知识库');
 
@@ -162,31 +163,31 @@ function requestToImportPayload(body: unknown): ImportPayload {
 
 export function registerImportRoutes(api: Router): void {
   // 导出全部知识库结构（备份）
-  api.get('/export', (_req, res) => {
-    res.json(exportData());
-  });
+  api.get('/export', asyncHandler(async (_req, res) => {
+    res.json(await exportData());
+  }));
 
   // 导入：主格式为 kb-package-2；内部备份/撤销仍走 entries/folders 结构。
-  api.post('/import', (req, res) => {
+  api.post('/import', asyncHandler(async (req, res) => {
     try {
-      const payload = requestToImportPayload(req.body);
+      const payload = await requestToImportPayload(req.body);
       if (payload.entries.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
-      const { imported } = importEntries(payload, Boolean(req.body?.replace));
-      res.json({ ok: true, imported, kbCategories: listKbCategories(), kbs: listKbs(), folders: listFolders(), entries: listEntries() });
+      const { imported } = await importEntries(payload, Boolean(req.body?.replace));
+      res.json({ ok: true, imported, kbCategories: await listKbCategories(), kbs: await listKbs(), folders: await listFolders(), entries: await listEntries() });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
-  });
+  }));
 
   // 导入预览：解析导入载荷，但不写库。
-  api.post('/import/preview', (req, res) => {
+  api.post('/import/preview', asyncHandler(async (req, res) => {
     try {
-      const payload = requestToImportPayload(req.body);
+      const payload = await requestToImportPayload(req.body);
       if (payload.entries.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
-      const preview = buildImportPreview(payload.entries, payload.folders);
+      const preview = await buildImportPreview(payload.entries, payload.folders);
       res.json({ preview });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
-  });
+  }));
 }

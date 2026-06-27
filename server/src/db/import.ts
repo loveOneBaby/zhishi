@@ -49,19 +49,19 @@ export interface ExportPayload {
   entries: Entry[];
 }
 
-export function exportData(): ExportPayload {
+export async function exportData(): Promise<ExportPayload> {
   return {
     version: 'kb-export-2',
     exportedAt: Date.now(),
-    kbCategories: listKbCategories(),
-    kbs: listKbs(),
-    folders: listFolders(),
-    entries: listEntries(),
+    kbCategories: await listKbCategories(),
+    kbs: await listKbs(),
+    folders: await listFolders(),
+    entries: await listEntries(),
   };
 }
 
 // 查询给定 id 中已存在于库内的（用于导入预览判定「新增 / 更新」）
-export function existingIds(ids: string[]): Set<string> {
+export async function existingIds(ids: string[]): Promise<Set<string>> {
   const result = new Set<string>();
   const unique = [...new Set(ids.filter((x): x is string => typeof x === 'string' && x.length > 0))];
   if (!unique.length) return result;
@@ -70,7 +70,7 @@ export function existingIds(ids: string[]): Set<string> {
   for (let i = 0; i < unique.length; i += CHUNK) {
     const slice = unique.slice(i, i + CHUNK);
     const placeholders = slice.map(() => '?').join(',');
-    const rows = db.prepare(`SELECT id FROM entries WHERE id IN (${placeholders})`).all(...slice) as { id: string }[];
+    const rows = await db.prepare(`SELECT id FROM entries WHERE id IN (${placeholders})`).all(...slice) as { id: string }[];
     for (const r of rows) result.add(r.id);
   }
   return result;
@@ -137,9 +137,9 @@ function buildPreviewFolders(folders: ImportFolder[] = []): PreviewFolder[] {
   }));
 }
 
-export function buildImportPreview(list: ImportEntry[], folders: ImportFolder[] = []): ImportPreview {
+export async function buildImportPreview(list: ImportEntry[], folders: ImportFolder[] = []): Promise<ImportPreview> {
   const ids = list.map((e) => e.id).filter((x): x is string => typeof x === 'string' && x.length > 0);
-  const existing = existingIds(ids);
+  const existing = await existingIds(ids);
   const entries: PreviewEntry[] = [];
   let valid = 0, skipped = 0, newCount = 0, updateCount = 0;
   const catMap = new Map<string, number>();
@@ -175,7 +175,8 @@ export function buildImportPreview(list: ImportEntry[], folders: ImportFolder[] 
 }
 
 // 批量导入（备份恢复 / 迁移）。replace=true 先清空；按 id upsert，兼容旧 body / cat 字段。
-export function importEntries(payload: ImportPayload, replace: boolean): { imported: number } {
+export async function importEntries(payload: ImportPayload, replace: boolean): Promise<{ imported: number }> {
+  // 事务外 prepare、事务内 run：经 AsyncLocalStorage 自动落到当前事务
   const insertEntry = db.prepare(
     `INSERT INTO entries (id, cat, kbId, folderId, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
      VALUES (:id, :cat, :kbId, :folderId, :title, :py, :tags, :summary, '', :idx, :sort, :createdAt, :updatedAt)`
@@ -189,20 +190,18 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
   const insertCategory = db.prepare(
     'INSERT OR IGNORE INTO kb_categories (id, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)'
   );
-  const categoryExistsStmt = db.prepare('SELECT 1 FROM kb_categories WHERE id = ?');
   const insertFolder = db.prepare(
     'INSERT OR IGNORE INTO folders (id, kbId, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
   );
   const existsStmt = db.prepare('SELECT 1 FROM entries WHERE id = ?');
 
   let imported = 0;
-  db.exec('BEGIN');
-  try {
+  await db.tx(async () => {
     if (replace) {
-      db.exec('DELETE FROM entries');
-      db.exec('DELETE FROM folders');
-      db.exec('DELETE FROM knowledge_bases');
-      db.exec('DELETE FROM kb_categories');
+      await db.exec('DELETE FROM entries');
+      await db.exec('DELETE FROM folders');
+      await db.exec('DELETE FROM knowledge_bases');
+      await db.exec('DELETE FROM kb_categories');
     }
 
     // 1) 知识库分类
@@ -221,26 +220,25 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
       if (!id) continue;
       const parentId = c.parentId ? (categoryIdMap.get(c.parentId) ?? null) : null;
       const now = Date.now();
-      insertCategory.run(id, parentId, c.name.trim(), c.sort ?? 0, now, now);
+      await insertCategory.run(id, parentId, c.name.trim(), c.sort ?? 0, now, now);
     }
 
     // 2) 知识库
     const kbIdMap = new Map<string, string>();   // 载荷原 id → 实际入库 id
     for (const k of payload.kbs ?? []) {
       const now = Date.now();
-      const candidateCategoryId = k.categoryId ? (categoryIdMap.get(k.categoryId) ?? k.categoryId) : null;
-      const categoryId = candidateCategoryId && categoryExistsStmt.get(candidateCategoryId) ? candidateCategoryId : null;
+      const categoryId = k.categoryId ? (categoryIdMap.get(k.categoryId) ?? k.categoryId) : null;
       if (k.id) {
-        insertKb.run(k.id, k.name, categoryId, k.sort ?? 0, now, now);
+        await insertKb.run(k.id, k.name, categoryId, k.sort ?? 0, now, now);
         kbIdMap.set(k.id, k.id);
       } else {
-        const kb = ensureKb(k.name);
-        if (categoryId) updateKbCategory(kb.id, categoryId);
+        const kb = await ensureKb(k.name);
+        if (categoryId) await updateKbCategory(kb.id, categoryId);
         kbIdMap.set(k.name, kb.id);
       }
     }
     // 兜底知识库：在导入的知识库就绪后再取，避免 replace 清空后凭空多建一个默认库
-    const fallbackKbId = defaultKbId();
+    const fallbackKbId = await defaultKbId();
 
     // 3) 文件夹：按依赖多趟建入（先建父、再建子），未就绪的父降级为根
     const pending = [...(payload.folders ?? [])];
@@ -250,15 +248,15 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
       progress = false;
       for (let i = pending.length - 1; i >= 0; i--) {
         const f = pending[i];
-        const kbId = f.kbId ? (kbIdMap.get(f.kbId) ?? resolveKbId(f.kbId, undefined)) : fallbackKbId;
-        if (f.parentId && !folderIdMap.has(f.parentId) && !getFolder(f.parentId)) continue; // 等父先建，或挂到已有文件夹
-        const parentId = f.parentId ? (folderIdMap.get(f.parentId) ?? (getFolder(f.parentId) ? f.parentId : null)) : null;
+        const kbId = f.kbId ? (kbIdMap.get(f.kbId) ?? await resolveKbId(f.kbId, undefined)) : fallbackKbId;
+        if (f.parentId && !folderIdMap.has(f.parentId) && !await getFolder(f.parentId)) continue; // 等父先建，或挂到已有文件夹
+        const parentId = f.parentId ? (folderIdMap.get(f.parentId) ?? (await getFolder(f.parentId) ? f.parentId : null)) : null;
         const now = Date.now();
         if (f.id) {
-          insertFolder.run(f.id, kbId, parentId, f.name, f.sort ?? 0, now, now);
+          await insertFolder.run(f.id, kbId, parentId, f.name, f.sort ?? 0, now, now);
           folderIdMap.set(f.id, f.id);
         } else {
-          const folder = ensureFolder(kbId, f.name, parentId);
+          const folder = await ensureFolder(kbId, f.name, parentId);
           folderIdMap.set(f.name + '::' + (parentId ?? ''), folder.id);
         }
         pending.splice(i, 1);
@@ -267,48 +265,44 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
     }
     for (const f of pending) {
       // 父缺失，强制挂根
-      const kbId = f.kbId ? (kbIdMap.get(f.kbId) ?? resolveKbId(f.kbId, undefined)) : fallbackKbId;
+      const kbId = f.kbId ? (kbIdMap.get(f.kbId) ?? await resolveKbId(f.kbId, undefined)) : fallbackKbId;
       const now = Date.now();
-      if (f.id) { insertFolder.run(f.id, kbId, null, f.name, f.sort ?? 0, now, now); folderIdMap.set(f.id, f.id); }
-      else { const folder = ensureFolder(kbId, f.name, null); folderIdMap.set(f.name + '::', folder.id); }
+      if (f.id) { await insertFolder.run(f.id, kbId, null, f.name, f.sort ?? 0, now, now); folderIdMap.set(f.id, f.id); }
+      else { const folder = await ensureFolder(kbId, f.name, null); folderIdMap.set(f.name + '::', folder.id); }
     }
 
     // 4) 知识点
-    let maxSort = Number((db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM entries').get() as { m: number }).m);
+    let maxSort = Number((await db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM entries').get() as { m: number }).m);
     for (const raw of payload.entries) {
       if (!raw || typeof raw.title !== 'string' || !raw.title.trim()) continue;
       const now = Date.now();
       const id = typeof raw.id === 'string' && raw.id ? raw.id : 'u' + now + Math.floor(Math.random() * 100000);
       // 统一 doc-canonical:优先 doc 块,其次 intro/nodes,其次旧 body;图片落库去重
-      const { tree, idx } = buildDocIdx({ doc: raw.doc, intro: raw.intro, nodes: raw.nodes, body: raw.body });
+      const { tree, idx } = await buildDocIdx({ doc: raw.doc, intro: raw.intro, nodes: raw.nodes, body: raw.body });
       const cat = (raw.cat && String(raw.cat).trim()) || '未分类';
-      const kbId = raw.kbId ? (kbIdMap.get(raw.kbId) ?? resolveKbId(raw.kbId, cat)) : resolveKbId(undefined, cat);
+      const kbId = raw.kbId ? (kbIdMap.get(raw.kbId) ?? await resolveKbId(raw.kbId, cat)) : await resolveKbId(undefined, cat);
       // 未声明 folderId 的旧载荷按 cat 建根文件夹；明确 folderId:null 表示导入到知识库根级。
       const hasFolderId = Object.prototype.hasOwnProperty.call(raw, 'folderId');
       let folderId: string | null;
       if (hasFolderId) {
         folderId = raw.folderId ? (folderIdMap.get(raw.folderId) ?? raw.folderId) : null;
-        if (folderId && !getFolder(folderId)) folderId = null;
+        if (folderId && !await getFolder(folderId)) folderId = null;
       } else {
-        folderId = ensureFolder(kbId, cat, null).id;
+        folderId = (await ensureFolder(kbId, cat, null)).id;
       }
       const title = raw.title.trim();
       const py = (raw.py || title).toLowerCase();
       const tags = JSON.stringify(Array.isArray(raw.tags) ? raw.tags : []);
       const summary = (raw.summary && raw.summary.trim()) ? raw.summary.trim() : deriveSummary({}, tree);
-      const exists = Boolean(existsStmt.get(id));
+      const exists = Boolean(await existsStmt.get(id));
       if (exists) {
-        updateEntry.run({ id, cat: kbNameOf(kbId), kbId, folderId, title, py, tags, summary, idx, updatedAt: now });
+        await updateEntry.run({ id, cat: await kbNameOf(kbId), kbId, folderId, title, py, tags, summary, idx, updatedAt: now });
       } else {
         maxSort += 1;
-        insertEntry.run({ id, cat: kbNameOf(kbId), kbId, folderId, title, py, tags, summary, idx, sort: maxSort, createdAt: now, updatedAt: now });
+        await insertEntry.run({ id, cat: await kbNameOf(kbId), kbId, folderId, title, py, tags, summary, idx, sort: maxSort, createdAt: now, updatedAt: now });
       }
       imported += 1;
     }
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
+  });
   return { imported };
 }

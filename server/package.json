@@ -13,6 +13,7 @@
   "dependencies": {
     "@langchain/core": "^1.2.1",
     "@langchain/openai": "^1.5.3",
+    "@libsql/client": "^0.17.4",
     "express": "^4.21.0",
     "pinyin-pro": "^3.28.1"
   },

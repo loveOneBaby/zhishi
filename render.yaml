@@ -1,0 +1,32 @@
+# Render Blueprint：把本项目部署为免费 Web Service + Turso 远程数据库。
+# 用法：把仓库推到 GitHub，在 Render 选 New → Blueprint，选中本文件即可。
+# 首次创建后，在 Render 的 Environment 里填入 TURSO_DATABASE_URL / TURSO_AUTH_TOKEN
+# （以及可选的 AI_API_KEY 等）。详细步骤见 README「部署到 Render + Turso」。
+services:
+  - type: web
+    name: zhishi
+    runtime: node
+    plan: free
+    buildCommand: npm run install:all && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # 远程数据库（必填，见 README 建库步骤）
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      # AI（可选；不填则 AI 问答 / 生成功能提示「未配置」，其余功能不受影响）
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_BASE_URL
+        value: https://dashscope.aliyuncs.com/compatible-mode/v1
+      - key: AI_MODEL
+        value: qwen-plus
+      - key: AI_IMAGE_ENABLED
+        value: "true"
+      - key: AI_IMAGE_MODEL
+        value: qwen-image-2.0-pro

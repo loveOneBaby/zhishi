@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "面试知识快速检索网站（React + Vite 前端 / TypeScript + Express + SQLite 后端）",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "install:all": "npm --prefix server install && npm --prefix web install",
     "dev:server": "npm --prefix server run dev",

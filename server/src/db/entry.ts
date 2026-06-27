@@ -7,15 +7,15 @@ import type { IndexTree } from '../index-tree.js';
 
 // ───────────────────────── 知识点 CRUD ─────────────────────────
 
-export function listEntries(): Entry[] {
-  const kbs = new Map(listKbs().map((k) => [k.id, k.name]));
-  const rows = db.prepare('SELECT * FROM entries ORDER BY sort ASC, createdAt ASC').all() as unknown as EntryRow[];
-  return rows.map((r) => rowToEntry(r, kbs.get(r.kbId ?? '')));
+export async function listEntries(): Promise<Entry[]> {
+  const kbs = new Map((await listKbs()).map((k) => [k.id, k.name]));
+  const rows = await db.prepare('SELECT * FROM entries ORDER BY sort ASC, createdAt ASC').all() as unknown as EntryRow[];
+  return Promise.all(rows.map((r) => rowToEntry(r, kbs.get(r.kbId ?? ''))));
 }
 
-export function getEntry(id: string): Entry | null {
-  const row = db.prepare('SELECT * FROM entries WHERE id = ?').get(id) as unknown as EntryRow | undefined;
-  return row ? rowToEntry(row) : null;
+export async function getEntry(id: string): Promise<Entry | null> {
+  const row = await db.prepare('SELECT * FROM entries WHERE id = ?').get(id) as unknown as EntryRow | undefined;
+  return row ? await rowToEntry(row) : null;
 }
 
 export interface EntryInput {
@@ -37,16 +37,16 @@ export function deriveSummary(input: { summary?: string }, tree: IndexTree): str
   return firstIntro || tree.nodes[0]?.title || '自建知识点';
 }
 
-export function createEntry(input: EntryInput): Entry {
+export async function createEntry(input: EntryInput): Promise<Entry> {
   const now = Date.now();
   const id = 'u' + now + Math.floor(Math.random() * 1000);
-  const { doc, tree, idx } = buildDocIdx(input);
-  const maxRow = db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM entries').get() as { m: number };
-  const kbId = resolveKbId(input.kbId, input.cat);
+  const { doc, tree, idx } = await buildDocIdx(input);
+  const maxRow = await db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM entries').get() as { m: number };
+  const kbId = await resolveKbId(input.kbId, input.cat);
   const folderId = input.folderId ?? null;
   const entry: Entry = {
     id,
-    cat: kbNameOf(kbId),
+    cat: await kbNameOf(kbId),
     kbId,
     folderId,
     title: input.title.trim(),
@@ -60,7 +60,7 @@ export function createEntry(input: EntryInput): Entry {
     createdAt: now,
     updatedAt: now,
   };
-  db.prepare(
+  await db.prepare(
     `INSERT INTO entries (id, cat, kbId, folderId, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
      VALUES (:id, :cat, :kbId, :folderId, :title, :py, :tags, :summary, '', :idx, :sort, :createdAt, :updatedAt)`
   ).run({
@@ -73,20 +73,15 @@ export function createEntry(input: EntryInput): Entry {
 }
 
 // 按给定顺序重排（管理模块拖拽）。ids 为某作用域内的知识点 id 序列。
-export function reorderEntries(ids: string[]): void {
+export async function reorderEntries(ids: string[]): Promise<void> {
   const stmt = db.prepare('UPDATE entries SET sort = :sort WHERE id = :id');
-  db.exec('BEGIN');
-  try {
-    ids.forEach((id, index) => stmt.run({ id, sort: index }));
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
+  await db.tx(async () => {
+    for (const [index, id] of ids.entries()) await stmt.run({ id, sort: index });
+  });
 }
 
-export function updateEntry(id: string, input: Partial<EntryInput>): Entry | null {
-  const cur = getEntry(id);
+export async function updateEntry(id: string, input: Partial<EntryInput>): Promise<Entry | null> {
+  const cur = await getEntry(id);
   if (!cur) return null;
   // 内容来源优先级:显式 doc > 显式 intro/nodes > 保持原内容(仅改元数据时)
   const docSource = input.doc !== undefined
@@ -94,7 +89,7 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
     : (input.intro !== undefined || input.nodes !== undefined)
       ? { intro: input.intro ?? cur.intro, nodes: input.nodes ?? cur.nodes }
       : { doc: cur.doc };
-  const { doc, tree, idx } = buildDocIdx(docSource);
+  const { doc, tree, idx } = await buildDocIdx(docSource);
   const nextTitle = input.title?.trim() ?? cur.title;
   // 标题变更且未显式给 py 时，按新标题重算拼音源，避免检索过期
   const nextPy = input.py != null
@@ -103,11 +98,11 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
   let nextSummary = input.summary ?? cur.summary;
   if (!nextSummary || !nextSummary.trim()) nextSummary = deriveSummary({}, tree);
   // 归属变更（仅当显式传入 kbId / folderId 时才改）
-  const kbId = input.kbId !== undefined ? resolveKbId(input.kbId, input.cat) : cur.kbId;
+  const kbId = input.kbId !== undefined ? await resolveKbId(input.kbId, input.cat) : cur.kbId;
   const folderId = input.folderId !== undefined ? (input.folderId ?? null) : cur.folderId;
   const next: Entry = {
     ...cur,
-    cat: kbNameOf(kbId),
+    cat: await kbNameOf(kbId),
     kbId,
     folderId,
     title: nextTitle,
@@ -119,7 +114,7 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
     doc,
     updatedAt: Date.now(),
   };
-  db.prepare(
+  await db.prepare(
     `UPDATE entries SET cat=:cat, kbId=:kbId, folderId=:folderId, title=:title, py=:py, tags=:tags,
        summary=:summary, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
   ).run({
@@ -131,7 +126,7 @@ export function updateEntry(id: string, input: Partial<EntryInput>): Entry | nul
   return next;
 }
 
-export function deleteEntry(id: string): boolean {
-  const info = db.prepare('DELETE FROM entries WHERE id = ?').run(id);
+export async function deleteEntry(id: string): Promise<boolean> {
+  const info = await db.prepare('DELETE FROM entries WHERE id = ?').run(id);
   return Number(info.changes) > 0;
 }

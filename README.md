@@ -39,7 +39,7 @@
 
 ## 快速开始
 
-需要 **Node.js 22.5+ 或 24**（后端用 Node 内置的 `node:sqlite`，无需任何原生编译 / Xcode 工具）。
+需要 **Node.js 20 或更新版本**（推荐 22）。后端数据库统一用 `@libsql/client`（libSQL），本地场景无需联网。
 
 最简单的方式是用根目录脚本一键启动：
 
@@ -76,10 +76,44 @@ npm start            # 启动后端，同时托管前端，访问 http://localho
 
 ## 数据存储
 
-- 使用 **Node 内置 SQLite**（`node:sqlite`），无需安装 / 编译任何原生依赖；数据库文件默认在 `server/data/knowledge.db`，启动时按版本补充新增的内置知识库。
-- 新建的知识点会写入数据库，永久保留。
-- 可通过环境变量 `DB_PATH` 自定义数据库位置。
-- 启动时若看到 `ExperimentalWarning: SQLite is an experimental feature` 属正常提示，不影响使用。
+统一用 **libSQL**（`@libsql/client`），一套代码按环境变量切场景：
+
+- **本地场景（默认）**：不设任何数据库变量，默认 `file:./data/knowledge.db`（离线、零网络、可直接读现有库文件）。也可用 `DB_PATH=./data/knowledge.db` 显式指定（兼容旧变量，会自动转成 `file:` 前缀）。
+- **远程场景**：设 `TURSO_DATABASE_URL=libsql://<db>.turso.io` 与 `TURSO_AUTH_TOKEN=<token>`，数据持久、可跨实例共享，适合线上部署。
+- 启动时按版本补充新增的内置知识库（`seed_migrations` 记录版本，幂等）；新建的知识点写入数据库，永久保留。
+- 本地首次启动会在 `server/data/` 下创建库文件；远程首次启动会自动把 `server/src/seed-data/` 内置知识库播种到空库。
+
+详见 `server/.env.example` 与下文「部署到 Render + Turso」。
+
+## 部署到 Render + Turso（免费、数据持久）
+
+无服务器 / 数据库也能上线：用 [Render](https://render.com) 托管服务 + [Turso](https://turso.tech) 提供免费远程 SQLite。两者都有免费额度。
+
+### 1. 建 Turso 远程数据库
+
+本地装 Turso CLI 后：
+
+```bash
+turso db create zhishi                       # 建库（首次会引导登录 / 关联 GitHub）
+turso db show zhishi --url                   # 得到 TURSO_DATABASE_URL，形如 libsql://zhishi-xxx.turso.io
+turso db tokens create zhishi                # 得到 TURSO_AUTH_TOKEN
+```
+
+### 2. 部署到 Render
+
+仓库根已有 `render.yaml`（Blueprint）。把仓库推到 GitHub 后，在 Render 选 **New → Blueprint**，选中本仓库，Render 会自动识别。首次创建后，在服务的 **Environment** 里填：
+
+| 变量 | 值 | 必填 |
+| --- | --- | --- |
+| `TURSO_DATABASE_URL` | 上一步的 `libsql://...` | 是 |
+| `TURSO_AUTH_TOKEN` | 上一步的 token | 是 |
+| `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` | 见「AI 问答接入」 | 否 |
+| `NODE_VERSION` | `22`（`render.yaml` 已默认） | — |
+
+Render 的构建命令 `npm run install:all && npm run build`、启动命令 `npm start` 都已在 `render.yaml` 里配好。部署成功后访问 Render 给的 `https://<service>.onrender.com`，首次启动会自动播种内置知识库。
+
+> 免费版 Web Service 会在 15 分钟无访问后休眠，首次唤醒有约 30–60s 冷启动；数据库（Turso）始终在线，数据不会丢。
+> 若想把本地已有数据搬到线上：本地跑起来后用管理页「导出」，再对着线上实例「导入」即可。
 
 ## AI 问答接入（可选）
 

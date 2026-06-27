@@ -13,19 +13,21 @@ export interface EntryVersion {
   createdAt: number;
 }
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS entry_versions (
-    id        TEXT PRIMARY KEY,
-    entryId   TEXT NOT NULL,
-    source    TEXT NOT NULL,
-    title     TEXT NOT NULL,
-    summary   TEXT NOT NULL DEFAULT '',
-    tags      TEXT NOT NULL DEFAULT '[]',
-    snapshot  TEXT NOT NULL,
-    createdAt INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_entry_versions_entry ON entry_versions(entryId, createdAt DESC);
-`);
+export async function ensureEntryVersionTable(): Promise<void> {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS entry_versions (
+      id        TEXT PRIMARY KEY,
+      entryId   TEXT NOT NULL,
+      source    TEXT NOT NULL,
+      title     TEXT NOT NULL,
+      summary   TEXT NOT NULL DEFAULT '',
+      tags      TEXT NOT NULL DEFAULT '[]',
+      snapshot  TEXT NOT NULL,
+      createdAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_entry_versions_entry ON entry_versions(entryId, createdAt DESC);
+  `);
+}
 
 function versionId(): string {
   return `ver_${Date.now().toString(36)}_${Math.floor(Math.random() * 100000).toString(36)}`;
@@ -72,7 +74,7 @@ function rowToVersion(row: Record<string, unknown>): EntryVersion {
   };
 }
 
-export function createEntryVersion(entry: Entry, source = 'manual'): EntryVersion {
+export async function createEntryVersion(entry: Entry, source = 'manual'): Promise<EntryVersion> {
   const version: EntryVersion = {
     id: versionId(),
     entryId: entry.id,
@@ -83,7 +85,7 @@ export function createEntryVersion(entry: Entry, source = 'manual'): EntryVersio
     snapshot: entryToSnapshot(entry),
     createdAt: Date.now(),
   };
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO entry_versions (id, entryId, source, title, summary, tags, snapshot, createdAt)
     VALUES (:id, :entryId, :source, :title, :summary, :tags, :snapshot, :createdAt)
   `).run({
@@ -99,20 +101,20 @@ export function createEntryVersion(entry: Entry, source = 'manual'): EntryVersio
   return version;
 }
 
-export function listEntryVersions(entryId: string): EntryVersion[] {
-  const rows = db.prepare('SELECT * FROM entry_versions WHERE entryId = ? ORDER BY createdAt DESC').all(entryId) as Record<string, unknown>[];
+export async function listEntryVersions(entryId: string): Promise<EntryVersion[]> {
+  const rows = await db.prepare('SELECT * FROM entry_versions WHERE entryId = ? ORDER BY createdAt DESC').all(entryId) as Record<string, unknown>[];
   return rows.map(rowToVersion);
 }
 
-export function getEntryVersion(entryId: string, versionId: string): EntryVersion | null {
-  const row = db.prepare('SELECT * FROM entry_versions WHERE entryId = ? AND id = ?').get(entryId, versionId) as Record<string, unknown> | undefined;
+export async function getEntryVersion(entryId: string, versionId: string): Promise<EntryVersion | null> {
+  const row = await db.prepare('SELECT * FROM entry_versions WHERE entryId = ? AND id = ?').get(entryId, versionId) as Record<string, unknown> | undefined;
   return row ? rowToVersion(row) : null;
 }
 
-export function restoreEntryVersion(entryId: string, versionId: string): Entry | null {
-  const current = getEntry(entryId);
-  const version = getEntryVersion(entryId, versionId);
+export async function restoreEntryVersion(entryId: string, versionId: string): Promise<Entry | null> {
+  const current = await getEntry(entryId);
+  const version = await getEntryVersion(entryId, versionId);
   if (!current || !version) return null;
-  createEntryVersion(current, 'restore-backup');
+  await createEntryVersion(current, 'restore-backup');
   return updateEntry(entryId, version.snapshot);
 }

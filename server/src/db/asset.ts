@@ -29,15 +29,15 @@ function assetRowToMeta(r: Record<string, unknown>): AssetMeta {
 }
 
 // 落库一张 data:base64 图片(按内容哈希去重),返回元信息(含站内 url)
-export function createDataAsset(dataUrl: string, alt = ''): AssetMeta | null {
+export async function createDataAsset(dataUrl: string, alt = ''): Promise<AssetMeta | null> {
   const parsed = parseDataUrl(dataUrl);
   if (!parsed) return null;
   const hash = sha256(parsed.bytes);
-  const existing = db.prepare('SELECT * FROM assets WHERE hash = ? AND kind = \'data\' LIMIT 1').get(hash) as Record<string, unknown> | undefined;
+  const existing = await db.prepare('SELECT * FROM assets WHERE hash = ? AND kind = \'data\' LIMIT 1').get(hash) as Record<string, unknown> | undefined;
   if (existing) return assetRowToMeta(existing);
   const size = sniffImageSize(parsed.bytes);
   const id = 'as_' + hash.slice(0, 16);
-  db.prepare(
+  await db.prepare(
     `INSERT OR IGNORE INTO assets (id, kind, mime, hash, data, url, width, height, alt, size, createdAt)
      VALUES (:id, 'data', :mime, :hash, :data, NULL, :width, :height, :alt, :size, :createdAt)`
   ).run({
@@ -45,23 +45,23 @@ export function createDataAsset(dataUrl: string, alt = ''): AssetMeta | null {
     width: size?.width ?? null, height: size?.height ?? null,
     alt, size: parsed.bytes.length, createdAt: Date.now(),
   });
-  const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown>;
+  const row = await db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown>;
   return assetRowToMeta(row);
 }
 
 // 登记一个外链图片(不下载,仅存引用)
-export function registerExternalAsset(url: string, alt = ''): AssetMeta {
+export async function registerExternalAsset(url: string, alt = ''): Promise<AssetMeta> {
   const id = 'ax_' + sha256(Buffer.from(url)).slice(0, 16);
-  db.prepare(
+  await db.prepare(
     `INSERT OR IGNORE INTO assets (id, kind, mime, hash, data, url, width, height, alt, size, createdAt)
      VALUES (:id, 'external', '', NULL, NULL, :url, NULL, NULL, :alt, 0, :createdAt)`
   ).run({ id, url, alt, createdAt: Date.now() });
-  const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown>;
+  const row = await db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown>;
   return assetRowToMeta(row);
 }
 
 // 统一入口:把任意图片地址(data: / 外链)收敛成站内可用的稳定 url
-export function ingestImageSrc(src: string, alt = ''): AssetMeta | null {
+export async function ingestImageSrc(src: string, alt = ''): Promise<AssetMeta | null> {
   const ref = classifyImageSrc(src);
   if (!ref) return null;
   if (ref.kind === 'data' && ref.dataUrl) return createDataAsset(ref.dataUrl, alt);
@@ -69,13 +69,13 @@ export function ingestImageSrc(src: string, alt = ''): AssetMeta | null {
   return null;
 }
 
-export function getAsset(id: string): AssetMeta | null {
-  const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+export async function getAsset(id: string): Promise<AssetMeta | null> {
+  const row = await db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   return row ? assetRowToMeta(row) : null;
 }
 
-export function getAssetBytes(id: string): { mime: string; bytes: Buffer } | null {
-  const row = db.prepare('SELECT mime, data FROM assets WHERE id = ? AND kind = \'data\'').get(id) as { mime: string; data: Buffer } | undefined;
+export async function getAssetBytes(id: string): Promise<{ mime: string; bytes: Buffer } | null> {
+  const row = await db.prepare('SELECT mime, data FROM assets WHERE id = ? AND kind = \'data\'').get(id) as { mime: string; data: ArrayBuffer | Buffer | null } | undefined;
   if (!row || !row.data) return null;
-  return { mime: row.mime, bytes: Buffer.from(row.data) };
+  return { mime: row.mime, bytes: Buffer.from(row.data as ArrayBuffer) };
 }

@@ -1,6 +1,6 @@
-// Barrel：把 db/ 目录各域模块聚合为单一入口，保持 7 个消费者的 `from './db.js'` 零改动。
-// 模块加载顺序即副作用顺序：client(连接+DDL+迁移+genId) → asset → doc-write → kb → folder → entry → import → seed。
-// migrateKbFolder() 是唯一顶层调用，置于末尾——此时 createKb/ensureFolder 均已就绪。
+// Barrel：把 db/ 目录各域模块聚合为单一入口，保持消费者的 `from './db.js'` 零改动。
+// 副作用统一收敛到 initDb()，由启动入口（index.ts）在 listen 之前 await 调用，
+// 顺序：initSchema(建表+列迁移) → ensureEntryVersionTable → ensureAiJobsTable → migrateKbFolder。
 export * from './db/client.js';
 export * from './db/asset.js';
 export * from './db/doc-write.js';
@@ -12,5 +12,14 @@ export * from './db/entry-version.js';
 export * from './db/import.js';
 export * from './db/ai.js';
 export * from './db/seed.js';
+import { initSchema } from './db/client.js';
+import { ensureEntryVersionTable } from './db/entry-version.js';
+import { ensureAiJobsTable } from './db/ai.js';
 import { migrateKbFolder } from './db/seed.js';
-migrateKbFolder();
+
+export async function initDb(): Promise<void> {
+  await initSchema();
+  await ensureEntryVersionTable();
+  await ensureAiJobsTable();
+  await migrateKbFolder();
+}

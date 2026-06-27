@@ -90,6 +90,13 @@ export interface RewriteEntryOptions {
   signal?: AbortSignal;
 }
 
+// 单次 AI 调用的 token 消耗(与 ai-client.TokenUsage 同构，独立定义避免 types ↔ ai-client 循环依赖)
+export interface AiTokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export type GenerateEntryEvent =
   | { type: 'stage'; message: string }
   | { type: 'context'; items: Array<{ title: string; summary: string }> }
@@ -97,16 +104,19 @@ export type GenerateEntryEvent =
   | { type: 'model-output'; content: string }
   | { type: 'parsed'; title: string; tags: string[]; sections: number }
   | { type: 'image-stage'; message: string }
-  | { type: 'image'; url: string; assetId: string; caption: string; prompt: string };
+  | { type: 'image'; url: string; assetId: string; caption: string; prompt: string }
+  | { type: 'usage'; usage: AiTokenUsage };
 
 export type GenerateKnowledgeBaseEvent =
   | { type: 'stage'; message: string }
   | { type: 'model-delta'; content: string }
   | { type: 'model-output'; content: string }
-  | { type: 'parsed-kb'; kbName: string; folders: number; questions: number };
+  | { type: 'parsed-kb'; kbName: string; folders: number; questions: number }
+  | { type: 'usage'; usage: AiTokenUsage };
 
 export type GenerateFolderTreeEvent =
   | { type: 'stage'; message: string }
   | { type: 'model-delta'; content: string }
   | { type: 'model-output'; content: string }
-  | { type: 'parsed-folders'; title: string; folders: number };
+  | { type: 'parsed-folders'; title: string; folders: number }
+  | { type: 'usage'; usage: AiTokenUsage };

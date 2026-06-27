@@ -259,7 +259,7 @@ export async function generateIllustration(input: EntryInput, ctx: IllustrationC
   if (!image) throw new Error('Qwen Image 未返回图片');
   const caption = `${ctx.title || input.title} 图解`;
   const dataUrl = await downloadImageAsDataUrl(image, signal);
-  const asset = createDataAsset(dataUrl, caption);
+  const asset = await createDataAsset(dataUrl, caption);
   if (!asset) throw new Error('图解落库失败');
   return { assetId: asset.id, url: asset.url, caption, prompt };
 }

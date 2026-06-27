@@ -1,8 +1,5 @@
 import { ChatOpenAI } from '@langchain/openai';
-import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
-import { ChatPromptTemplate } from '@langchain/core/prompts';
-import { StringOutputParser } from '@langchain/core/output_parsers';
-import { RunnableSequence } from '@langchain/core/runnables';
+import { AIMessage, AIMessageChunk, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 
 export type AiRole = 'system' | 'user' | 'assistant';
 
@@ -19,8 +16,17 @@ export interface AiConfig {
   temperature: number;
 }
 
+// 单次 AI 调用的 token 消耗(与 LangChain usage_metadata 对齐)
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface AiRequestOptions extends Partial<Pick<AiConfig, 'model' | 'temperature'>> {
   signal?: AbortSignal;
+  // 流式调用时开启 stream_options.include_usage，使最后一个 chunk 带 usage_metadata
+  streamUsage?: boolean;
 }
 
 export class AiConfigError extends Error {
@@ -58,19 +64,41 @@ function createLangChainModel(options: AiRequestOptions = {}): ChatOpenAI {
     apiKey: config.apiKey,
     model: options.model ?? config.model,
     temperature: options.temperature ?? config.temperature,
+    streamUsage: options.streamUsage ?? false,
     configuration: {
       baseURL: config.baseUrl,
     },
   });
 }
 
-function createTextChain(messages: AiMessage[], options: AiRequestOptions = {}) {
-  const prompt = ChatPromptTemplate.fromMessages(messages.map(toLangChainMessage));
-  return RunnableSequence.from([
-    prompt,
-    createLangChainModel(options),
-    new StringOutputParser(),
-  ]);
+// 从 AIMessage/AIMessageChunk.usage_metadata 提取 token 消耗，缺失或全 0 时返回 null
+function extractUsage(message: AIMessage | AIMessageChunk): TokenUsage | null {
+  const meta = (message as AIMessage).usage_metadata as
+    | { input_tokens?: number; output_tokens?: number; total_tokens?: number }
+    | undefined;
+  if (!meta) return null;
+  const promptTokens = Number(meta.input_tokens ?? 0);
+  const completionTokens = Number(meta.output_tokens ?? 0);
+  const totalTokens = Number(meta.total_tokens ?? (promptTokens + completionTokens));
+  if (!promptTokens && !completionTokens && !totalTokens) return null;
+  return { promptTokens, completionTokens, totalTokens };
+}
+
+// AIMessage.content 可能是 string 或多模态数组，统一规整为纯文本
+function messageContentToText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string') {
+          return (part as { text: string }).text;
+        }
+        return '';
+      })
+      .join('');
+  }
+  return '';
 }
 
 export function getAiConfig(): AiConfig {
@@ -96,9 +124,13 @@ export function getAiConfig(): AiConfig {
 export async function chatCompletion(
   messages: AiMessage[],
   options: AiRequestOptions = {},
+  onUsage?: (usage: TokenUsage) => void,
 ): Promise<string> {
-  const chain = createTextChain(messages, options);
-  const content = (await chain.invoke({}, { signal: options.signal })).trim();
+  const model = createLangChainModel(options);
+  const aiMessage = await model.invoke(messages.map(toLangChainMessage), { signal: options.signal });
+  const usage = extractUsage(aiMessage);
+  if (usage) onUsage?.(usage);
+  const content = messageContentToText(aiMessage.content).trim();
   if (!content) throw new Error('AI 未返回内容');
   return content;
 }
@@ -107,15 +139,19 @@ export async function chatCompletionStream(
   messages: AiMessage[],
   options: AiRequestOptions = {},
   onDelta?: (delta: string) => void,
+  onUsage?: (usage: TokenUsage) => void,
 ): Promise<string> {
   let full = '';
-  const chain = createTextChain(messages, options);
-  const stream = await chain.stream({}, { signal: options.signal });
+  const model = createLangChainModel({ ...options, streamUsage: true });
+  const stream = await model.stream(messages.map(toLangChainMessage), { signal: options.signal });
   for await (const chunk of stream) {
-    const delta = String(chunk ?? '');
-    if (!delta) continue;
-    full += delta;
-    onDelta?.(delta);
+    const delta = messageContentToText(chunk.content);
+    if (delta) {
+      full += delta;
+      onDelta?.(delta);
+    }
+    const usage = extractUsage(chunk);
+    if (usage) onUsage?.(usage);
   }
   const content = full.trim();
   if (!content) throw new Error('AI 未返回内容');

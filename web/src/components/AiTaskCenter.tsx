@@ -139,6 +139,47 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatDuration(ms: number): string {
+  if (!ms || ms < 0) return '<1秒';
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}秒`;
+  const minutes = Math.floor(seconds / 60);
+  const remain = Math.round(seconds % 60);
+  return `${minutes}分${remain}秒`;
+}
+
+function formatTokens(n: number): string {
+  if (!n || n < 0) return '0';
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+// 任务执行耗时与 token 消耗统计条；运行中以 now - startedAt 实时计时，结束后用 durationMs
+function JobStatsBar({ job, now }: { job: AiKnowledgeBaseJob; now: number }): ReactNode {
+  const running = job.status === 'running';
+  const duration = running ? Math.max(0, now - (job.startedAt || job.createdAt)) : job.durationMs;
+  const hasTokens = job.totalTokens > 0 || job.promptTokens > 0 || job.completionTokens > 0;
+  if (!duration && !hasTokens) return null;
+  return (
+    <div className="ik-ai-task-stats">
+      <span className="ik-ai-task-stat">
+        <Clock3 size={13} strokeWidth={2.1} />
+        <b>耗时</b>
+        <small>{formatDuration(duration)}</small>
+      </span>
+      {hasTokens && (
+        <span className="ik-ai-task-stat is-token">
+          <b>Token</b>
+          <small>
+            <em>{formatTokens(job.totalTokens)}</em>
+            <i>输入 {formatTokens(job.promptTokens)} · 输出 {formatTokens(job.completionTokens)}</i>
+          </small>
+        </span>
+      )}
+    </div>
+  );
+}
+
 type JobResult = NonNullable<AiKnowledgeBaseJob['result']>;
 
 function folderPath(result: JobResult, folderId: string | null): string {
@@ -225,6 +266,12 @@ export default function AiTaskCenter({
   const recordCount = sortedJobs.length + sortedLive.length;
   const selectedLive = sortedLive.find((task) => selectedId === liveId(task.id)) ?? null;
   const selectedJob = selectedLive ? null : (sortedJobs.find((job) => job.id === selectedId) ?? sortedJobs[0] ?? null);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (selectedJob?.status !== 'running') return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [selectedJob?.status, selectedJob?.id]);
   const output = splitModelOutput(selectedJob?.modelOutput ?? '');
   const selectedKindLabel = selectedJob ? jobKindLabel(selectedJob) : 'AI 任务';
   const liveItems = selectedJob ? growthItems(selectedJob) : [];
@@ -419,7 +466,7 @@ export default function AiTaskCenter({
                     <span className="ik-ai-task-row-icon">{statusIcon(job.status)}</span>
                     <span className="ik-ai-task-row-main">
                       <b>{job.domain}</b>
-                      <small>{jobKindLabel(job)} · {runningText(job)} · {formatTime(job.updatedAt)}</small>
+                      <small>{jobKindLabel(job)} · {runningText(job)} · {formatTime(job.updatedAt)}{job.status !== 'queued' && job.status !== 'running' && (job.durationMs > 0 || job.totalTokens > 0) ? ` · ${formatDuration(job.durationMs)} · ${formatTokens(job.totalTokens)}` : ''}</small>
                     </span>
                     {job.parsed && (
                       <span className="ik-ai-task-row-count">{job.kind === 'folder-init' ? job.parsed.folders : job.parsed.questions}</span>
@@ -453,6 +500,7 @@ export default function AiTaskCenter({
               </section>
             ) : selectedJob && selectedJob.kind === 'analyze' ? (
               <section className="ik-ai-task-detail">
+                <JobStatsBar job={selectedJob} now={now} />
                 <KbAnalysisPanel
                   kbName={selectedJob.kbName ?? selectedJob.domain}
                   analysis={(
@@ -480,6 +528,8 @@ export default function AiTaskCenter({
                       <small>{selectedKindLabel} · {runningText(selectedJob)} · {parsedText(selectedJob)}</small>
                   </div>
                 </div>
+
+                <JobStatsBar job={selectedJob} now={now} />
 
                 {selectedJob.result && (
                   <button type="button" className="ik-ai-task-open" onClick={() => onOpenResult(selectedJob)}>

@@ -1,4 +1,4 @@
-import { chatCompletion, chatCompletionStream } from './ai-client.js';
+import { chatCompletion, chatCompletionStream, type TokenUsage } from './ai-client.js';
 import type { EntryInput } from './db.js';
 import type {
   GenerateEntryEvent,
@@ -50,7 +50,7 @@ const ENTRY_JSON_SCHEMA = '{"title":"知识点标题","summary":"一句话摘要
 const KB_JSON_SCHEMA = '{"kbName":"知识库名称","description":"一句话说明","containers":[{"sourceId":"folder_unique_id","kind":"folder","parentSourceId":null,"name":"目录名","sort":1}],"entries":[{"sourceId":"entry_unique_id","containerSourceId":"folder_unique_id","title":"知识点标题","question":"面试题","summary":"一句话摘要","tags":["标签"],"shortAnswer":"30-80字直接回答","answer":"展开回答","keyPoints":["关键点"],"followUps":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接复述的回答模板"}]}';
 const FOLDER_JSON_SCHEMA = '{"title":"目录方案名称","description":"一句话说明","folders":[{"path":["一级目录","二级目录"]}]}';
 
-async function repairModelJson(raw: string, schema: string, signal?: AbortSignal): Promise<string> {
+async function repairModelJson(raw: string, schema: string, signal?: AbortSignal, onUsage?: (usage: TokenUsage) => void): Promise<string> {
   const content = await chatCompletion([
     {
       role: 'system',
@@ -66,7 +66,7 @@ async function repairModelJson(raw: string, schema: string, signal?: AbortSignal
         raw.slice(0, 30000),
       ].join('\n'),
     },
-  ], { temperature: 0, signal });
+  ], { temperature: 0, signal }, onUsage);
   return `---JSON---\n${content}`;
 }
 
@@ -76,19 +76,20 @@ async function parseWithRepair<T>(
   parse: (value: string) => T,
   onRepair: () => void,
   signal?: AbortSignal,
+  onUsage?: (usage: TokenUsage) => void,
 ): Promise<T> {
   try {
     return parse(raw);
   } catch {
     onRepair();
-    const repaired = await repairModelJson(raw, schema, signal);
+    const repaired = await repairModelJson(raw, schema, signal, onUsage);
     return parse(repaired);
   }
 }
 
-export async function generateEntryInput(options: GenerateEntryOptions): Promise<EntryInput> {
-  const raw = await chatCompletion(buildGenerateMessages(options), { signal: options.signal });
-  return parseWithRepair(raw, ENTRY_JSON_SCHEMA, (value) => entryInputFromModelOutput(value, options.topic), () => {}, options.signal);
+export async function generateEntryInput(options: GenerateEntryOptions, onUsage?: (usage: TokenUsage) => void): Promise<EntryInput> {
+  const raw = await chatCompletion(buildGenerateMessages(options), { signal: options.signal }, onUsage);
+  return parseWithRepair(raw, ENTRY_JSON_SCHEMA, (value) => entryInputFromModelOutput(value, options.topic), () => {}, options.signal, onUsage);
 }
 
 export async function generateKnowledgeBaseDraftStream(
@@ -98,7 +99,7 @@ export async function generateKnowledgeBaseDraftStream(
   onEvent({ type: 'stage', message: '开始规划知识库目录和高频题' });
   const raw = await chatCompletionStream(buildGenerateKnowledgeBaseMessages(options), { signal: options.signal }, (content) => {
     onEvent({ type: 'model-delta', content });
-  });
+  }, (usage) => onEvent({ type: 'usage', usage }));
   onEvent({ type: 'model-output', content: raw });
   onEvent({ type: 'stage', message: 'Qwen 输出完成，开始解析知识库结构' });
   const draft = await parseWithRepair(
@@ -107,6 +108,7 @@ export async function generateKnowledgeBaseDraftStream(
     (value) => kbDraftFromModelOutput(value, options.domain),
     () => onEvent({ type: 'stage', message: '结构化 JSON 解析失败，正在自动修复' }),
     options.signal,
+    (usage) => onEvent({ type: 'usage', usage }),
   );
   onEvent({
     type: 'parsed-kb',
@@ -124,7 +126,7 @@ export async function generateKnowledgeBasePlanStream(
   onEvent({ type: 'stage', message: 'Agent 第 1 步：规划目录树和知识点清单' });
   const raw = await chatCompletionStream(buildPlanKnowledgeBaseMessages(options), { signal: options.signal }, (content) => {
     onEvent({ type: 'model-delta', content });
-  });
+  }, (usage) => onEvent({ type: 'usage', usage }));
   onEvent({ type: 'model-output', content: raw });
   onEvent({ type: 'stage', message: '规划输出完成，开始解析目录与挂载关系' });
   const draft = await parseWithRepair(
@@ -133,6 +135,7 @@ export async function generateKnowledgeBasePlanStream(
     (value) => kbDraftFromModelOutput(value, options.domain),
     () => onEvent({ type: 'stage', message: '规划 JSON 解析失败，正在自动修复' }),
     options.signal,
+    (usage) => onEvent({ type: 'usage', usage }),
   );
   onEvent({
     type: 'parsed-kb',
@@ -150,7 +153,7 @@ export async function generateFolderTreeDraftStream(
   onEvent({ type: 'stage', message: '开始规划知识库文件目录' });
   const raw = await chatCompletionStream(buildGenerateFolderTreeMessages(options), { signal: options.signal }, (content) => {
     onEvent({ type: 'model-delta', content });
-  });
+  }, (usage) => onEvent({ type: 'usage', usage }));
   onEvent({ type: 'model-output', content: raw });
   onEvent({ type: 'stage', message: 'Qwen 输出完成，开始解析目录结构' });
   const draft = await parseWithRepair(
@@ -159,6 +162,7 @@ export async function generateFolderTreeDraftStream(
     (value) => folderTreeDraftFromModelOutput(value, options.domain),
     () => onEvent({ type: 'stage', message: '目录 JSON 解析失败，正在自动修复' }),
     options.signal,
+    (usage) => onEvent({ type: 'usage', usage }),
   );
   onEvent({
     type: 'parsed-folders',
@@ -181,7 +185,7 @@ export async function generateEntryInputStream(
   onEvent({ type: 'stage', message: '通过 LangChain 调用 Qwen 生成内容' });
   const raw = await chatCompletionStream(buildGenerateMessages(options), { signal: options.signal }, (content) => {
     onEvent({ type: 'model-delta', content });
-  });
+  }, (usage) => onEvent({ type: 'usage', usage }));
   onEvent({ type: 'model-output', content: raw });
   onEvent({ type: 'stage', message: 'Qwen 输出完成，开始解析结构' });
   const input = await parseWithRepair(
@@ -190,6 +194,7 @@ export async function generateEntryInputStream(
     (value) => entryInputFromModelOutput(value, options.topic),
     () => onEvent({ type: 'stage', message: '结构化 JSON 解析失败，正在自动修复' }),
     options.signal,
+    (usage) => onEvent({ type: 'usage', usage }),
   );
   onEvent({
     type: 'parsed',
@@ -209,7 +214,7 @@ export async function rewriteEntryInputStream(
   onEvent({ type: 'stage', message: '通过 LangChain 调用 Qwen 改写知识点' });
   const raw = await chatCompletionStream(buildRewriteMessages(options), { signal: options.signal }, (content) => {
     onEvent({ type: 'model-delta', content });
-  });
+  }, (usage) => onEvent({ type: 'usage', usage }));
   onEvent({ type: 'model-output', content: raw });
   onEvent({ type: 'stage', message: 'Qwen 输出完成，开始解析改写结果' });
   const input = await parseWithRepair(
@@ -218,6 +223,7 @@ export async function rewriteEntryInputStream(
     (value) => entryInputFromModelOutput(value, entry.title),
     () => onEvent({ type: 'stage', message: '改写 JSON 解析失败，正在自动修复' }),
     options.signal,
+    (usage) => onEvent({ type: 'usage', usage }),
   );
   onEvent({
     type: 'parsed',

@@ -50,6 +50,11 @@ export interface AiKnowledgeBaseJob {
   error?: string;
   createdAt: number;
   updatedAt: number;
+  startedAt: number;
+  durationMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
 }
 
 export async function fetchAiJobs(): Promise<AiKnowledgeBaseJob[]> {

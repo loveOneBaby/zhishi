@@ -6,9 +6,9 @@ export function stableImportId(prefix: string, seed: string): string {
   return `${prefix}_${createHash('sha1').update(seed).digest('hex').slice(0, 18)}`;
 }
 
-export function folderPathLabel(folderId: string | null): string {
+export async function folderPathLabel(folderId: string | null): Promise<string> {
   if (!folderId) return '根层级';
-  const folders = listFolders();
+  const folders = await listFolders();
   const byId = new Map(folders.map((folder) => [folder.id, folder]));
   const names: string[] = [];
   const seen = new Set<string>();
