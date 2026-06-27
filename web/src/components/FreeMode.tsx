@@ -219,10 +219,10 @@ export default function FreeMode(props: Props): ReactNode {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `knowledge-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `knowledge-bases-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      toast('已导出全量知识点', 'success');
+      toast('已导出全部知识库', 'success');
     } catch (err) {
       toast('导出失败：' + (err instanceof Error ? err.message : String(err)), 'error');
     }
@@ -763,6 +763,7 @@ export default function FreeMode(props: Props): ReactNode {
           renameCategory={onRenameKbCategory}
           deleteCategory={onDeleteKbCategory}
           moveKbToCategory={onMoveKbToCategory}
+          onExportAll={handleExport}
           openKb={openKb}
           renameKbAction={renameKbAction}
           deleteKbAction={deleteKbAction}

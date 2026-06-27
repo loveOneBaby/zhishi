@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { Check, ChevronRight, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Tags, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, Download, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Tags, Trash2 } from 'lucide-react';
 import type { Entry, Folder as KbFolder, KnowledgeBase, KbCategory } from '../../types';
 import ImportPreviewModal from '../ImportPreviewModal';
 import CommandDialog from '../CommandDialog';
@@ -35,6 +35,7 @@ interface KbGalleryProps {
   renameCategory: (id: string, name: string) => Promise<void>;
   deleteCategory: (id: string) => Promise<void>;
   moveKbToCategory: (id: string, categoryId?: string | null) => Promise<void>;
+  onExportAll: () => Promise<void>;
   openKb: (kb: KnowledgeBase) => void;
   renameKbAction: (kb: KnowledgeBase) => void;
   deleteKbAction: (kb: KnowledgeBase) => void;
@@ -57,7 +58,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
   const {
     kbs, categories, entries, folders, entriesOfKb, newKb,
     createCategory, renameCategory, deleteCategory, moveKbToCategory,
-    openKb, renameKbAction, deleteKbAction, importPreview, importing, onCloseImportPreview,
+    onExportAll, openKb, renameKbAction, deleteKbAction, importPreview, importing, onCloseImportPreview,
     handleConfirmImport, commandDialog,
   } = props;
 
@@ -241,6 +242,14 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
           </div>
         </div>
         <div className="ik-kb-gallery-actions">
+          <button
+            className="ik-btn ik-btn-secondary ik-btn-size-md"
+            onClick={() => {
+              void onExportAll();
+            }}
+          >
+            <span className="ik-btn-leading-icon"><Download size={15} strokeWidth={2.3} /></span>导出全部
+          </button>
           <button className="ik-btn ik-btn-secondary ik-btn-size-md" onClick={() => setCategoryCommand({ kind: 'create', parentId: activeCategoryId, parentName: activeCategoryId ? activeCategoryName : undefined })}>
             <span className="ik-btn-leading-icon"><FolderPlus size={15} strokeWidth={2.4} /></span>新建分类
           </button>
@@ -340,9 +349,6 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
               <span>{activeCategoryName}</span>
               <b>{visibleKbs.length} 个知识库</b>
             </div>
-            <button type="button" className="ik-kb-section-create" onClick={createKbInActiveCategory}>
-              <Plus size={14} strokeWidth={2.3} />新建
-            </button>
           </div>
 
           {visibleKbs.length > 0 ? (
@@ -379,7 +385,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                       <span className="ik-kb-stat"><b>{n}</b> 知识点</span>
                     </div>
                     <details className="ik-kb-move-menu" onClick={(event) => event.stopPropagation()}>
-                      <summary>移动分类</summary>
+                      <summary title="移动分类" aria-label="移动分类"><Tags size={14} strokeWidth={2.15} /></summary>
                       <div className="ik-kb-move-popover">
                         <div className="ik-kb-move-title">移动到</div>
                         {categoryOptions.map((option) => {
