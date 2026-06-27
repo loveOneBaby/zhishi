@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { ChevronRight, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Tags, Trash2 } from 'lucide-react';
 import type { Entry, Folder as KbFolder, KnowledgeBase, KbCategory } from '../../types';
 import ImportPreviewModal from '../ImportPreviewModal';
 import CommandDialog from '../CommandDialog';
@@ -162,10 +162,11 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
   };
 
   const categoryOptions = [
-    { value: '', label: '未分类' },
+    { value: '', label: '未分类', depth: 0 },
     ...allCategoryRows.map((row) => ({
       value: row.category.id,
-      label: `${'　'.repeat(row.depth)}${row.category.name}`,
+      label: row.category.name,
+      depth: row.depth,
     })),
   ];
 
@@ -350,6 +351,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                 const n = entriesOfKb(kb.id).length;
                 const fn = folders.filter((f) => f.kbId === kb.id).length;
                 const category = kb.categoryId ? categoryById.get(kb.categoryId) : undefined;
+                const currentCategoryValue = kb.categoryId ?? '';
                 return (
                   <div
                     className="ik-kb-card"
@@ -358,6 +360,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                     tabIndex={0}
                     onClick={() => openKb(kb)}
                     onKeyDown={(e) => {
+                      if ((e.target as HTMLElement).closest('button, details, summary, select, input, a')) return;
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
                         openKb(kb);
@@ -367,27 +370,48 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                     <RowActions onRename={() => renameKbAction(kb)} onDelete={() => deleteKbAction(kb)} />
                     <div className="ik-kb-tile"><LibraryBig size={22} strokeWidth={1.95} /></div>
                     <div className="ik-kb-name">{kb.name}</div>
-                    <div className="ik-kb-card-category">{categoryName(category)}</div>
+                    <div className="ik-kb-card-category">
+                      <Tags size={13} strokeWidth={2.05} />
+                      <span>{categoryName(category)}</span>
+                    </div>
                     <div className="ik-kb-stats">
                       <span className="ik-kb-stat"><b>{fn}</b> 文件夹</span>
                       <span className="ik-kb-stat"><b>{n}</b> 知识点</span>
                     </div>
-                    <label className="ik-kb-move-label" onClick={(event) => event.stopPropagation()}>
-                      <span>分类</span>
-                      <select
-                        value={kb.categoryId ?? ''}
-                        onChange={(event) => {
-                          const next = event.currentTarget.value || null;
-                          void moveKbToCategory(kb.id, next)
-                            .then(() => toast('已移动知识库分类', 'success'))
-                            .catch((err) => toast('移动分类失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
-                        }}
-                      >
-                        {categoryOptions.map((option) => (
-                          <option key={option.value || 'none'} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </label>
+                    <details className="ik-kb-move-menu" onClick={(event) => event.stopPropagation()}>
+                      <summary>移动分类</summary>
+                      <div className="ik-kb-move-popover">
+                        <div className="ik-kb-move-title">移动到</div>
+                        {categoryOptions.map((option) => {
+                          const selected = option.value === currentCategoryValue;
+                          return (
+                            <button
+                              type="button"
+                              key={option.value || 'none'}
+                              className={`ik-kb-move-option ${selected ? 'is-selected' : ''}`}
+                              style={{ paddingLeft: 10 + option.depth * 14 } as CSSProperties}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                if (selected) {
+                                  event.currentTarget.closest('details')?.removeAttribute('open');
+                                  return;
+                                }
+                                const next = option.value || null;
+                                void moveKbToCategory(kb.id, next)
+                                  .then(() => {
+                                    event.currentTarget.closest('details')?.removeAttribute('open');
+                                    toast('已移动知识库分类', 'success');
+                                  })
+                                  .catch((err) => toast('移动分类失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
+                              }}
+                            >
+                              <span>{option.label}</span>
+                              {selected && <Check size={13} strokeWidth={2.2} />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </details>
                   </div>
                 );
               })}

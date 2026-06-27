@@ -189,6 +189,7 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
   const insertCategory = db.prepare(
     'INSERT OR IGNORE INTO kb_categories (id, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)'
   );
+  const categoryExistsStmt = db.prepare('SELECT 1 FROM kb_categories WHERE id = ?');
   const insertFolder = db.prepare(
     'INSERT OR IGNORE INTO folders (id, kbId, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
   );
@@ -227,7 +228,8 @@ export function importEntries(payload: ImportPayload, replace: boolean): { impor
     const kbIdMap = new Map<string, string>();   // 载荷原 id → 实际入库 id
     for (const k of payload.kbs ?? []) {
       const now = Date.now();
-      const categoryId = k.categoryId ? (categoryIdMap.get(k.categoryId) ?? k.categoryId) : null;
+      const candidateCategoryId = k.categoryId ? (categoryIdMap.get(k.categoryId) ?? k.categoryId) : null;
+      const categoryId = candidateCategoryId && categoryExistsStmt.get(candidateCategoryId) ? candidateCategoryId : null;
       if (k.id) {
         insertKb.run(k.id, k.name, categoryId, k.sort ?? 0, now, now);
         kbIdMap.set(k.id, k.id);

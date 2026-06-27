@@ -84,6 +84,7 @@ const kbColumns = db.prepare('PRAGMA table_info(knowledge_bases)').all() as { na
 if (!kbColumns.some((c) => c.name === 'categoryId')) {
   db.exec('ALTER TABLE knowledge_bases ADD COLUMN categoryId TEXT');
 }
+db.exec('UPDATE knowledge_bases SET categoryId = NULL WHERE categoryId IS NOT NULL AND categoryId NOT IN (SELECT id FROM kb_categories)');
 
 const entryColumns = db.prepare('PRAGMA table_info(entries)').all() as { name: string }[];
 if (!entryColumns.some((c) => c.name === 'sort')) {
