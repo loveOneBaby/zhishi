@@ -1,4 +1,5 @@
-import { createClient, type Client, type InArgs, type InStatement, type InValue, type ResultSet, type Transaction } from '@libsql/client';
+import { createClient as createHttpClient } from '@libsql/client/http';
+import type { Client, InArgs, InStatement, InValue, ResultSet, Transaction } from '@libsql/client';
 import fs from 'node:fs';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -10,6 +11,8 @@ import type { Block } from '../blocks.js';
 // ───────────────────────── 连接 ─────────────────────────
 // 统一用 @libsql/client：本地场景 file:./data/knowledge.db（离线、可直接读现有库文件），
 // 远程场景 libsql://<db>.turso.io + TURSO_AUTH_TOKEN。由环境变量按场景切换。
+// 注意：不 import 主入口 '@libsql/client'（它会预加载原生 libsql 二进制，在无该二进制的线上环境会崩）；
+// 远程走 '@libsql/client/http'（纯 HTTP，不加载原生），仅本地 file: 模式才动态加载原生 '@libsql/client/sqlite3'。
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DEFAULT_FILE = path.join(DATA_DIR, 'knowledge.db');
 
@@ -23,7 +26,14 @@ const DB_URL = resolveDbUrl();
 // 本地 file: 模式需要目录存在（远程无文件）
 if (DB_URL.startsWith('file:') && !fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const client: Client = createClient({ url: DB_URL, authToken: process.env.TURSO_AUTH_TOKEN });
+let client: Client;
+if (DB_URL.startsWith('file:')) {
+  // 本地 file:：按需加载原生 libsql（仅本地开发触发；远程部署走 HTTP 不加载原生）
+  const { createClient: createSqlite3Client } = await import('@libsql/client/sqlite3');
+  client = createSqlite3Client({ url: DB_URL });
+} else {
+  client = createHttpClient({ url: DB_URL, authToken: process.env.TURSO_AUTH_TOKEN });
+}
 
 // ───────────────────────── 异步 shim ─────────────────────────
 // 用 libSQL client 实现，对外保留原 node:sqlite 的 db.prepare(sql).get/.all/.run + db.exec 调用形状（返回 Promise）。
