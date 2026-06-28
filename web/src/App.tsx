@@ -678,8 +678,9 @@ export default function App() {
 
   // 先用列表轻量数据（标题/摘要/标签立即可见），fullEntry 到了替换完整 doc
   const openEntry = openId ? (fullEntry && fullEntry.id === openId ? fullEntry : entries.find((e) => e.id === openId) ?? null) : null;
+  // 搜索列表模式：优先用 openEntry（含完整 doc），否则回退到 results 轻量数据
   const selectedListEntry = isSearchList
-    ? (results.find((e) => e.id === openId) ?? results[Math.min(sel, Math.max(0, results.length - 1))] ?? null)
+    ? (openEntry ?? results.find((e) => e.id === openId) ?? results[Math.min(sel, Math.max(0, results.length - 1))] ?? null)
     : null;
   const selectedListId = selectedListEntry?.id ?? null;
   const modalEntry = isSearchList ? null : openEntry;
