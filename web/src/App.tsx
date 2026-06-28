@@ -671,12 +671,13 @@ export default function App() {
   // openId 变化时按需获取完整 entry（列表只有摘要，详情需要 doc/intro/nodes）
   useEffect(() => {
     if (!openId) { setFullEntry(null); return; }
+    setFullEntry(null); // 先清空，避免用旧 entry 的 doc
     let cancelled = false;
     fetchEntry(openId).then((e) => { if (!cancelled) setFullEntry(e); }).catch(() => {});
     return () => { cancelled = true; };
   }, [openId]);
 
-  const openEntry = openId ? (fullEntry && fullEntry.id === openId ? fullEntry : entries.find((e) => e.id === openId) ?? null) : null;
+  const openEntry = openId ? (fullEntry && fullEntry.id === openId ? fullEntry : null) : null;
   const selectedListEntry = isSearchList
     ? (results.find((e) => e.id === openId) ?? results[Math.min(sel, Math.max(0, results.length - 1))] ?? null)
     : null;

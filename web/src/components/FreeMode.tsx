@@ -93,8 +93,8 @@ export default function FreeMode(props: Props): ReactNode {
   const currentKb = kbs.find((k) => k.id === freeKb) ?? null;
   const kbEntries = useMemo(() => (freeKb ? entriesOfKb(freeKb) : []), [entriesOfKb, freeKb]);
   const selectedEntry = useMemo(
-    () => (fullEntry && fullEntry.id === selectedEntryId ? fullEntry : null) ?? kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
-    [kbEntries, selectedEntryId, fullEntry],
+    () => (fullEntry && fullEntry.id === selectedEntryId ? fullEntry : null),
+    [selectedEntryId, fullEntry],
   );
   const currentFolderId = selectedEntry?.folderId ?? freeFolder;
   const currentFolderChain = useMemo(() => folderChain(folders, currentFolderId), [currentFolderId, folders]);
@@ -151,6 +151,7 @@ export default function FreeMode(props: Props): ReactNode {
   // 列表只有摘要，选中时按需获取完整 doc/intro/nodes
   useEffect(() => {
     if (!selectedEntryId) { setFullEntry(null); return; }
+    setFullEntry(null); // 先清空，避免用旧 entry 的 doc
     let cancelled = false;
     onFetchEntry(selectedEntryId).then((e) => { if (!cancelled) setFullEntry(e); }).catch(() => {});
     return () => { cancelled = true; };
