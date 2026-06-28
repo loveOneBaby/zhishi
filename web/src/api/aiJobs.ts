@@ -30,39 +30,9 @@ export interface KbAnalysis {
   suggestions: KbSuggestion[];
 }
 
-export type AgentEditActionKind = 'create-folder' | 'rename-folder' | 'create-entry' | 'rewrite-entry' | 'move-entry' | 'note';
-
-export interface AgentEditAction {
-  id: string;
-  kind: AgentEditActionKind;
-  title: string;
-  detail: string;
-  folderId?: string | null;
-  folderRef?: string;
-  entryId?: string;
-  name?: string;
-  topic?: string;
-  instruction?: string;
-  ref?: string;
-}
-
-export interface AgentEditPlan {
-  summary: string;
-  actions: AgentEditAction[];
-}
-
-export interface AgentEditRollback {
-  createdFolderIds: string[];
-  createdEntryIds: string[];
-  updatedEntries: Entry[];
-  renamedFolders: Folder[];
-  appliedAt: number;
-  revertedAt?: number;
-}
-
 export interface AiKnowledgeBaseJob {
   id: string;
-  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze' | 'agent-edit';
+  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze';
   domain: string;
   questionCount: number;
   kbId?: string;
@@ -70,16 +40,12 @@ export interface AiKnowledgeBaseJob {
   entryId?: string;
   parentId?: string | null;
   targetPath?: string;
-  instruction?: string;
   status: AiJobStatus;
   logs: string[];
   modelOutput: string;
   parsed?: { kbName: string; folders: number; questions: number };
-  plan?: AgentEditPlan | unknown;
   result?: GenerateKnowledgeBaseResult;
   analysis?: KbAnalysis;
-  agentPhase?: 'draft' | 'applying' | 'applied' | 'reverted';
-  rollback?: AgentEditRollback;
   resumable?: boolean;
   error?: string;
   createdAt: number;
@@ -105,14 +71,6 @@ export async function cancelAiJob(id: string): Promise<AiKnowledgeBaseJob> {
 
 export async function retryAiJob(id: string): Promise<AiKnowledgeBaseJob> {
   return apiPostKey<AiKnowledgeBaseJob>(`/ai/jobs/${encodeURIComponent(id)}/retry`, {}, 'job');
-}
-
-export async function applyAiJobDraft(id: string): Promise<AiKnowledgeBaseJob> {
-  return apiPostKey<AiKnowledgeBaseJob>(`/ai/jobs/${encodeURIComponent(id)}/apply`, {}, 'job');
-}
-
-export async function revertAiJobApply(id: string): Promise<AiKnowledgeBaseJob> {
-  return apiPostKey<AiKnowledgeBaseJob>(`/ai/jobs/${encodeURIComponent(id)}/revert`, {}, 'job');
 }
 
 export async function clearAiJobHistory(): Promise<AiKnowledgeBaseJob[]> {

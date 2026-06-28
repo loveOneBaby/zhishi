@@ -51,20 +51,6 @@ function securityHeaders(req: Request, res: Response, next: NextFunction): void 
 // 写操作(POST/PUT/DELETE)按 IP 限流,兜底防刷;读接口不限。
 const writeLimiter = rateLimit({ windowMs: 60_000, max: 120, message: '操作过于频繁,请稍后再试' });
 
-function firstForwardedHost(value: string): string {
-  return value.split(',')[0]?.trim() ?? '';
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
-}
-
-function sameOriginWriteGuard(req: Request, res: Response, next: NextFunction): void {
-  // 暂时禁用：Render 平台的 origin/host 头行为复杂，容易误杀。
-  // 写操作已由 requireAuth 中间件保护，无需额外同源校验。
-  next();
-}
-
 export function createApp() {
   const app = express();
   // Render 等平台反代:信任一跳,使 req.ip / req.secure 取真实客户端。
@@ -75,7 +61,6 @@ export function createApp() {
   app.use('/api', express.json({ limit: '256kb' }));
 
   const api = express.Router();
-  api.use(sameOriginWriteGuard);
   // 写操作统一限流(在鉴权前,429 不必走鉴权)
   api.use((req, res, next) => {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();

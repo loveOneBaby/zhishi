@@ -21,31 +21,24 @@ export async function createKbCategory(name: string, parentId?: string | null): 
   const trimmed = name.trim();
   if (!trimmed) return null;
   const normalizedParentId = normalizeParentId(parentId);
+  if (normalizedParentId && !await getKbCategory(normalizedParentId)) return null;
 
   const now = Date.now();
   const id = genId('kbc');
-  const row = normalizedParentId
-    ? await db.prepare(`
-      INSERT INTO kb_categories (id, parentId, name, sort, createdAt, updatedAt)
-      SELECT ?, ?, ?, COALESCE((SELECT MAX(sort) FROM kb_categories WHERE parentId = ?), 0) + 1, ?, ?
-      WHERE EXISTS (SELECT 1 FROM kb_categories WHERE id = ?)
-      RETURNING *
-    `).get(id, normalizedParentId, trimmed, normalizedParentId, now, now, normalizedParentId) as unknown as KbCategoryRow | undefined
-    : await db.prepare(`
-      INSERT INTO kb_categories (id, parentId, name, sort, createdAt, updatedAt)
-      SELECT ?, NULL, ?, COALESCE((SELECT MAX(sort) FROM kb_categories WHERE parentId IS NULL), 0) + 1, ?, ?
-      RETURNING *
-    `).get(id, trimmed, now, now) as unknown as KbCategoryRow | undefined;
-  return row ? rowToKbCategory(row) : null;
+  const maxRow = normalizedParentId
+    ? await db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM kb_categories WHERE parentId = ?').get(normalizedParentId) as { m: number }
+    : await db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM kb_categories WHERE parentId IS NULL').get() as { m: number };
+  await db.prepare('INSERT INTO kb_categories (id, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, normalizedParentId, trimmed, Number(maxRow.m) + 1, now, now);
+  return getKbCategory(id);
 }
 
 export async function renameKbCategory(id: string, name: string): Promise<KbCategory | null> {
   const trimmed = name.trim();
   if (!trimmed) return null;
   const now = Date.now();
-  const row = await db.prepare('UPDATE kb_categories SET name = ?, updatedAt = ? WHERE id = ? RETURNING *')
-    .get(trimmed, now, id) as unknown as KbCategoryRow | undefined;
-  return row ? rowToKbCategory(row) : null;
+  await db.prepare('UPDATE kb_categories SET name = ?, updatedAt = ? WHERE id = ?').run(trimmed, now, id);
+  return getKbCategory(id);
 }
 
 export async function deleteKbCategory(id: string): Promise<boolean> {

@@ -17,7 +17,7 @@ html, body {
 @keyframes ik-pop { from { opacity: 0; transform: translateY(6px) scale(.99); } to { opacity: 1; transform: none; } }
 @keyframes ik-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes ik-spin { to { transform: rotate(360deg); } }
-@keyframes ik-export-pulse { 0%, 100% { opacity: .72; } 50% { opacity: 1; } }
 input::placeholder { color: var(--mut); opacity: .7; }
 textarea::placeholder { color: var(--mut); opacity: .7; }
 button { font-family: inherit; }
+

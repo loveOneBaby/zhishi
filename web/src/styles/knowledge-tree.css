@@ -102,32 +102,6 @@
 .ik-kt-iconbtn.is-active svg {
   opacity: 1;
 }
-.ik-kt-export-btn {
-  position: relative;
-  overflow: hidden;
-}
-.ik-kt-export-btn:disabled {
-  cursor: progress;
-  opacity: 1;
-}
-.ik-kt-export-fill {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  z-index: 0;
-  width: 0;
-  height: 3px;
-  border-radius: 999px;
-  background: var(--accent);
-  transition: width 180ms ease;
-}
-.ik-kt-export-btn svg {
-  position: relative;
-  z-index: 1;
-}
-.ik-kt-export-btn.is-exporting svg {
-  animation: ik-export-pulse 1s ease-in-out infinite;
-}
 .ik-kt-tool-sep {
   width: 1px;
   align-self: stretch;
@@ -545,10 +519,6 @@
 }
 .ik-kt-menu button:hover {
   background: var(--sel);
-}
-.ik-kt-menu button:disabled {
-  cursor: progress;
-  opacity: .62;
 }
 .ik-kt-menu button.danger {
   color: var(--danger);

@@ -35,20 +35,8 @@ function productionAuthRequired(): boolean {
     || Boolean(clean(process.env.RENDER) || clean(process.env.TURSO_DATABASE_URL));
 }
 
-function strongTokenRequired(): boolean {
-  return enabledFlag(process.env.REQUIRE_AUTH)
-    || process.env.NODE_ENV === 'production'
-    || Boolean(clean(process.env.RENDER));
-}
-
 export function assertAuthConfiguredForProduction(): void {
-  const token = getAuthToken();
-  if (token) {
-    if (strongTokenRequired() && token.length < 32) {
-      throw new Error('线上环境 AUTH_TOKEN 长度至少 32 个字符，请使用随机强令牌。');
-    }
-    return;
-  }
+  if (getAuthToken()) return;
   if (!productionAuthRequired()) return;
   if (enabledFlag(process.env.ALLOW_UNAUTHENTICATED_ADMIN)) return;
   throw new Error('线上环境必须设置 AUTH_TOKEN；如确认为一次性内网开发环境，可显式设置 ALLOW_UNAUTHENTICATED_ADMIN=true。');

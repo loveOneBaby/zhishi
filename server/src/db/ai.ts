@@ -1,7 +1,7 @@
 import { db, tryAlter } from './client.js';
 
 export type StoredAiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-export type StoredAiJobKind = 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze' | 'agent-edit';
+export type StoredAiJobKind = 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze';
 
 export interface StoredAiJob {
   id: string;
@@ -13,7 +13,6 @@ export interface StoredAiJob {
   entryId?: string;
   parentId?: string | null;
   targetPath?: string;
-  instruction?: string;
   status: StoredAiJobStatus;
   logs: string[];
   modelOutput: string;
@@ -21,8 +20,6 @@ export interface StoredAiJob {
   plan?: unknown;
   result?: unknown;
   analysis?: unknown;
-  agentPhase?: 'draft' | 'applying' | 'applied' | 'reverted';
-  rollback?: unknown;
   error?: string;
   abortRequested?: boolean;
   createdAt: number;
@@ -45,15 +42,12 @@ export async function ensureAiJobsTable(): Promise<void> {
       kbName          TEXT,
       parentId        TEXT,
       targetPath      TEXT,
-      instruction     TEXT,
       status          TEXT NOT NULL,
       logs            TEXT NOT NULL DEFAULT '[]',
       modelOutput     TEXT NOT NULL DEFAULT '',
       parsed          TEXT,
       plan            TEXT,
       result          TEXT,
-      agentPhase      TEXT,
-      rollback        TEXT,
       error           TEXT,
       abortRequested  INTEGER NOT NULL DEFAULT 0,
       createdAt       INTEGER NOT NULL,
@@ -69,10 +63,7 @@ export async function ensureAiJobsTable(): Promise<void> {
   // 列迁移：列已存在则忽略（去掉对 PRAGMA table_info 的依赖）
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN plan TEXT');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN analysis TEXT');
-  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN agentPhase TEXT');
-  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN rollback TEXT');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN entryId TEXT');
-  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN instruction TEXT');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN startedAt INTEGER NOT NULL DEFAULT 0');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN durationMs INTEGER NOT NULL DEFAULT 0');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN promptTokens INTEGER NOT NULL DEFAULT 0');
@@ -91,12 +82,7 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
 
 function rowToJob(row: Record<string, unknown>): StoredAiJob {
   const rawKind = String(row.kind);
-  const kind: StoredAiJobKind = rawKind === 'folder-init'
-    || rawKind === 'folder-entries'
-    || rawKind === 'analyze'
-    || rawKind === 'agent-edit'
-    ? rawKind
-    : 'kb-generate';
+  const kind: StoredAiJobKind = rawKind === 'folder-init' || rawKind === 'folder-entries' || rawKind === 'analyze' ? rawKind : 'kb-generate';
   return {
     id: String(row.id),
     kind,
@@ -107,7 +93,6 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
     entryId: typeof row.entryId === 'string' && row.entryId ? row.entryId : undefined,
     parentId: row.parentId == null ? null : String(row.parentId),
     targetPath: typeof row.targetPath === 'string' && row.targetPath ? row.targetPath : undefined,
-    instruction: typeof row.instruction === 'string' && row.instruction ? row.instruction : undefined,
     status: String(row.status ?? 'failed') as StoredAiJobStatus,
     logs: parseJson<string[]>(String(row.logs ?? '[]'), []),
     modelOutput: String(row.modelOutput ?? ''),
@@ -115,10 +100,6 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
     plan: parseJson<unknown | undefined>(row.plan as string | null, undefined),
     result: parseJson<unknown | undefined>(row.result as string | null, undefined),
     analysis: parseJson<unknown | undefined>(row.analysis as string | null, undefined),
-    agentPhase: typeof row.agentPhase === 'string' && row.agentPhase
-      ? row.agentPhase as StoredAiJob['agentPhase']
-      : undefined,
-    rollback: parseJson<unknown | undefined>(row.rollback as string | null, undefined),
     error: typeof row.error === 'string' && row.error ? row.error : undefined,
     abortRequested: Number(row.abortRequested ?? 0) === 1,
     createdAt: Number(row.createdAt ?? 0),
@@ -134,14 +115,12 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
 export async function saveAiJob(job: StoredAiJob): Promise<void> {
   await db.prepare(`
     INSERT INTO ai_jobs (
-      id, kind, domain, questionCount, kbId, kbName, entryId, parentId, targetPath, instruction, status,
+      id, kind, domain, questionCount, kbId, kbName, entryId, parentId, targetPath, status,
       logs, modelOutput, parsed, plan, result, analysis, error, abortRequested, createdAt, updatedAt,
-      agentPhase, rollback,
       startedAt, durationMs, promptTokens, completionTokens, totalTokens
     ) VALUES (
-      :id, :kind, :domain, :questionCount, :kbId, :kbName, :entryId, :parentId, :targetPath, :instruction, :status,
+      :id, :kind, :domain, :questionCount, :kbId, :kbName, :entryId, :parentId, :targetPath, :status,
       :logs, :modelOutput, :parsed, :plan, :result, :analysis, :error, :abortRequested, :createdAt, :updatedAt,
-      :agentPhase, :rollback,
       :startedAt, :durationMs, :promptTokens, :completionTokens, :totalTokens
     )
     ON CONFLICT(id) DO UPDATE SET
@@ -153,7 +132,6 @@ export async function saveAiJob(job: StoredAiJob): Promise<void> {
       entryId=excluded.entryId,
       parentId=excluded.parentId,
       targetPath=excluded.targetPath,
-      instruction=excluded.instruction,
       status=excluded.status,
       logs=excluded.logs,
       modelOutput=excluded.modelOutput,
@@ -161,8 +139,6 @@ export async function saveAiJob(job: StoredAiJob): Promise<void> {
       plan=excluded.plan,
       result=excluded.result,
       analysis=excluded.analysis,
-      agentPhase=excluded.agentPhase,
-      rollback=excluded.rollback,
       error=excluded.error,
       abortRequested=excluded.abortRequested,
       updatedAt=excluded.updatedAt,
@@ -178,15 +154,12 @@ export async function saveAiJob(job: StoredAiJob): Promise<void> {
     plan: job.plan ? JSON.stringify(job.plan) : null,
     result: job.result ? JSON.stringify(job.result) : null,
     analysis: job.analysis ? JSON.stringify(job.analysis) : null,
-    agentPhase: job.agentPhase ?? null,
-    rollback: job.rollback ? JSON.stringify(job.rollback) : null,
     error: job.error ?? null,
     kbId: job.kbId ?? null,
     kbName: job.kbName ?? null,
     entryId: job.entryId ?? null,
     parentId: job.parentId ?? null,
     targetPath: job.targetPath ?? null,
-    instruction: job.instruction ?? null,
     abortRequested: job.abortRequested ? 1 : 0,
   });
 }

@@ -17,15 +17,10 @@ interface Props {
   onPickTag: (tag: string) => void;
   viewType: 'list' | 'canvas';
   onViewType: (v: 'list' | 'canvas') => void;
-  doubleCommandEnabled?: boolean;
-}
-
-function normalizeSearchInput(value: string): string {
-  return value.replace(/、/g, '/');
 }
 
 // 顶栏搜索框:输入 "/" 唤起知识库选择,选中后检索锁定到该库;空输入按退格解除锁定。
-export default function SearchBox({ query, onQuery, onClear, kbs, searchKb, onScopeKb, inputRef, kpEntries, kpOpen, setKpOpen, onPickTag, viewType, onViewType, doubleCommandEnabled = true }: Props) {
+export default function SearchBox({ query, onQuery, onClear, kbs, searchKb, onScopeKb, inputRef, kpEntries, kpOpen, setKpOpen, onPickTag, viewType, onViewType }: Props) {
   const kpTags = useMemo(() => {
     const counts = new Map<string, number>();
     for (const e of kpEntries) for (const raw of e.tags) { const t = raw.trim(); if (t) counts.set(t, (counts.get(t) ?? 0) + 1); }
@@ -50,9 +45,6 @@ export default function SearchBox({ query, onQuery, onClear, kbs, searchKb, onSc
   const open = (slashActive || pickerOpen) && kbs.length > 0;
   const [sel, setSel] = useState(0);
   useEffect(() => { setSel(0); }, [token, slashActive, pickerOpen]);
-  useEffect(() => {
-    if (kpOpen) setPickerOpen(false);
-  }, [kpOpen]);
 
   // 选择器(点胶囊)打开时,点外部关闭
   useEffect(() => {
@@ -84,14 +76,9 @@ export default function SearchBox({ query, onQuery, onClear, kbs, searchKb, onSc
   };
 
   const placeholder = scopeName ? `在「${scopeName}」中搜索…` : '搜索知识点（输入 / 选择知识库）';
-  const toggleKeyPoints = (): void => {
-    setPickerOpen(false);
-    if (slashActive) onQuery('');
-    setKpOpen((v) => !v);
-  };
 
   return (
-    <div className="ik-searchbox-wrap" onClick={(e) => e.stopPropagation()}>
+    <div style={{ position: 'relative', width: '100%' }} onClick={(e) => e.stopPropagation()}>
       <div className="ik-searchbox ik-surface">
         <span className="ik-searchbox-icon" aria-hidden="true"><Search size={17} strokeWidth={2.1} /></span>
         {scopeName && (
@@ -119,62 +106,24 @@ export default function SearchBox({ query, onQuery, onClear, kbs, searchKb, onSc
           ref={inputRef}
           className="ik-searchbox-input"
           value={query}
-          onChange={(e) => onQuery(normalizeSearchInput(e.target.value))}
+          onChange={(e) => onQuery(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           spellCheck={false}
           autoComplete="off"
         />
-        {!query && (
-          <span className="ik-searchbox-kbd" title={doubleCommandEnabled ? '快速按两次 Command 进入搜索' : 'Command + K 进入搜索'}>
-            {doubleCommandEnabled ? '⌘⌘' : '⌘K'}
-          </span>
-        )}
         {query && (
           <button type="button" className="ik-searchbox-btn" onClick={onClear} aria-label="清空">清空</button>
         )}
-        <span className="ik-kp-anchor">
-          <button
-            type="button"
-            className={`ik-searchbox-btn ik-kp-trigger ${kpOpen ? 'is-active' : ''}`}
-            title="关键点(标签) · ⌘/ 或 Ctrl+/"
-            aria-label="关键点"
-            aria-haspopup="dialog"
-            aria-expanded={kpOpen}
-            onClick={toggleKeyPoints}
-          >
-            <Hash size={14} strokeWidth={2.2} />
-          </button>
-          {kpOpen && !open && (
-            <div className="ik-kp-popover" role="dialog" aria-label="关键点筛选">
-              <div className="ik-kp-head">
-                <div className="ik-kp-title">
-                  <span>关键点</span>
-                  <kbd>⌘/ Ctrl+/</kbd>
-                </div>
-                <b>{kpTags.length} 个</b>
-              </div>
-              {kpTags.length === 0 ? (
-                <div className="ik-kp-empty">当前范围内的知识点还没有标签。</div>
-              ) : (
-                <div className="ik-kp-grid">
-                  {kpTags.map(([tag, count]) => (
-                    <button
-                      key={tag}
-                      type="button"
-                      className="ik-kp-chip"
-                      title={`筛选标签：${tag}`}
-                      onMouseDown={(e) => { e.preventDefault(); onPickTag(tag); }}
-                    >
-                      <span className="ik-kp-chip-name">{tag}</span>
-                      <span className="ik-kp-chip-count">{count}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </span>
+        <button
+          type="button"
+          className={`ik-searchbox-btn ${kpOpen ? 'is-active' : ''}`}
+          title="关键点(标签) · ⌘/"
+          aria-label="关键点"
+          onClick={() => setKpOpen((v) => !v)}
+        >
+          <Hash size={14} strokeWidth={2.2} />
+        </button>
         <span className="ik-searchbox-divider" aria-hidden="true" />
         <div className="ik-searchbox-seg" role="group" aria-label="视图切换">
           <button type="button" className={viewType === 'list' ? 'is-active' : ''} onClick={() => onViewType('list')}>列表</button>
@@ -182,23 +131,45 @@ export default function SearchBox({ query, onQuery, onClear, kbs, searchKb, onSc
         </div>
       </div>
 
+      {kpOpen && !open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 31, width: 340, maxHeight: 380, overflow: 'auto', border: '1px solid var(--bd)', borderRadius: 12, background: 'var(--panel)', boxShadow: '0 20px 50px rgba(0,0,0,.16)', padding: 12, animation: 'ik-pop .12s ease' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--mut)', padding: '0 2px 9px' }}>关键点 · 点击标签筛选 · 共 {kpTags.length} 个</div>
+          {kpTags.length === 0 ? (
+            <div style={{ padding: '14px 4px', fontSize: 13, color: 'var(--mut)' }}>当前范围内的知识点还没有标签。</div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+              {kpTags.map(([tag, count]) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); onPickTag(tag); }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 999, border: '1px solid var(--bd)', background: 'color-mix(in srgb, var(--sel) 60%, transparent)', color: 'var(--fg)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  {tag}<span style={{ fontSize: 11, color: 'var(--mut)' }}>{count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {open && (
-        <div className="ik-kb-picker">
-          <div className="ik-kb-picker-head">选择知识库 · 限定检索范围</div>
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 30, border: '1px solid var(--bd)', borderRadius: 12, background: 'var(--panel)', boxShadow: '0 20px 50px rgba(0,0,0,.16)', overflow: 'hidden', animation: 'ik-fade .12s' }}>
+          <div style={{ fontSize: 11, color: 'var(--mut)', padding: '8px 12px', borderBottom: '1px solid var(--bd)' }}>选择知识库 · 限定检索范围</div>
           {matches.length === 0 ? (
-            <div className="ik-kb-picker-empty">没有匹配「{token}」的知识库</div>
+            <div style={{ padding: '12px', fontSize: 13, color: 'var(--mut)' }}>没有匹配「{token}」的知识库</div>
           ) : (
             matches.map((kb, i) => {
               const active = kb.id === searchKb;
               return (
                 <div
                   key={kb.id}
-                  className={`ik-kb-picker-row ${i === sel ? 'is-hover' : ''} ${active ? 'is-active' : ''}`}
                   onMouseEnter={() => setSel(i)}
                   onMouseDown={(e) => { e.preventDefault(); pick(kb); }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 12px', cursor: 'pointer', background: i === sel ? 'var(--sel)' : 'transparent' }}
                 >
-                  <span>{kb.name}</span>
-                  {active ? <b>当前</b> : i === sel ? <small>↵ 选定</small> : null}
+                  <span style={{ fontSize: 13.5, fontWeight: active || i === sel ? 640 : 500, color: 'var(--fg)' }}>{kb.name}</span>
+                  {active ? <span style={{ fontSize: 11, color: 'var(--accent)' }}>当前 ✓</span> : i === sel ? <span style={{ fontSize: 11, color: 'var(--mut)' }}>↵ 选定</span> : null}
                 </div>
               );
             })

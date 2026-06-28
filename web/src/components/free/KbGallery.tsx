@@ -36,7 +36,6 @@ interface KbGalleryProps {
   deleteCategory: (id: string) => Promise<void>;
   moveKbToCategory: (id: string, categoryId?: string | null) => Promise<void>;
   onExportAll: () => Promise<void>;
-  exportProgress?: { active: boolean; percent: number; label: string } | null;
   onImportKnowledgeBases: () => void;
   openKb: (kb: KnowledgeBase) => void;
   renameKbAction: (kb: KnowledgeBase) => void;
@@ -58,9 +57,9 @@ function categoryName(category: KbCategory | undefined): string {
 
 export function KbGallery(props: KbGalleryProps): ReactNode {
   const {
-    kbs, categories, entries, folders, newKb,
+    kbs, categories, entries, folders, entriesOfKb, newKb,
     createCategory, renameCategory, deleteCategory, moveKbToCategory,
-    onExportAll, exportProgress, onImportKnowledgeBases, openKb, renameKbAction, deleteKbAction, importPreview, importing, onCloseImportPreview,
+    onExportAll, onImportKnowledgeBases, openKb, renameKbAction, deleteKbAction, importPreview, importing, onCloseImportPreview,
     handleConfirmImport, commandDialog,
   } = props;
 
@@ -151,57 +150,27 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
     return kbs.filter((kb) => kb.categoryId && ids.has(kb.categoryId));
   }, [activeCategory, kbs, subtreeIds]);
 
-  const categoryExactCounts = useMemo(() => {
-    const counts = new Map<string | null, number>();
-    counts.set(null, 0);
-    for (const kb of kbs) {
-      const id = kb.categoryId ?? null;
-      counts.set(id, (counts.get(id) ?? 0) + 1);
-    }
-    return counts;
-  }, [kbs]);
-
-  const categoryTotalCounts = useMemo(() => {
-    const totals = new Map<string, number>();
-    const countTree = (id: string): number => {
-      const cached = totals.get(id);
-      if (cached !== undefined) return cached;
-      let total = categoryExactCounts.get(id) ?? 0;
-      for (const child of childrenByParent.get(categoryKey(id)) ?? []) {
-        total += countTree(child.id);
-      }
-      totals.set(id, total);
-      return total;
-    };
-    for (const category of categories) countTree(category.id);
-    return totals;
-  }, [categories, categoryExactCounts, childrenByParent]);
-
-  const entryCountByKb = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const entry of entries) counts.set(entry.kbId, (counts.get(entry.kbId) ?? 0) + 1);
-    return counts;
-  }, [entries]);
-
-  const folderCountByKb = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const folder of folders) counts.set(folder.kbId, (counts.get(folder.kbId) ?? 0) + 1);
-    return counts;
-  }, [folders]);
-
   const activeCategoryName = activeCategory === ALL_CATEGORIES
     ? '全部知识库'
     : activeCategory === UNCATEGORIZED
       ? '未分类'
       : categoryName(categoryById.get(activeCategory));
-  const categoryOptions = useMemo(() => [
+  const activeCategoryId = activeCategory !== ALL_CATEGORIES && activeCategory !== UNCATEGORIZED ? activeCategory : null;
+
+  const exactCount = (id: string | null): number => kbs.filter((kb) => (kb.categoryId ?? null) === id).length;
+  const subtreeCount = (id: string): number => {
+    const ids = subtreeIds.get(id) ?? new Set([id]);
+    return kbs.filter((kb) => kb.categoryId && ids.has(kb.categoryId)).length;
+  };
+
+  const categoryOptions = [
     { value: '', label: '未分类', depth: 0 },
     ...allCategoryRows.map((row) => ({
       value: row.category.id,
       label: row.category.name,
       depth: row.depth,
     })),
-  ], [allCategoryRows]);
+  ];
 
   const createKbInActiveCategory = (): void => {
     if (activeCategory === ALL_CATEGORIES || activeCategory === UNCATEGORIZED) newKb(null);
@@ -270,16 +239,11 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
   return (
     <div className="ik-kb-gallery">
       <div className="ik-kb-gallery-head">
-        <div className="ik-kb-hero-copy">
-          <div className="ik-kb-eyebrow">Knowledge Bases</div>
-          <div className="ik-kb-title-row">
-            <h1>知识库</h1>
-            <span>{entries.length} 条知识点 · {categories.length} 个分类</span>
-          </div>
-          <div className="ik-kb-hero-stats" aria-label="知识库统计">
-            <span><b>{kbs.length}</b> 知识库</span>
-            <span><b>{folders.length}</b> 文件夹</span>
-            <span><b>{categories.length}</b> 分类</span>
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--mut)', fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase' }}>Knowledge Bases</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 7, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 30, fontWeight: 840, letterSpacing: 0 }}>知识库</span>
+            <span style={{ fontSize: 13, color: 'var(--mut)' }}>{entries.length} 条知识点 · {categories.length} 个分类</span>
           </div>
         </div>
         <div className="ik-kb-gallery-actions" role="toolbar" aria-label="知识库操作">
@@ -292,16 +256,12 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
           </button>
           <button
             type="button"
-            className={`ik-btn ik-btn-secondary ik-btn-size-md ik-export-btn ${exportProgress?.active ? 'is-exporting' : ''}`}
-            disabled={Boolean(exportProgress?.active)}
+            className="ik-btn ik-btn-secondary ik-btn-size-md"
             onClick={() => {
               void onExportAll();
             }}
-            title={exportProgress?.active ? exportProgress.label : '导出全部'}
           >
-            <span className="ik-export-btn-fill" style={{ width: `${exportProgress?.percent ?? 0}%` }} />
-            <span className="ik-btn-leading-icon"><Download size={15} strokeWidth={2.3} /></span>
-            <span className="ik-export-btn-text">{exportProgress?.active ? `导出中 ${Math.round(exportProgress.percent)}%` : '导出全部'}</span>
+            <span className="ik-btn-leading-icon"><Download size={15} strokeWidth={2.3} /></span>导出全部
           </button>
           <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-md" onClick={() => setCategoryCommand({ kind: 'create', parentId: null })}>
             <span className="ik-btn-leading-icon"><FolderPlus size={15} strokeWidth={2.4} /></span>新建分类
@@ -316,7 +276,6 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
         <aside className="ik-kb-category-panel">
           <div className="ik-kb-category-title">
             <span>分类树</span>
-            <b>{visibleKbs.length} 个结果</b>
           </div>
           <div className="ik-kb-category-list">
             <button
@@ -354,7 +313,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                   >
                     <span className="ik-kb-category-icon"><Folder size={15} strokeWidth={2.05} /></span>
                     <span className="ik-kb-category-name">{category.name}</span>
-                    <span className="ik-kb-category-count">{categoryTotalCounts.get(category.id) ?? 0}</span>
+                    <span className="ik-kb-category-count">{subtreeCount(category.id)}</span>
                   </button>
                   <button
                     type="button"
@@ -391,17 +350,23 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
             >
               <span className="ik-kb-category-icon"><Folder size={15} strokeWidth={2.05} /></span>
               <span className="ik-kb-category-name">未分类</span>
-              <span className="ik-kb-category-count">{categoryExactCounts.get(null) ?? 0}</span>
+              <span className="ik-kb-category-count">{exactCount(null)}</span>
             </button>
           </div>
         </aside>
 
         <section className="ik-kb-library-main">
+          <div className="ik-kb-section-head">
+            <div>
+              <span>{activeCategoryName}</span>
+            </div>
+          </div>
+
           {visibleKbs.length > 0 ? (
             <div className="ik-kb-grid">
               {visibleKbs.map((kb) => {
-                const n = entryCountByKb.get(kb.id) ?? 0;
-                const fn = folderCountByKb.get(kb.id) ?? 0;
+                const n = entriesOfKb(kb.id).length;
+                const fn = folders.filter((f) => f.kbId === kb.id).length;
                 const category = kb.categoryId ? categoryById.get(kb.categoryId) : undefined;
                 const currentCategoryValue = kb.categoryId ?? '';
                 return (
@@ -441,9 +406,9 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                                     return;
                                   }
                                   const next = option.value || null;
-                                  menu?.removeAttribute('open');
                                   void moveKbToCategory(kb.id, next)
                                     .then(() => {
+                                      menu?.removeAttribute('open');
                                       toast('已移动知识库分类', 'success');
                                     })
                                     .catch((err) => toast('移动分类失败：' + (err instanceof Error ? err.message : String(err)), 'error'));

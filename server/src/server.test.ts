@@ -12,7 +12,6 @@ import { normalizeDocBlocks, splitDocToIndex, markdownToDocBlocks, safeImageUrl,
 import { assertAuthConfiguredForProduction } from './auth.js';
 import { coerceGeneratedDraft, coerceGeneratedFolderTreeDraft, coerceGeneratedKbDraft, draftToMarkdown, extractJsonObject, kbQuestionToEntryInput, kbQuestionToMarkdown } from './ai-generate.js';
 import { ensureTags } from './ai/render.js';
-import { coerceAgentEditPlan } from './ai-agent-edit.js';
 import type { Entry } from './types.js';
 
 const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -189,9 +188,6 @@ test('auth: 线上环境必须配置 AUTH_TOKEN', () => {
     assert.throws(() => assertAuthConfiguredForProduction(), /AUTH_TOKEN/);
   });
   withEnv({ NODE_ENV: 'production', AUTH_TOKEN: 'secret' }, () => {
-    assert.throws(() => assertAuthConfiguredForProduction(), /至少 32/);
-  });
-  withEnv({ NODE_ENV: 'production', AUTH_TOKEN: 'a'.repeat(32) }, () => {
     assert.doesNotThrow(() => assertAuthConfiguredForProduction());
   });
 });
@@ -313,26 +309,6 @@ test('ai-generate: 目录初始化 JSON 只转文件夹路径', () => {
     ['核心原理', '副本机制'],
     ['核心原理', '消费组'],
   ]);
-});
-
-test('ai-agent-edit: 校验动作引用并保留 create-folder ref', () => {
-  const plan = coerceAgentEditPlan({
-    summary: '重组缓存目录并补内容',
-    actions: [
-      { kind: 'create-folder', ref: 'cache_high_availability', parentFolderId: 'fd_cache', name: '高可用' },
-      { kind: 'move-entry', entryId: 'e_redis_lock', folderId: 'cache_high_availability' },
-      { kind: 'rewrite-entry', entryId: 'missing_entry', instruction: '补充故障恢复' },
-    ],
-  }, {
-    folderIds: new Set(['fd_cache']),
-    entryIds: new Set(['e_redis_lock']),
-  });
-  assert.equal(plan.actions.length, 3);
-  assert.equal(plan.actions[0].kind, 'create-folder');
-  assert.equal(plan.actions[0].ref, 'cache_high_availability');
-  assert.equal(plan.actions[1].kind, 'move-entry');
-  assert.equal(plan.actions[1].folderRef, 'cache_high_availability');
-  assert.equal(plan.actions[2].kind, 'note');
 });
 
 test('score: 标题前缀分高于全文包含', () => {

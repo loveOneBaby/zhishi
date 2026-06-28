@@ -11,7 +11,6 @@ import {
   renameKbCategory,
   deleteKbCategory,
   getKb,
-  getEntry,
   createKb,
   renameKb,
   deleteKb,
@@ -22,7 +21,7 @@ import {
   listEntries,
 } from '../db.js';
 import { createKnowledgeBaseFromDraft } from '../services/kb-draft-writer.js';
-import { discardAiJobResultsForKb, jobSnapshot, startAgentEditJob, startAnalyzeJob, startFolderEntriesJob, startFolderInitJob, startKnowledgeBaseJob } from '../services/ai-jobs.js';
+import { discardAiJobResultsForKb, jobSnapshot, startAnalyzeJob, startFolderEntriesJob, startFolderInitJob, startKnowledgeBaseJob } from '../services/ai-jobs.js';
 import { folderPathLabel, sendSse } from '../services/utils.js';
 import { asyncHandler } from '../app.js';
 
@@ -158,37 +157,6 @@ export function registerKbRoutes(api: Router): void {
     const kb = await getKb(req.params.id);
     if (!kb) return res.status(404).json({ error: '知识库不存在' });
     const job = await startAnalyzeJob({ kbId: kb.id, kbName: kb.name });
-    res.status(202).json({ job: await jobSnapshot(job) });
-  }));
-
-  // AI 控制台:用户用自然语言描述调整想法，后台规划并写入目录/知识点。
-  api.post('/kbs/:id/agent-edit/jobs', asyncHandler(async (req, res) => {
-    const kb = await getKb(req.params.id);
-    if (!kb) return res.status(404).json({ error: '知识库不存在' });
-    const instruction = String(req.body?.instruction ?? '').trim();
-    if (!instruction) return res.status(400).json({ error: 'instruction 不能为空' });
-    if (instruction.length > 4000) return res.status(400).json({ error: 'instruction 不能超过 4000 字' });
-
-    const requestedEntryId = req.body?.entryId == null ? '' : String(req.body.entryId).trim();
-    const entry = requestedEntryId ? await getEntry(requestedEntryId) : null;
-    if (requestedEntryId && !entry) return res.status(404).json({ error: '知识点不存在' });
-    if (entry && entry.kbId !== kb.id) return res.status(400).json({ error: '知识点不属于当前知识库' });
-
-    const requestedFolderId = req.body?.folderId ?? req.body?.parentId;
-    let parentId = requestedFolderId == null ? (entry?.folderId ?? null) : (String(requestedFolderId).trim() || null);
-    const parent = parentId ? await getFolder(parentId) : null;
-    if (parentId && !parent) return res.status(404).json({ error: '目标文件夹不存在' });
-    if (parent && parent.kbId !== kb.id) return res.status(400).json({ error: '目标文件夹不属于当前知识库' });
-    parentId = parent?.id ?? null;
-
-    const job = await startAgentEditJob({
-      kbId: kb.id,
-      kbName: kb.name,
-      instruction,
-      parentId,
-      entryId: entry?.id,
-      targetPath: await folderPathLabel(parentId),
-    });
     res.status(202).json({ job: await jobSnapshot(job) });
   }));
 

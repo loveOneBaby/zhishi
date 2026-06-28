@@ -15,14 +15,10 @@
 .ik-theme-picker {
   position: relative;
 }
-.ik-shortcuts {
-  position: relative;
-}
 .ik-topbar-logout {
   font-weight: 680;
 }
-.ik-theme-trigger,
-.ik-shortcuts-trigger {
+.ik-theme-trigger {
   height: 34px;
   min-width: 48px;
   display: inline-flex;
@@ -38,29 +34,19 @@
   outline: none;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
-.ik-shortcuts-trigger {
-  min-width: 34px;
-  width: 34px;
-  padding: 0;
-}
-.ik-theme-trigger svg,
-.ik-shortcuts-trigger svg {
+.ik-theme-trigger svg {
   display: block;
   flex: none;
 }
 .ik-theme-trigger:hover,
-.ik-theme-trigger.is-open,
-.ik-shortcuts-trigger:hover,
-.ik-shortcuts-trigger.is-open {
+.ik-theme-trigger.is-open {
   background: color-mix(in srgb, var(--fg) 13%, var(--panel));
   color: var(--fg);
 }
-.ik-theme-trigger:active,
-.ik-shortcuts-trigger:active {
+.ik-theme-trigger:active {
   transform: translateY(1px);
 }
-.ik-theme-trigger:focus-visible,
-.ik-shortcuts-trigger:focus-visible {
+.ik-theme-trigger:focus-visible {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 .ik-theme-trigger-preview,
@@ -171,139 +157,6 @@
 .ik-theme-menu-check svg {
   display: block;
 }
-.ik-shortcuts-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 62;
-  width: min(330px, calc(100vw - 28px));
-  overflow: hidden;
-  border: 1px solid var(--bd);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--panel) 98%, var(--bg));
-  box-shadow: 0 18px 48px rgba(0,0,0,.16);
-  animation: ik-pop .13s ease;
-}
-.ik-shortcuts-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 13px 14px 11px;
-  border-bottom: 1px solid color-mix(in srgb, var(--bd) 72%, transparent);
-}
-.ik-shortcuts-head span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--fg);
-  font-size: 13px;
-  font-weight: 780;
-}
-.ik-shortcuts-head b {
-  color: var(--mut);
-  font-size: 11.5px;
-  font-weight: 720;
-}
-.ik-shortcuts-list {
-  display: grid;
-  gap: 2px;
-  padding: 8px;
-}
-.ik-shortcut-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  padding: 8px 9px;
-  border-radius: 12px;
-}
-.ik-shortcut-row:hover {
-  background: var(--sel);
-}
-.ik-shortcut-keys {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.ik-shortcut-keys kbd {
-  min-width: 23px;
-  height: 23px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid color-mix(in srgb, var(--bd) 90%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--sel) 58%, transparent);
-  color: var(--fg);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 760;
-  line-height: 1;
-}
-.ik-shortcut-copy {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-.ik-shortcut-copy b,
-.ik-shortcut-copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ik-shortcut-copy b {
-  color: var(--fg);
-  font-size: 12.5px;
-  font-weight: 720;
-}
-.ik-shortcut-copy small {
-  color: var(--mut);
-  font-size: 11.5px;
-}
-.ik-shortcut-toggle {
-  position: relative;
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  padding: 11px 14px 13px;
-  border-top: 1px solid color-mix(in srgb, var(--bd) 72%, transparent);
-  color: var(--fg);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-}
-.ik-shortcut-toggle input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: 0;
-  opacity: 0;
-}
-.ik-shortcut-toggle span {
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid color-mix(in srgb, var(--bd) 86%, transparent);
-  border-radius: 7px;
-  background: var(--panel);
-  color: var(--bg);
-  pointer-events: none;
-}
-.ik-shortcut-toggle input:checked + span {
-  border-color: var(--accent);
-  background: var(--accent);
-}
-.ik-shortcut-toggle b {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .ik-theme-glass .ik-topbar {
   border-bottom-color: rgba(255,255,255,.58);
   background: var(--chrome-bg);
@@ -318,17 +171,14 @@
   background: linear-gradient(135deg, #4455c8, #6f7ded);
   box-shadow: 0 0 0 4px rgba(255,255,255,.55), 0 6px 16px rgba(79,99,215,.2);
 }
-.ik-theme-glass .ik-theme-trigger,
-.ik-theme-glass .ik-shortcuts-trigger {
+.ik-theme-glass .ik-theme-trigger {
   border-color: rgba(255,255,255,.62);
   background: rgba(255,255,255,.5);
   color: color-mix(in srgb, var(--mut) 78%, var(--fg));
   box-shadow: inset 0 1px 0 rgba(255,255,255,.55);
 }
 .ik-theme-glass .ik-theme-trigger:hover,
-.ik-theme-glass .ik-theme-trigger.is-open,
-.ik-theme-glass .ik-shortcuts-trigger:hover,
-.ik-theme-glass .ik-shortcuts-trigger.is-open {
+.ik-theme-glass .ik-theme-trigger.is-open {
   border-color: rgba(105,120,148,.2);
   background: rgba(255,255,255,.72);
   color: var(--fg);
@@ -339,8 +189,7 @@
   border-color: rgba(65,78,105,.2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.75), 0 2px 8px rgba(43,55,83,.07);
 }
-.ik-theme-glass .ik-theme-menu,
-.ik-theme-glass .ik-shortcuts-menu {
+.ik-theme-glass .ik-theme-menu {
   border-color: rgba(255,255,255,.68);
   background: rgba(255,255,255,.98);
   box-shadow: 0 18px 48px rgba(43,55,83,.14), inset 0 1px 0 rgba(255,255,255,.54);
