@@ -10,7 +10,8 @@ export interface SearchSuggestion {
 }
 
 // 递归收集索引节点标题
-function indexTitles(nodes: IndexNode[]): string[] {
+function indexTitles(nodes: IndexNode[] | undefined): string[] {
+  if (!nodes) return [];
   const out: string[] = [];
   const walk = (ns: IndexNode[]): void => { for (const n of ns) { out.push(n.title); walk(n.children); } };
   walk(nodes);
@@ -44,9 +45,11 @@ function blockText(value: unknown): string {
 }
 
 function indexText(e: Entry): string {
-  const parts: string[] = [e.intro, blockText(e.doc)];
-  const walk = (ns: IndexNode[]): void => { for (const n of ns) { parts.push(n.title, n.content); walk(n.children); } };
-  walk(e.nodes);
+  const parts: string[] = [e.intro ?? '', blockText(e.doc)];
+  if (e.nodes) {
+    const walk = (ns: IndexNode[]): void => { for (const n of ns) { parts.push(n.title, n.content); walk(n.children); } };
+    walk(e.nodes);
+  }
   return parts.filter(Boolean).join(' ');
 }
 
