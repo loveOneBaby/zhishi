@@ -71,6 +71,7 @@ interface Props {
   onImportToFolder: (folder: Folder) => void;
   onImportHere: () => void;
   onExportAll: () => void;
+  exportProgress?: { active: boolean; percent: number; label: string } | null;
   onEditEntry: (entry: Entry) => void;
   onDeleteEntry: (entry: Entry) => void;
   onDeleteBatch: (folders: Folder[], entries: Entry[]) => Promise<void>;
@@ -154,6 +155,7 @@ export default function KnowledgeTree(props: Props): ReactNode {
     onImportToFolder,
     onImportHere,
     onExportAll,
+    exportProgress,
     onEditEntry,
     onDeleteEntry,
     onDeleteBatch,
@@ -520,7 +522,15 @@ export default function KnowledgeTree(props: Props): ReactNode {
           <button type="button" className="ik-kt-iconbtn" onClick={onImportHere} title="导入 JSON 到当前位置" aria-label="导入 JSON">
             <Upload size={15} strokeWidth={2.1} />
           </button>
-          <button type="button" className="ik-kt-iconbtn" onClick={onExportAll} title="导出全部为 JSON" aria-label="导出全部">
+          <button
+            type="button"
+            className={`ik-kt-iconbtn ik-kt-export-btn ${exportProgress?.active ? 'is-exporting' : ''}`}
+            onClick={onExportAll}
+            disabled={Boolean(exportProgress?.active)}
+            title={exportProgress?.active ? `${exportProgress.label} ${Math.round(exportProgress.percent)}%` : '导出全部为 JSON'}
+            aria-label={exportProgress?.active ? `导出中 ${Math.round(exportProgress.percent)}%` : '导出全部'}
+          >
+            <span className="ik-kt-export-fill" style={{ width: `${exportProgress?.percent ?? 0}%` }} />
             <Download size={15} strokeWidth={2.1} />
           </button>
         </div>
@@ -635,8 +645,8 @@ export default function KnowledgeTree(props: Props): ReactNode {
                   <Upload size={14} strokeWidth={2.1} />导入 JSON
                 </button>
               )}
-              <button type="button" onClick={() => runMenuAction(onExportAll)}>
-                <Download size={14} strokeWidth={2.1} />导出全部
+              <button type="button" disabled={Boolean(exportProgress?.active)} onClick={() => runMenuAction(onExportAll)}>
+                <Download size={14} strokeWidth={2.1} />{exportProgress?.active ? `导出中 ${Math.round(exportProgress.percent)}%` : '导出全部'}
               </button>
             </div>
           )}

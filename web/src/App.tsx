@@ -33,6 +33,8 @@ import {
   startAgentEditJob,
   cancelAiJob,
   retryAiJob,
+  applyAiJobDraft,
+  revertAiJobApply,
   clearAiJobHistory,
   type AiKnowledgeBaseJob,
   type EntryInput as ApiEntryInput,
@@ -47,6 +49,7 @@ import AskModal from './components/AskModal';
 import EntryEditor from './components/EntryEditor';
 import AiTaskCenter from './components/AiTaskCenter';
 import LoginPanel from './components/LoginPanel';
+import ShortcutMenu from './components/ShortcutMenu';
 import Toaster from './components/Toaster';
 import { toast } from './toast';
 
@@ -78,6 +81,15 @@ function mergeById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
   return [...map.values()];
 }
 
+function replaceByKb<T extends { kbId: string }>(current: T[], kbId: string, incoming: T[]): T[] {
+  return [...current.filter((item) => item.kbId !== kbId), ...incoming];
+}
+
+function isKeyPointShortcut(event: KeyboardEvent): boolean {
+  if (!event.metaKey && !event.ctrlKey) return false;
+  return event.code === 'Slash' || event.code === 'NumpadDivide' || event.key === '/' || event.key === '?';
+}
+
 export default function App() {
   const initialRoute = parseRoute();
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -98,6 +110,7 @@ export default function App() {
   const [sel, setSel] = useState(0);
   const [sugSel, setSugSel] = useState(-1);   // 联想下拉的键盘选中项（-1 = 无）
   const [theme, setThemeState] = useState<ThemeKey>('mono');
+  const [doubleCommandEnabled, setDoubleCommandEnabled] = useState(() => localStorage.getItem('ik_double_command_enabled') !== '0');
 
   // 自由模式导航：freeKb 当前进入的知识库；freeFolder 当前浏览的文件夹（null = 知识库根）
   // 优先从 URL 路由恢复（刷新/分享可还原），URL 无值时回退 localStorage（记忆上次位置）
@@ -111,8 +124,11 @@ export default function App() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const mergedJobIdsRef = useRef<Set<string>>(new Set());
   const notifiedJobIdsRef = useRef<Set<string>>(new Set());
+  const notifiedJobEventsRef = useRef<Set<string>>(new Set());
   const autoOpenedJobIdsRef = useRef<Set<string>>(new Set());
   const deletedKbIdsRef = useRef<Set<string>>(new Set());
+  const kbCategoryMoveVersionRef = useRef<Map<string, number>>(new Map());
+  const lastCommandTapRef = useRef(0);
   // 浏览器前进/后退触发的一次性标记:本轮 URL 同步用 replaceState(避免把回退后的地址又压成新历史)
   // 初始为 true,让首次挂载的 URL 规整也走 replace(不污染历史)
   const skipPushRef = useRef(true);
@@ -159,8 +175,16 @@ export default function App() {
     const materialized = jobs.filter((job) => job.result && !deletedKbIdsRef.current.has(job.result.kb.id));
     if (materialized.length) {
       setKbs((prev) => mergeById(prev, materialized.map((job) => job.result!.kb)));
-      setFolders((prev) => mergeById(prev, materialized.flatMap((job) => job.result!.folders)));
-      setEntries((prev) => mergeById(prev, materialized.flatMap((job) => job.result!.entries)));
+      const exact = materialized.filter((job) => job.kind === 'agent-edit' && (job.agentPhase === 'applied' || job.agentPhase === 'reverted'));
+      const merging = materialized.filter((job) => !exact.includes(job));
+      if (merging.length) {
+        setFolders((prev) => mergeById(prev, merging.flatMap((job) => job.result!.folders)));
+        setEntries((prev) => mergeById(prev, merging.flatMap((job) => job.result!.entries)));
+      }
+      if (exact.length) {
+        setFolders((prev) => exact.reduce((next, job) => replaceByKb(next, job.result!.kb.id, job.result!.folders), prev));
+        setEntries((prev) => exact.reduce((next, job) => replaceByKb(next, job.result!.kb.id, job.result!.entries), prev));
+      }
     }
 
     const streamingKb = materialized.find((job) =>
@@ -181,6 +205,7 @@ export default function App() {
     if (completed.length) {
       for (const job of completed) {
         mergedJobIdsRef.current.add(job.id);
+        if (job.kind === 'agent-edit' && job.agentPhase) continue;
         if (!notifiedJobIdsRef.current.has(job.id)) {
           notifiedJobIdsRef.current.add(job.id);
           toast(job.kind === 'folder-init'
@@ -191,6 +216,24 @@ export default function App() {
                 ? `AI 已调整「${job.result!.kb.name}」`
                 : `AI 已新建「${job.result!.kb.name}」`, 'success');
         }
+      }
+    }
+
+    const draftJobs = jobs.filter((job) => job.kind === 'agent-edit' && job.status === 'succeeded' && job.agentPhase === 'draft');
+    for (const job of draftJobs) {
+      const key = `${job.id}:draft`;
+      if (!notifiedJobEventsRef.current.has(key)) {
+        notifiedJobEventsRef.current.add(key);
+        toast('AI 已生成调整计划，请确认后应用', 'success');
+      }
+    }
+
+    const appliedJobs = jobs.filter((job) => job.kind === 'agent-edit' && job.status === 'succeeded' && job.agentPhase === 'applied');
+    for (const job of appliedJobs) {
+      const key = `${job.id}:applied`;
+      if (!notifiedJobEventsRef.current.has(key)) {
+        notifiedJobEventsRef.current.add(key);
+        toast('AI 调整已应用，可在控制台撤销', 'success');
       }
     }
 
@@ -208,30 +251,39 @@ export default function App() {
     }
   }, []);
 
-  const refreshAiJobs = useCallback(async (): Promise<void> => {
+  const refreshAiJobs = useCallback(async (): Promise<AiKnowledgeBaseJob[]> => {
     const jobs = await fetchAiJobs();
     setAiJobs(jobs);
     applyCompletedJobs(jobs);
+    return jobs;
   }, [applyCompletedJobs]);
 
   useEffect(() => {
     // 管理类接口需登录:未登录时不轮询 AI 任务,避免 401 刷屏。
     if (auth.authRequired && !auth.authenticated) return;
     let stopped = false;
+    let timer: number | null = null;
+    const schedule = (delay: number): void => {
+      if (stopped) return;
+      timer = window.setTimeout(tick, delay);
+    };
     const tick = (): void => {
-      refreshAiJobs().catch(() => {
+      refreshAiJobs().then((jobs) => {
+        const active = jobs.some((job) => job.status === 'queued' || job.status === 'running');
+        schedule(active ? 1600 : aiTaskPanelOpen ? 5000 : 10000);
+      }).catch(() => {
         if (!stopped) {
           // 后端未启动时不打扰用户，主数据加载会给出状态。
+          schedule(6000);
         }
       });
     };
     tick();
-    const timer = window.setInterval(tick, 1600);
     return () => {
       stopped = true;
-      window.clearInterval(timer);
+      if (timer !== null) window.clearTimeout(timer);
     };
-  }, [refreshAiJobs, auth.authRequired, auth.authenticated]);
+  }, [refreshAiJobs, auth.authRequired, auth.authenticated, aiTaskPanelOpen]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -259,6 +311,11 @@ export default function App() {
     setThemeState(k);
     try { localStorage.setItem('ik_theme', k); } catch { /* ignore */ }
   };
+
+  const setDoubleCommandShortcut = useCallback((enabled: boolean): void => {
+    setDoubleCommandEnabled(enabled);
+    try { localStorage.setItem('ik_double_command_enabled', enabled ? '1' : '0'); } catch { /* ignore */ }
+  }, []);
 
   const t = THEMES[theme];
   useEffect(() => {
@@ -312,6 +369,17 @@ export default function App() {
     setTimeout(() => inputRef.current?.focus(), 0);
   }, []);
 
+  const summonKeyPoints = useCallback(() => {
+    setMode('search');
+    setQuery((current) => (current.startsWith('/') ? '' : current));
+    setSel(0);
+    setSugSel(-1);
+    setOpenId(null);
+    setAiOpen(false);
+    setFormOpen(false);
+    setKpOpen((open) => (mode === 'search' ? !open : true));
+  }, [mode]);
+
   // 应用一条联想：有 entryId 直接打开详情，否则作为查询填入
   const applySuggestion = useCallback((s: SearchSuggestion) => {
     setQuery(s.value);
@@ -323,17 +391,28 @@ export default function App() {
   // 键盘交互：⌘K 呼出搜索、联想下拉的 ↑↓ 选择 / ↵ 应用、esc 关闭
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      // 快速按两次 Command 进入搜索框。只响应单独 Command，避免影响 ⌘K / ⌘/ 等组合键。
+      if (doubleCommandEnabled && e.key === 'Meta' && !e.repeat && !e.altKey && !e.ctrlKey && !e.shiftKey) {
+        const now = Date.now();
+        if (now - lastCommandTapRef.current <= 450) {
+          e.preventDefault();
+          lastCommandTapRef.current = 0;
+          summonSearch();
+          return;
+        }
+        lastCommandTapRef.current = now;
+      }
       // 全局：⌘K / Ctrl+K 呼出搜索（任意模式、任意焦点）
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         summonSearch();
         return;
       }
-      // ⌘/ 呼出关键点(标签)面板（检索模式）
-      if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+      // ⌘/ / Ctrl+/ 呼出关键点(标签)面板（任意模式可用）
+      if (isKeyPointShortcut(e)) {
         e.preventDefault();
-        if (mode === 'search') setKpOpen((v) => !v);
-        else { setMode('search'); setKpOpen(true); }
+        e.stopPropagation();
+        summonKeyPoints();
         return;
       }
       const modalOpen = Boolean(openId && !isSearchList);
@@ -363,7 +442,7 @@ export default function App() {
     }
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [openId, aiOpen, formOpen, isSearchList, mode, viewType, query, sel, results, suggestions, sugSel, closeAll, summonSearch, applySuggestion]);
+  }, [openId, aiOpen, formOpen, isSearchList, mode, viewType, query, sel, results, suggestions, sugSel, doubleCommandEnabled, closeAll, summonSearch, summonKeyPoints, applySuggestion]);
 
   // 知识点的增删改：同步到共享 entries，检索/画布即时反映
   const handleCreate = useCallback(async (input: ApiEntryInput): Promise<Entry> => {
@@ -397,10 +476,15 @@ export default function App() {
     setEntries((prev) => [...prev.filter((item) => item.id !== entry.id), entry]);
   }, []);
   const handleStartKnowledgeBaseJob = useCallback(async (domain: string): Promise<void> => {
-    const job = await startGenerateKnowledgeBaseJob({ domain });
+    const nextDomain = domain.trim();
+    if (!nextDomain) {
+      toast('请输入要生成的知识库领域', 'info');
+      return;
+    }
+    const job = await startGenerateKnowledgeBaseJob({ domain: nextDomain });
     setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
     setAiTaskPanelOpen(true);
-    toast(`「${domain}」已在后台生成`, 'success');
+    toast(`「${nextDomain}」已开始后台生成`, 'success');
   }, []);
 
   const handleStartFolderInitJob = useCallback(async (input: { kbId: string; parentId?: string | null; domain?: string }): Promise<void> => {
@@ -440,7 +524,7 @@ export default function App() {
     const job = await startAgentEditJob(input);
     setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
     setAiTaskPanelOpen(true);
-    toast('AI 已开始调整当前知识库', 'success');
+    toast('AI 正在生成调整计划', 'success');
   }, []);
 
   const handleCancelAiJob = useCallback(async (id: string): Promise<void> => {
@@ -455,6 +539,22 @@ export default function App() {
     setAiTaskPanelOpen(true);
     toast(job.resumable ? `已继续生成「${job.domain}」` : `已重新提交「${job.domain}」`, 'success');
   }, []);
+
+  const handleApplyAiJobDraft = useCallback(async (id: string): Promise<void> => {
+    const job = await applyAiJobDraft(id);
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    applyCompletedJobs([job]);
+    setAiTaskPanelOpen(true);
+    toast('已确认，AI 将开始应用调整', 'success');
+  }, [applyCompletedJobs]);
+
+  const handleRevertAiJobApply = useCallback(async (id: string): Promise<void> => {
+    const job = await revertAiJobApply(id);
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    applyCompletedJobs([job]);
+    if (job.status === 'failed') toast(`撤销失败：${job.error ?? '请稍后重试'}`, 'error');
+    else toast('已撤销本次 AI 调整', 'success');
+  }, [applyCompletedJobs]);
 
   const handleClearAiJobHistory = useCallback(async (): Promise<void> => {
     const jobs = await clearAiJobHistory();
@@ -514,9 +614,27 @@ export default function App() {
   }, []);
 
   const handleMoveKbToCategory = useCallback(async (id: string, categoryId?: string | null): Promise<void> => {
-    const kb = await moveKbToCategory(id, categoryId);
-    setKbs((prev) => prev.map((item) => (item.id === id ? kb : item)));
-  }, []);
+    const normalizedCategoryId = categoryId ?? null;
+    const previous = kbs.find((item) => item.id === id) ?? null;
+    const version = (kbCategoryMoveVersionRef.current.get(id) ?? 0) + 1;
+    kbCategoryMoveVersionRef.current.set(id, version);
+    if (previous) {
+      setKbs((prev) => prev.map((item) => (
+        item.id === id ? { ...item, categoryId: normalizedCategoryId, updatedAt: Date.now() } : item
+      )));
+    }
+    try {
+      const kb = await moveKbToCategory(id, normalizedCategoryId);
+      if (kbCategoryMoveVersionRef.current.get(id) === version) {
+        setKbs((prev) => prev.map((item) => (item.id === id ? kb : item)));
+      }
+    } catch (err) {
+      if (previous && kbCategoryMoveVersionRef.current.get(id) === version) {
+        setKbs((prev) => prev.map((item) => (item.id === id ? previous : item)));
+      }
+      throw err;
+    }
+  }, [kbs]);
 
   // 文件夹回调
   const handleCreateFolder = useCallback(async (input: { kbId: string; parentId?: string | null; name: string }): Promise<Folder> => {
@@ -589,6 +707,7 @@ export default function App() {
       onPickTag={(tag) => { setQuery(tag); setSel(0); setOpenId(null); setSugSel(-1); setKpOpen(false); }}
       viewType={viewType}
       onViewType={(v) => { setViewType(v); setOpenId(null); }}
+      doubleCommandEnabled={doubleCommandEnabled}
     />
   ) : undefined;
 
@@ -599,11 +718,14 @@ export default function App() {
     <div className={`ik-theme-${theme}`} style={{ ...themeVars(t), height: '100vh', overflow: 'hidden', background: 'var(--app-bg, var(--bg))', color: 'var(--fg)', fontFamily: 'var(--font)', WebkitFontSmoothing: 'antialiased' }}>
       <div style={{ width: '100%', height: '100%', maxWidth: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <TopBar mode={mode} setMode={handleTopModeChange} theme={theme} setTheme={setTheme} searchSlot={searchField} searchTools={searchTools} trailing={
-          auth.authRequired && auth.authenticated && mode === 'free' ? (
-            <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-sm ik-topbar-logout" onClick={handleLogout}>
-              <span className="ik-btn-leading-icon"><LogOut size={15} strokeWidth={2.25} /></span>退出登录
-            </button>
-          ) : undefined
+          <>
+            <ShortcutMenu doubleCommandEnabled={doubleCommandEnabled} onDoubleCommandEnabled={setDoubleCommandShortcut} />
+            {auth.authRequired && auth.authenticated && mode === 'free' && (
+              <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-sm ik-topbar-logout" onClick={handleLogout}>
+                <span className="ik-btn-leading-icon"><LogOut size={15} strokeWidth={2.25} /></span>退出登录
+              </button>
+            )}
+          </>
         } />
 
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '0 clamp(16px, 2.4vw, 44px)' }}>
@@ -685,6 +807,8 @@ export default function App() {
                   onOpenAiJobResult={handleOpenAiJobResult}
                   onCancelAiJob={handleCancelAiJob}
                   onRetryAiJob={handleRetryAiJob}
+                  onApplyAiJobDraft={handleApplyAiJobDraft}
+                  onRevertAiJobApply={handleRevertAiJobApply}
                   onClearAiJobHistory={handleClearAiJobHistory}
                 />
               )}
@@ -750,6 +874,8 @@ export default function App() {
           onOpenResult={handleOpenAiJobResult}
           onCancel={handleCancelAiJob}
           onRetry={handleRetryAiJob}
+          onApplyAgentEdit={handleApplyAiJobDraft}
+          onRevertAgentEdit={handleRevertAiJobApply}
           onClearHistory={handleClearAiJobHistory}
         />
       )}

@@ -21,6 +21,8 @@ export interface StoredAiJob {
   plan?: unknown;
   result?: unknown;
   analysis?: unknown;
+  agentPhase?: 'draft' | 'applying' | 'applied' | 'reverted';
+  rollback?: unknown;
   error?: string;
   abortRequested?: boolean;
   createdAt: number;
@@ -50,6 +52,8 @@ export async function ensureAiJobsTable(): Promise<void> {
       parsed          TEXT,
       plan            TEXT,
       result          TEXT,
+      agentPhase      TEXT,
+      rollback        TEXT,
       error           TEXT,
       abortRequested  INTEGER NOT NULL DEFAULT 0,
       createdAt       INTEGER NOT NULL,
@@ -65,6 +69,8 @@ export async function ensureAiJobsTable(): Promise<void> {
   // 列迁移：列已存在则忽略（去掉对 PRAGMA table_info 的依赖）
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN plan TEXT');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN analysis TEXT');
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN agentPhase TEXT');
+  await tryAlter('ALTER TABLE ai_jobs ADD COLUMN rollback TEXT');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN entryId TEXT');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN instruction TEXT');
   await tryAlter('ALTER TABLE ai_jobs ADD COLUMN startedAt INTEGER NOT NULL DEFAULT 0');
@@ -109,6 +115,10 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
     plan: parseJson<unknown | undefined>(row.plan as string | null, undefined),
     result: parseJson<unknown | undefined>(row.result as string | null, undefined),
     analysis: parseJson<unknown | undefined>(row.analysis as string | null, undefined),
+    agentPhase: typeof row.agentPhase === 'string' && row.agentPhase
+      ? row.agentPhase as StoredAiJob['agentPhase']
+      : undefined,
+    rollback: parseJson<unknown | undefined>(row.rollback as string | null, undefined),
     error: typeof row.error === 'string' && row.error ? row.error : undefined,
     abortRequested: Number(row.abortRequested ?? 0) === 1,
     createdAt: Number(row.createdAt ?? 0),
@@ -126,10 +136,12 @@ export async function saveAiJob(job: StoredAiJob): Promise<void> {
     INSERT INTO ai_jobs (
       id, kind, domain, questionCount, kbId, kbName, entryId, parentId, targetPath, instruction, status,
       logs, modelOutput, parsed, plan, result, analysis, error, abortRequested, createdAt, updatedAt,
+      agentPhase, rollback,
       startedAt, durationMs, promptTokens, completionTokens, totalTokens
     ) VALUES (
       :id, :kind, :domain, :questionCount, :kbId, :kbName, :entryId, :parentId, :targetPath, :instruction, :status,
       :logs, :modelOutput, :parsed, :plan, :result, :analysis, :error, :abortRequested, :createdAt, :updatedAt,
+      :agentPhase, :rollback,
       :startedAt, :durationMs, :promptTokens, :completionTokens, :totalTokens
     )
     ON CONFLICT(id) DO UPDATE SET
@@ -149,6 +161,8 @@ export async function saveAiJob(job: StoredAiJob): Promise<void> {
       plan=excluded.plan,
       result=excluded.result,
       analysis=excluded.analysis,
+      agentPhase=excluded.agentPhase,
+      rollback=excluded.rollback,
       error=excluded.error,
       abortRequested=excluded.abortRequested,
       updatedAt=excluded.updatedAt,
@@ -164,6 +178,8 @@ export async function saveAiJob(job: StoredAiJob): Promise<void> {
     plan: job.plan ? JSON.stringify(job.plan) : null,
     result: job.result ? JSON.stringify(job.result) : null,
     analysis: job.analysis ? JSON.stringify(job.analysis) : null,
+    agentPhase: job.agentPhase ?? null,
+    rollback: job.rollback ? JSON.stringify(job.rollback) : null,
     error: job.error ?? null,
     kbId: job.kbId ?? null,
     kbName: job.kbName ?? null,

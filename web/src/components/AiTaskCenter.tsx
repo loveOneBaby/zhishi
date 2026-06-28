@@ -1,7 +1,7 @@
-import { AlertCircle, Ban, CheckCircle2, Clock3, ExternalLink, FileText, FolderTree, Loader2, RefreshCw, Sparkles, Trash2, X } from 'lucide-react';
+import { AlertCircle, Ban, CheckCircle2, Clock3, ExternalLink, FileText, FolderTree, ListChecks, Loader2, RefreshCw, Sparkles, Trash2, Undo2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { AiKnowledgeBaseJob, KbSuggestion } from '../api';
+import type { AgentEditAction, AgentEditPlan, AiKnowledgeBaseJob, KbSuggestion } from '../api';
 import KbAnalysisPanel, { type KbApiState } from './KbAnalysisPanel';
 import LiveRewritePanel from './free/LiveRewritePanel';
 
@@ -52,6 +52,8 @@ interface Props {
   onOpenResult: (job: AiKnowledgeBaseJob) => void;
   onCancel: (id: string) => Promise<void>;
   onRetry: (id: string) => Promise<void>;
+  onApplyAgentEdit?: (id: string) => Promise<void>;
+  onRevertAgentEdit?: (id: string) => Promise<void>;
   onClearHistory: () => Promise<void>;
   actions?: AiQuickAction[];
   contextLabel?: string;
@@ -102,6 +104,17 @@ function parsedText(job: AiKnowledgeBaseJob): string {
   return `${job.parsed.folders} 个目录 / ${job.parsed.questions} 条知识点`;
 }
 
+function agentPhaseText(job: AiKnowledgeBaseJob): string {
+  if (job.kind !== 'agent-edit') return runningText(job);
+  if (job.status === 'queued' || job.status === 'running') {
+    return job.agentPhase === 'applying' ? '应用中' : '规划中';
+  }
+  if (job.agentPhase === 'draft') return '待确认';
+  if (job.agentPhase === 'applied') return '已应用';
+  if (job.agentPhase === 'reverted') return '已撤销';
+  return statusLabel(job.status);
+}
+
 function outputPlanLabel(job: AiKnowledgeBaseJob): string {
   if (job.kind === 'folder-init') return '目录规划';
   if (job.kind === 'folder-entries') return '生成过程';
@@ -112,7 +125,7 @@ function outputPlanLabel(job: AiKnowledgeBaseJob): string {
 function outputJsonLabel(job: AiKnowledgeBaseJob): string {
   if (job.kind === 'folder-init') return '目录 JSON';
   if (job.kind === 'folder-entries') return '知识点输出';
-  if (job.kind === 'agent-edit') return '执行 JSON';
+  if (job.kind === 'agent-edit') return '计划 JSON';
   return '知识库 JSON';
 }
 
@@ -159,6 +172,39 @@ function splitModelOutput(raw: string): { plan: string; json: string } {
   return { plan: output, json: '' };
 }
 
+function isAgentEditPlan(value: unknown): value is AgentEditPlan {
+  const plan = value as AgentEditPlan | undefined;
+  return Boolean(plan && typeof plan === 'object' && typeof plan.summary === 'string' && Array.isArray(plan.actions));
+}
+
+function agentPlanFromJob(job: AiKnowledgeBaseJob | null): AgentEditPlan | null {
+  if (!job || job.kind !== 'agent-edit') return null;
+  if (isAgentEditPlan(job.plan)) return job.plan;
+  const output = splitModelOutput(job.modelOutput);
+  if (!output.json) return null;
+  try {
+    const parsed = JSON.parse(output.json) as unknown;
+    return isAgentEditPlan(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function actionKindLabel(action: AgentEditAction): string {
+  switch (action.kind) {
+    case 'create-folder': return '新目录';
+    case 'rename-folder': return '改目录名';
+    case 'create-entry': return '新知识点';
+    case 'rewrite-entry': return '改写';
+    case 'move-entry': return '移动';
+    case 'note': return '备注';
+  }
+}
+
+function actionTarget(action: AgentEditAction): string {
+  return action.topic || action.name || action.entryId || action.folderId || action.folderRef || action.ref || action.kind;
+}
+
 function formatTime(ts: number): string {
   if (!ts) return '';
   return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
@@ -201,6 +247,74 @@ function JobStatsBar({ job, now }: { job: AiKnowledgeBaseJob; now: number }): Re
           </small>
         </span>
       )}
+    </div>
+  );
+}
+
+function AgentEditPreview({
+  job,
+  plan,
+  onApply,
+  onRevert,
+  onRetry,
+}: {
+  job: AiKnowledgeBaseJob;
+  plan: AgentEditPlan;
+  onApply?: (id: string) => Promise<void>;
+  onRevert?: (id: string) => Promise<void>;
+  onRetry: (id: string) => Promise<void>;
+}): ReactNode {
+  const phase = job.agentPhase;
+  const canApply = job.status === 'succeeded' && (phase === 'draft' || phase === 'reverted') && Boolean(onApply);
+  const canRevert = job.status === 'succeeded' && phase === 'applied' && Boolean(job.rollback) && Boolean(onRevert);
+  const isBusy = job.status === 'queued' || job.status === 'running';
+  return (
+    <div className={`ik-agent-plan is-${phase ?? job.status}`}>
+      <div className="ik-agent-plan-head">
+        <span>
+          <ListChecks size={15} strokeWidth={2.2} />
+          {phase === 'draft' ? '待确认变更' : phase === 'applied' ? '已应用变更' : phase === 'reverted' ? '已撤销变更' : '调整计划'}
+        </span>
+        <b>{plan.actions.length} 个动作</b>
+      </div>
+      <p>{plan.summary}</p>
+      <div className="ik-agent-action-list">
+        {plan.actions.map((action, index) => (
+          <div key={action.id || `${action.kind}-${index}`} className={`ik-agent-action is-${action.kind}`}>
+            <span>{index + 1}</span>
+            <div>
+              <b>{action.title || actionKindLabel(action)}</b>
+              <small>
+                <em>{actionKindLabel(action)}</em>
+                <i>{actionTarget(action)}</i>
+              </small>
+              {action.detail && <p>{action.detail}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="ik-agent-plan-actions">
+        {canApply && (
+          <button type="button" className="ik-agent-plan-primary" onClick={() => { void onApply?.(job.id); }}>
+            <CheckCircle2 size={15} strokeWidth={2.25} />应用调整
+          </button>
+        )}
+        {phase === 'draft' && (
+          <button type="button" className="ik-ai-task-secondary" onClick={() => { void onRetry(job.id); }}>
+            <RefreshCw size={14} strokeWidth={2.2} />重做计划
+          </button>
+        )}
+        {canRevert && (
+          <button type="button" className="ik-ai-task-secondary is-danger" onClick={() => { void onRevert?.(job.id); }}>
+            <Undo2 size={14} strokeWidth={2.2} />撤销本次调整
+          </button>
+        )}
+        {isBusy && (
+          <span className="ik-agent-plan-busy">
+            <Loader2 size={14} strokeWidth={2.2} className="ik-ai-task-spin" />{phase === 'applying' ? '正在应用调整' : '正在生成计划'}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -256,6 +370,8 @@ export default function AiTaskCenter({
   onOpenResult,
   onCancel,
   onRetry,
+  onApplyAgentEdit,
+  onRevertAgentEdit,
   onClearHistory,
   actions = [],
   contextLabel,
@@ -300,8 +416,10 @@ export default function AiTaskCenter({
   }, [selectedJob?.status, selectedJob?.id]);
   const output = splitModelOutput(selectedJob?.modelOutput ?? '');
   const selectedKindLabel = selectedJob ? jobKindLabel(selectedJob) : 'AI 任务';
+  const selectedAgentPlan = agentPlanFromJob(selectedJob);
   const liveItems = selectedJob ? growthItems(selectedJob) : [];
   const retryText = selectedJob?.resumable ? '继续生成' : '重新生成';
+  const showGrowth = Boolean(selectedJob?.result && (selectedJob.kind !== 'agent-edit' || selectedJob.agentPhase === 'applying' || selectedJob.agentPhase === 'applied'));
   const hasContextCrumbs = Boolean(contextCrumbs?.length);
 
   useEffect(() => {
@@ -518,7 +636,7 @@ export default function AiTaskCenter({
                     <span className="ik-ai-task-row-icon">{statusIcon(job.status)}</span>
                     <span className="ik-ai-task-row-main">
                       <b>{job.domain}</b>
-                      <small>{jobKindLabel(job)} · {runningText(job)} · {formatTime(job.updatedAt)}{job.status !== 'queued' && job.status !== 'running' && (job.durationMs > 0 || job.totalTokens > 0) ? ` · ${formatDuration(job.durationMs)} · ${formatTokens(job.totalTokens)}` : ''}</small>
+                      <small>{jobKindLabel(job)} · {agentPhaseText(job)} · {formatTime(job.updatedAt)}{job.status !== 'queued' && job.status !== 'running' && (job.durationMs > 0 || job.totalTokens > 0) ? ` · ${formatDuration(job.durationMs)} · ${formatTokens(job.totalTokens)}` : ''}</small>
                     </span>
                     {job.parsed && (
                       <span className="ik-ai-task-row-count">{rowCount(job)}</span>
@@ -577,11 +695,21 @@ export default function AiTaskCenter({
                   <span>{statusIcon(selectedJob.status)}</span>
                   <div>
                     <b>{selectedJob.domain}</b>
-                      <small>{selectedKindLabel} · {runningText(selectedJob)} · {parsedText(selectedJob)}</small>
+                      <small>{selectedKindLabel} · {agentPhaseText(selectedJob)} · {parsedText(selectedJob)}</small>
                   </div>
                 </div>
 
                 <JobStatsBar job={selectedJob} now={now} />
+
+                {selectedJob.kind === 'agent-edit' && selectedAgentPlan && (
+                  <AgentEditPreview
+                    job={selectedJob}
+                    plan={selectedAgentPlan}
+                    onApply={onApplyAgentEdit}
+                    onRevert={onRevertAgentEdit}
+                    onRetry={onRetry}
+                  />
+                )}
 
                 {selectedJob.result && (
                   <button type="button" className="ik-ai-task-open" onClick={() => onOpenResult(selectedJob)}>
@@ -606,7 +734,7 @@ export default function AiTaskCenter({
                   )}
                 </div>
 
-                {selectedJob.result && (
+                {showGrowth && selectedJob.result && (
                   <div className="ik-ai-growth">
                     <div className="ik-ai-growth-head">
                       <span>实时写入</span>

@@ -10,7 +10,7 @@ import ImportPreviewModal from './ImportPreviewModal';
 import VersionHistoryModal from './VersionHistoryModal';
 import KnowledgeTree from './KnowledgeTree';
 import type { SelectOption } from './SelectField';
-import { exportAll, generateEntryDraftWithAIStream, generateEntryIllustrationWithAIStream, rewriteEntryDraftWithAIStream, commitRewriteEntryDraft, type KbSuggestion } from '../api';
+import { exportAllWithProgress, generateEntryDraftWithAIStream, generateEntryIllustrationWithAIStream, rewriteEntryDraftWithAIStream, commitRewriteEntryDraft, type ExportProgressEvent, type KbSuggestion } from '../api';
 import { toast } from '../toast';
 import { KbGallery } from './free/KbGallery';
 import AiTaskCenter, { type AiContextCrumb, type AiQuickAction, type LiveTask } from './AiTaskCenter';
@@ -21,6 +21,14 @@ import { useImportLogic } from './free/useImportLogic';
 import { useCommandSystem } from './free/useCommandSystem';
 import { CommandDialogRenderer } from './free/CommandDialogRenderer';
 import type { AiKnowledgeBaseJob } from '../api';
+
+export interface ExportProgressState {
+  active: boolean;
+  percent: number;
+  label: string;
+  loaded?: number;
+  total?: number;
+}
 
 interface Props {
   entries: Entry[];
@@ -62,6 +70,8 @@ interface Props {
   onOpenAiJobResult: (job: AiKnowledgeBaseJob) => void;
   onCancelAiJob: (id: string) => Promise<void>;
   onRetryAiJob: (id: string) => Promise<void>;
+  onApplyAiJobDraft: (id: string) => Promise<void>;
+  onRevertAiJobApply: (id: string) => Promise<void>;
   onClearAiJobHistory: () => Promise<void>;
 }
 
@@ -69,10 +79,11 @@ export default function FreeMode(props: Props): ReactNode {
   const { entries, kbs, kbCategories, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
     onCreate, onUpdate, onDelete, onImported, onGeneratedEntry, onStartKnowledgeBaseJob, onStartFolderInitJob,
     onStartFolderEntriesJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onStartAgentEditJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
-    aiJobs, aiTaskPanelOpen, onAiTaskPanelOpenChange, onOpenAiJobResult, onCancelAiJob, onRetryAiJob, onClearAiJobHistory } = props;
+    aiJobs, aiTaskPanelOpen, onAiTaskPanelOpenChange, onOpenAiJobResult, onCancelAiJob, onRetryAiJob, onApplyAiJobDraft, onRevertAiJobApply, onClearAiJobHistory } = props;
 
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(() => localStorage.getItem('ik_free_entry') || null);
   const [panelMode, setPanelMode] = useState<'detail' | 'create' | 'edit'>('detail');
+  const [exportProgress, setExportProgress] = useState<ExportProgressState | null>(null);
   const dirtyRef = useRef(false);
   const pendingGuardRef = useRef<(() => void) | null>(null);
 
@@ -215,17 +226,34 @@ export default function FreeMode(props: Props): ReactNode {
   }
 
   async function handleExport(): Promise<void> {
+    if (exportProgress?.active) return;
+    const setProgress = (event: ExportProgressEvent): void => {
+      setExportProgress({
+        active: true,
+        percent: Math.max(0, Math.min(100, event.percent)),
+        label: event.label,
+        loaded: event.loaded,
+        total: event.total,
+      });
+    };
     try {
-      const all = await exportAll();
+      setExportProgress({ active: true, percent: 4, label: '准备导出' });
+      const all = await exportAllWithProgress(setProgress);
+      setExportProgress({ active: true, percent: 88, label: '生成 JSON 文件' });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
+      setExportProgress({ active: true, percent: 94, label: '准备下载' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `knowledge-bases-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
+      setExportProgress({ active: true, percent: 100, label: '导出完成' });
       toast('已导出全部知识库', 'success');
+      window.setTimeout(() => setExportProgress(null), 900);
     } catch (err) {
+      setExportProgress(null);
       toast('导出失败：' + (err instanceof Error ? err.message : String(err)), 'error');
     }
   }
@@ -725,7 +753,7 @@ export default function FreeMode(props: Props): ReactNode {
       onClick: () => {},
       prompt: {
         placeholder: '例如：把缓存相关内容拆成基础/高可用/持久化，并补 3 个高频题',
-        submitLabel: '执行',
+        submitLabel: '生成计划',
         onSubmit: startAgentEditDirect,
       },
       meta: '结构 / 内容',
@@ -805,7 +833,16 @@ export default function FreeMode(props: Props): ReactNode {
       prompt: {
         placeholder: '输入领域，如「Java 并发」',
         submitLabel: '生成',
-        onSubmit: (value) => { void onStartKnowledgeBaseJob(value); },
+        onSubmit: (value) => {
+          const domain = value.trim();
+          if (!domain) {
+            toast('请输入要生成的知识库领域', 'info');
+            return;
+          }
+          void onStartKnowledgeBaseJob(domain).catch((err) => {
+            toast('AI 新建知识库失败：' + (err instanceof Error ? err.message : String(err)), 'error');
+          });
+        },
       },
       meta: '后台任务',
     },
@@ -818,6 +855,8 @@ export default function FreeMode(props: Props): ReactNode {
       onOpenResult={onOpenAiJobResult}
       onCancel={onCancelAiJob}
       onRetry={onRetryAiJob}
+      onApplyAgentEdit={onApplyAiJobDraft}
+      onRevertAgentEdit={onRevertAiJobApply}
       onClearHistory={onClearAiJobHistory}
       actions={aiActions}
       contextLabel={aiContextLabel}
@@ -849,6 +888,7 @@ export default function FreeMode(props: Props): ReactNode {
           deleteCategory={onDeleteKbCategory}
           moveKbToCategory={onMoveKbToCategory}
           onExportAll={handleExport}
+          exportProgress={exportProgress}
           onImportKnowledgeBases={importLogic.importKnowledgeBases}
           openKb={openKb}
           renameKbAction={renameKbAction}
@@ -913,6 +953,7 @@ export default function FreeMode(props: Props): ReactNode {
               onImportToFolder={importLogic.importToFolder}
               onImportHere={importLogic.importHere}
               onExportAll={handleExport}
+              exportProgress={exportProgress}
               onEditEntry={editEntryAction}
               onDeleteEntry={deleteEntryAction}
               onDeleteBatch={deletes.deleteSelectionWithUndo}
