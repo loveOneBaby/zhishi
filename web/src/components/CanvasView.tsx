@@ -234,6 +234,8 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
 
     if (node.type === 'entry') {
       setPreviewId(node.id);
+      // 通知父组件更新路由（URL 包含知识点 ID）
+      if (node.entryId) onOpen(node.entryId);
       pendingFocusRef.current = node.id;
       window.setTimeout(() => focusNode(node.id), 0);
       return;
