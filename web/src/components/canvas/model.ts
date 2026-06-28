@@ -178,7 +178,7 @@ export function buildModel(
     const entryDepth = parentDepth + 1;
 
     const entryId = `ent::${entry.id}`;
-    const sectionText = (nodes: IndexNode[]): string => nodes
+    const sectionText = (nodes: IndexNode[] | undefined): string => (nodes ?? [])
       .map((node) => [
         node.title,
         node.content,
@@ -195,10 +195,10 @@ export function buildModel(
       parentId,
       children: [],
       text: [
-        toSearchText(kbNameOf.get(entry.kbId) ?? entry.cat, entry.title, entry.py, entry.tags.join(' ')),
+        toSearchText(kbNameOf.get(entry.kbId) ?? entry.cat, entry.title, entry.py, (entry.tags ?? []).join(' ')),
         toSearchText(entry.summary, entry.intro, sectionText(entry.nodes)),
       ].join(' '),
-      meta: entry.tags,
+      meta: entry.tags ?? [],
     });
     map.get(parentId)!.children.push(entryId);
   }
