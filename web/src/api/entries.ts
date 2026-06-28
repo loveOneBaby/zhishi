@@ -10,6 +10,9 @@ export type NewEntryInput = EntryInput;
 export async function fetchEntries(): Promise<Entry[]> {
   return apiGetKey<Entry[]>('/entries', 'entries');
 }
+export async function fetchEntry(id: string): Promise<Entry> {
+  return apiGetKey<Entry>(`/entries/${encodeURIComponent(id)}`, 'entry');
+}
 export async function createEntry(input: EntryInput): Promise<Entry> {
   return apiPostKey<Entry>('/entries', input, 'entry');
 }

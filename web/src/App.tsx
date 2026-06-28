@@ -5,6 +5,7 @@ import { THEMES, themeVars } from './themes';
 import { filterEntries, suggestQueries, type SearchSuggestion } from './search';
 import {
   fetchEntries,
+  fetchEntry,
   fetchKbs,
   fetchKbCategories,
   fetchFolders,
@@ -118,6 +119,7 @@ export default function App() {
   const [freeFolder, setFreeFolder] = useState<string | null>(() => initialRoute.folderId ?? localStorage.getItem('ik_free_folder') ?? null);
 
   const [openId, setOpenId] = useState<string | null>(null);
+  const [fullEntry, setFullEntry] = useState<Entry | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
 
@@ -666,7 +668,15 @@ export default function App() {
     setFolders(next);
   }, []);
 
-  const openEntry = openId ? entries.find((e) => e.id === openId) ?? null : null;
+  // openId 变化时按需获取完整 entry（列表只有摘要，详情需要 doc/intro/nodes）
+  useEffect(() => {
+    if (!openId) { setFullEntry(null); return; }
+    let cancelled = false;
+    fetchEntry(openId).then((e) => { if (!cancelled) setFullEntry(e); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [openId]);
+
+  const openEntry = openId ? fullEntry ?? entries.find((e) => e.id === openId) ?? null : null;
   const selectedListEntry = isSearchList
     ? (results.find((e) => e.id === openId) ?? results[Math.min(sel, Math.max(0, results.length - 1))] ?? null)
     : null;
@@ -781,6 +791,7 @@ export default function App() {
                   onUpdate={handleUpdate}
                   onDelete={handleDelete}
                   onReorderEntries={handleReorder}
+                  onFetchEntry={fetchEntry}
                   onImported={handleImported}
                   onGeneratedEntry={handleGeneratedEntry}
                   onStartKnowledgeBaseJob={handleStartKnowledgeBaseJob}

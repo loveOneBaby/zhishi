@@ -44,6 +44,7 @@ interface Props {
   onUpdate: (id: string, input: EntryInput) => Promise<Entry>;
   onDelete: (id: string) => Promise<void>;
   onReorderEntries: (ids: string[]) => Promise<void>;
+  onFetchEntry: (id: string) => Promise<Entry>;
   onImported: (entries: Entry[], kbs: KnowledgeBase[], folders: Folder[], kbCategories?: KbCategory[]) => void;
   onGeneratedEntry: (entry: Entry) => void;
   onStartKnowledgeBaseJob: (domain: string) => Promise<void>;
@@ -77,11 +78,12 @@ interface Props {
 
 export default function FreeMode(props: Props): ReactNode {
   const { entries, kbs, kbCategories, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
-    onCreate, onUpdate, onDelete, onImported, onGeneratedEntry, onStartKnowledgeBaseJob, onStartFolderInitJob,
+    onCreate, onUpdate, onDelete, onFetchEntry, onImported, onGeneratedEntry, onStartKnowledgeBaseJob, onStartFolderInitJob,
     onStartFolderEntriesJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onStartAgentEditJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
     aiJobs, aiTaskPanelOpen, onAiTaskPanelOpenChange, onOpenAiJobResult, onCancelAiJob, onRetryAiJob, onApplyAiJobDraft, onRevertAiJobApply, onClearAiJobHistory } = props;
 
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(() => localStorage.getItem('ik_free_entry') || null);
+  const [fullEntry, setFullEntry] = useState<Entry | null>(null);
   const [panelMode, setPanelMode] = useState<'detail' | 'create' | 'edit'>('detail');
   const [exportProgress, setExportProgress] = useState<ExportProgressState | null>(null);
   const dirtyRef = useRef(false);
@@ -91,8 +93,8 @@ export default function FreeMode(props: Props): ReactNode {
   const currentKb = kbs.find((k) => k.id === freeKb) ?? null;
   const kbEntries = useMemo(() => (freeKb ? entriesOfKb(freeKb) : []), [entriesOfKb, freeKb]);
   const selectedEntry = useMemo(
-    () => kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
-    [kbEntries, selectedEntryId],
+    () => fullEntry ?? kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
+    [kbEntries, selectedEntryId, fullEntry],
   );
   const currentFolderId = selectedEntry?.folderId ?? freeFolder;
   const currentFolderChain = useMemo(() => folderChain(folders, currentFolderId), [currentFolderId, folders]);
@@ -145,6 +147,14 @@ export default function FreeMode(props: Props): ReactNode {
     if (selectedEntryId) localStorage.setItem('ik_free_entry', selectedEntryId);
     else localStorage.removeItem('ik_free_entry');
   }, [selectedEntryId]);
+
+  // 列表只有摘要，选中时按需获取完整 doc/intro/nodes
+  useEffect(() => {
+    if (!selectedEntryId) { setFullEntry(null); return; }
+    let cancelled = false;
+    onFetchEntry(selectedEntryId).then((e) => { if (!cancelled) setFullEntry(e); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedEntryId, onFetchEntry]);
 
   useEffect(() => {
     if (!freeKb || !freeFolder) return;
