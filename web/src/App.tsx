@@ -690,7 +690,8 @@ export default function App() {
     ? (openEntry ?? results.find((e) => e.id === openId) ?? results[Math.min(sel, Math.max(0, results.length - 1))] ?? null)
     : null;
   const selectedListId = selectedListEntry?.id ?? null;
-  const modalEntry = isSearchList ? null : openEntry;
+  // 搜索列表/画布模式都不弹框（画布有自己的详情面板）
+  const modalEntry = (isSearchList || viewType === 'canvas') ? null : openEntry;
 
   const handleTopModeChange = useCallback((nextMode: AppMode) => {
     setOpenId(null);
