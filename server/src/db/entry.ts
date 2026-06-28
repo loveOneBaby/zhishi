@@ -7,10 +7,25 @@ import type { IndexTree } from '../index-tree.js';
 
 // ───────────────────────── 知识点 CRUD ─────────────────────────
 
+// 内存缓存：避免短时间内重复查询 Turso（远程数据库有 100-200ms 延迟）
+let entriesCache: { data: Entry[]; ts: number } | null = null;
+const CACHE_TTL = 5000; // 5 秒缓存
+
 export async function listEntries(): Promise<Entry[]> {
+  const now = Date.now();
+  if (entriesCache && now - entriesCache.ts < CACHE_TTL) {
+    return entriesCache.data;
+  }
   const kbs = new Map((await listKbs()).map((k) => [k.id, k.name]));
   const rows = await db.prepare('SELECT * FROM entries ORDER BY sort ASC, createdAt ASC').all() as unknown as EntryRow[];
-  return Promise.all(rows.map((r) => rowToEntry(r, kbs.get(r.kbId ?? ''))));
+  const entries = await Promise.all(rows.map((r) => rowToEntry(r, kbs.get(r.kbId ?? ''))));
+  entriesCache = { data: entries, ts: now };
+  return entries;
+}
+
+// 写操作后清除缓存
+export function clearEntriesCache(): void {
+  entriesCache = null;
 }
 
 export async function getEntry(id: string): Promise<Entry | null> {
@@ -69,6 +84,7 @@ export async function createEntry(input: EntryInput): Promise<Entry> {
     tags: JSON.stringify(entry.tags), summary: entry.summary,
     idx, sort: entry.sort, createdAt: now, updatedAt: now,
   });
+  clearEntriesCache();
   return entry;
 }
 
@@ -78,6 +94,7 @@ export async function reorderEntries(ids: string[]): Promise<void> {
   await db.tx(async () => {
     for (const [index, id] of ids.entries()) await stmt.run({ id, sort: index });
   });
+  clearEntriesCache();
 }
 
 export async function updateEntry(id: string, input: Partial<EntryInput>): Promise<Entry | null> {
@@ -123,10 +140,12 @@ export async function updateEntry(id: string, input: Partial<EntryInput>): Promi
     tags: JSON.stringify(next.tags), summary: next.summary,
     idx, updatedAt: next.updatedAt,
   });
+  clearEntriesCache();
   return next;
 }
 
 export async function deleteEntry(id: string): Promise<boolean> {
   const info = await db.prepare('DELETE FROM entries WHERE id = ?').run(id);
+  clearEntriesCache();
   return Number(info.changes) > 0;
 }

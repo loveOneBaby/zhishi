@@ -2,7 +2,7 @@ import { db, deriveDoc, kbNameOf } from './client.js';
 import { listKbs, resolveKbId, defaultKbId, ensureKb, updateKbCategory } from './kb.js';
 import { listKbCategories } from './kb-category.js';
 import { listFolders, getFolder, ensureFolder } from './folder.js';
-import { listEntries, deriveSummary } from './entry.js';
+import { listEntries, deriveSummary, clearEntriesCache } from './entry.js';
 import { buildDocIdx } from './doc-write.js';
 import { splitDocToIndex } from '../doc.js';
 import type { KnowledgeBase, KbCategory, Folder, Entry, IndexNode } from '../types.js';
@@ -304,5 +304,6 @@ export async function importEntries(payload: ImportPayload, replace: boolean): P
       imported += 1;
     }
   });
+  clearEntriesCache();
   return { imported };
 }
