@@ -1,0 +1,468 @@
+@@ -30,16 +29,12 @@
+   startGenerateKnowledgePointsFromFoldersJob,
+   startAnalyzeJob,
+   startAnalyzeEntryJob,
+-  startAgentEditJob,
+   cancelAiJob,
+   retryAiJob,
+-  applyAiJobDraft,
+-  revertAiJobApply,
+   clearAiJobHistory,
+   type AiKnowledgeBaseJob,
+   type EntryInput as ApiEntryInput,
+ } from './api';
+-import { fetchAuthStatus, logout, type AuthStatus } from './api';
+ import TopBar, { type AppMode } from './components/TopBar';
+ import SearchBox from './components/SearchBox';
+ import SearchMode from './components/SearchMode';
+@@ -48,8 +43,6 @@
+ import AskModal from './components/AskModal';
+ import EntryEditor from './components/EntryEditor';
+ import AiTaskCenter from './components/AiTaskCenter';
+-import LoginPanel from './components/LoginPanel';
+-import ShortcutMenu from './components/ShortcutMenu';
+ import Toaster from './components/Toaster';
+ import { toast } from './toast';
+ 
+@@ -81,15 +74,6 @@
+   return [...map.values()];
+ }
+ 
+-function replaceByKb<T extends { kbId: string }>(current: T[], kbId: string, incoming: T[]): T[] {
+-  return [...current.filter((item) => item.kbId !== kbId), ...incoming];
+-}
+-
+-function isKeyPointShortcut(event: KeyboardEvent): boolean {
+-  if (!event.metaKey && !event.ctrlKey) return false;
+-  return event.code === 'Slash' || event.code === 'NumpadDivide' || event.key === '/' || event.key === '?';
+-}
+-
+ export default function App() {
+   const initialRoute = parseRoute();
+   const [entries, setEntries] = useState<Entry[]>([]);
+@@ -97,7 +79,6 @@
+   const [sel, setSel] = useState(0);
+   const [sugSel, setSugSel] = useState(-1);   // 联想下拉的键盘选中项（-1 = 无）
+   const [theme, setThemeState] = useState<ThemeKey>('mono');
+-  const [doubleCommandEnabled, setDoubleCommandEnabled] = useState(() => localStorage.getItem('ik_double_command_enabled') !== '0');
+ 
+   // 自由模式导航：freeKb 当前进入的知识库；freeFolder 当前浏览的文件夹（null = 知识库根）
+   // 优先从 URL 路由恢复（刷新/分享可还原），URL 无值时回退 localStorage（记忆上次位置）
+@@ -111,11 +92,8 @@
+   const inputRef = useRef<HTMLInputElement | null>(null);
+   const mergedJobIdsRef = useRef<Set<string>>(new Set());
+   const notifiedJobIdsRef = useRef<Set<string>>(new Set());
+-  const notifiedJobEventsRef = useRef<Set<string>>(new Set());
+   const autoOpenedJobIdsRef = useRef<Set<string>>(new Set());
+   const deletedKbIdsRef = useRef<Set<string>>(new Set());
+-  const kbCategoryMoveVersionRef = useRef<Map<string, number>>(new Map());
+-  const lastCommandTapRef = useRef(0);
+   // 浏览器前进/后退触发的一次性标记:本轮 URL 同步用 replaceState(避免把回退后的地址又压成新历史)
+   // 初始为 true,让首次挂载的 URL 规整也走 replace(不污染历史)
+   const skipPushRef = useRef(true);
+@@ -171,16 +148,8 @@
+     const materialized = jobs.filter((job) => job.result && !deletedKbIdsRef.current.has(job.result.kb.id));
+     if (materialized.length) {
+       setKbs((prev) => mergeById(prev, materialized.map((job) => job.result!.kb)));
+-      const exact = materialized.filter((job) => job.kind === 'agent-edit' && (job.agentPhase === 'applied' || job.agentPhase === 'reverted'));
+-      const merging = materialized.filter((job) => !exact.includes(job));
+-      if (merging.length) {
+-        setFolders((prev) => mergeById(prev, merging.flatMap((job) => job.result!.folders)));
+-        setEntries((prev) => mergeById(prev, merging.flatMap((job) => job.result!.entries)));
+-      }
+-      if (exact.length) {
+-        setFolders((prev) => exact.reduce((next, job) => replaceByKb(next, job.result!.kb.id, job.result!.folders), prev));
+-        setEntries((prev) => exact.reduce((next, job) => replaceByKb(next, job.result!.kb.id, job.result!.entries), prev));
+-      }
++      setFolders((prev) => mergeById(prev, materialized.flatMap((job) => job.result!.folders)));
++      setEntries((prev) => mergeById(prev, materialized.flatMap((job) => job.result!.entries)));
+     }
+ 
+     const streamingKb = materialized.find((job) =>
+@@ -201,38 +170,17 @@
+     if (completed.length) {
+       for (const job of completed) {
+         mergedJobIdsRef.current.add(job.id);
+-        if (job.kind === 'agent-edit' && job.agentPhase) continue;
+         if (!notifiedJobIdsRef.current.has(job.id)) {
+           notifiedJobIdsRef.current.add(job.id);
+           toast(job.kind === 'folder-init'
+             ? `AI 已初始化「${job.result!.kb.name}」目录`
+             : job.kind === 'folder-entries'
+               ? `AI 已按目录补全「${job.result!.kb.name}」知识点`
+-              : job.kind === 'agent-edit'
+-                ? `AI 已调整「${job.result!.kb.name}」`
+-                : `AI 已新建「${job.result!.kb.name}」`, 'success');
++              : `AI 已新建「${job.result!.kb.name}」`, 'success');
+         }
+       }
+     }
+ 
+-    const draftJobs = jobs.filter((job) => job.kind === 'agent-edit' && job.status === 'succeeded' && job.agentPhase === 'draft');
+-    for (const job of draftJobs) {
+-      const key = `${job.id}:draft`;
+-      if (!notifiedJobEventsRef.current.has(key)) {
+-        notifiedJobEventsRef.current.add(key);
+-        toast('AI 已生成调整计划，请确认后应用', 'success');
+-      }
+-    }
+-
+-    const appliedJobs = jobs.filter((job) => job.kind === 'agent-edit' && job.status === 'succeeded' && job.agentPhase === 'applied');
+-    for (const job of appliedJobs) {
+-      const key = `${job.id}:applied`;
+-      if (!notifiedJobEventsRef.current.has(key)) {
+-        notifiedJobEventsRef.current.add(key);
+-        toast('AI 调整已应用，可在控制台撤销', 'success');
+-      }
+-    }
+-
+     for (const job of jobs) {
+       if (job.status === 'failed' && !notifiedJobIdsRef.current.has(job.id)) {
+         notifiedJobIdsRef.current.add(job.id);
+@@ -240,46 +188,33 @@
+           ? 'AI 初始化目录失败'
+           : job.kind === 'folder-entries'
+             ? 'AI 按目录生成知识点失败'
+-            : job.kind === 'agent-edit'
+-              ? 'AI 调整知识库失败'
+-              : 'AI 建库失败'}：${job.error || job.domain}`, 'error');
++            : 'AI 建库失败'}：${job.error || job.domain}`, 'error');
+       }
+     }
+   }, []);
+ 
+-  const refreshAiJobs = useCallback(async (): Promise<AiKnowledgeBaseJob[]> => {
++  const refreshAiJobs = useCallback(async (): Promise<void> => {
+     const jobs = await fetchAiJobs();
+     setAiJobs(jobs);
+     applyCompletedJobs(jobs);
+-    return jobs;
+   }, [applyCompletedJobs]);
+ 
+   useEffect(() => {
+-    // 管理类接口需登录:未登录时不轮询 AI 任务,避免 401 刷屏。
+-    if (auth.authRequired && !auth.authenticated) return;
+     let stopped = false;
+-    let timer: number | null = null;
+-    const schedule = (delay: number): void => {
+-      if (stopped) return;
+-      timer = window.setTimeout(tick, delay);
+-    };
+     const tick = (): void => {
+-      refreshAiJobs().then((jobs) => {
+-        const active = jobs.some((job) => job.status === 'queued' || job.status === 'running');
+-        schedule(active ? 1600 : aiTaskPanelOpen ? 5000 : 10000);
+-      }).catch(() => {
++      refreshAiJobs().catch(() => {
+         if (!stopped) {
+           // 后端未启动时不打扰用户，主数据加载会给出状态。
+-          schedule(6000);
+         }
+       });
+     };
+     tick();
++    const timer = window.setInterval(tick, 1600);
+     return () => {
+       stopped = true;
+-      if (timer !== null) window.clearTimeout(timer);
++      window.clearInterval(timer);
+     };
+-  }, [refreshAiJobs, auth.authRequired, auth.authenticated, aiTaskPanelOpen]);
++  }, [refreshAiJobs]);
+ 
+   useEffect(() => {
+     if (!loaded) return;
+@@ -308,11 +243,6 @@
+     try { localStorage.setItem('ik_theme', k); } catch { /* ignore */ }
+   };
+ 
+-  const setDoubleCommandShortcut = useCallback((enabled: boolean): void => {
+-    setDoubleCommandEnabled(enabled);
+-    try { localStorage.setItem('ik_double_command_enabled', enabled ? '1' : '0'); } catch { /* ignore */ }
+-  }, []);
+-
+   const t = THEMES[theme];
+   useEffect(() => {
+     const vars = themeVars(t) as unknown as Record<string, string>;
+@@ -365,17 +295,6 @@
+     setTimeout(() => inputRef.current?.focus(), 0);
+   }, []);
+ 
+-  const summonKeyPoints = useCallback(() => {
+-    setMode('search');
+-    setQuery((current) => (current.startsWith('/') ? '' : current));
+-    setSel(0);
+-    setSugSel(-1);
+-    setOpenId(null);
+-    setAiOpen(false);
+-    setFormOpen(false);
+-    setKpOpen((open) => (mode === 'search' ? !open : true));
+-  }, [mode]);
+-
+   // 应用一条联想：有 entryId 直接打开详情，否则作为查询填入
+   const applySuggestion = useCallback((s: SearchSuggestion) => {
+     setQuery(s.value);
+@@ -387,28 +306,17 @@
+   // 键盘交互：⌘K 呼出搜索、联想下拉的 ↑↓ 选择 / ↵ 应用、esc 关闭
+   useEffect(() => {
+     function handleKey(e: KeyboardEvent) {
+-      // 快速按两次 Command 进入搜索框。只响应单独 Command，避免影响 ⌘K / ⌘/ 等组合键。
+-      if (doubleCommandEnabled && e.key === 'Meta' && !e.repeat && !e.altKey && !e.ctrlKey && !e.shiftKey) {
+-        const now = Date.now();
+-        if (now - lastCommandTapRef.current <= 450) {
+-          e.preventDefault();
+-          lastCommandTapRef.current = 0;
+-          summonSearch();
+-          return;
+-        }
+-        lastCommandTapRef.current = now;
+-      }
+       // 全局：⌘K / Ctrl+K 呼出搜索（任意模式、任意焦点）
+       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+         e.preventDefault();
+         summonSearch();
+         return;
+       }
+-      // ⌘/ / Ctrl+/ 呼出关键点(标签)面板（任意模式可用）
+-      if (isKeyPointShortcut(e)) {
++      // ⌘/ 呼出关键点(标签)面板（检索模式）
++      if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+         e.preventDefault();
+-        e.stopPropagation();
+-        summonKeyPoints();
++        if (mode === 'search') setKpOpen((v) => !v);
++        else { setMode('search'); setKpOpen(true); }
+         return;
+       }
+       const modalOpen = Boolean(openId && !isSearchList);
+@@ -438,7 +346,7 @@
+     }
+     document.addEventListener('keydown', handleKey);
+     return () => document.removeEventListener('keydown', handleKey);
+-  }, [openId, aiOpen, formOpen, isSearchList, mode, viewType, query, sel, results, suggestions, sugSel, doubleCommandEnabled, closeAll, summonSearch, summonKeyPoints, applySuggestion]);
++  }, [openId, aiOpen, formOpen, isSearchList, mode, viewType, query, sel, results, suggestions, sugSel, closeAll, summonSearch, applySuggestion]);
+ 
+   // 知识点的增删改：同步到共享 entries，检索/画布即时反映
+   const handleCreate = useCallback(async (input: ApiEntryInput): Promise<Entry> => {
+@@ -472,15 +380,10 @@
+     setEntries((prev) => [...prev.filter((item) => item.id !== entry.id), entry]);
+   }, []);
+   const handleStartKnowledgeBaseJob = useCallback(async (domain: string): Promise<void> => {
+-    const nextDomain = domain.trim();
+-    if (!nextDomain) {
+-      toast('请输入要生成的知识库领域', 'info');
+-      return;
+-    }
+-    const job = await startGenerateKnowledgeBaseJob({ domain: nextDomain });
++    const job = await startGenerateKnowledgeBaseJob({ domain });
+     setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+     setAiTaskPanelOpen(true);
+-    toast(`「${nextDomain}」已开始后台生成`, 'success');
++    toast(`「${domain}」已在后台生成`, 'success');
+   }, []);
+ 
+   const handleStartFolderInitJob = useCallback(async (input: { kbId: string; parentId?: string | null; domain?: string }): Promise<void> => {
+@@ -511,18 +414,6 @@
+     toast('已开始分析当前知识点', 'success');
+   }, []);
+ 
+-  const handleStartAgentEditJob = useCallback(async (input: {
+-    kbId: string;
+-    instruction: string;
+-    folderId?: string | null;
+-    entryId?: string;
+-  }): Promise<void> => {
+-    const job = await startAgentEditJob(input);
+-    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+-    setAiTaskPanelOpen(true);
+-    toast('AI 正在生成调整计划', 'success');
+-  }, []);
+-
+   const handleCancelAiJob = useCallback(async (id: string): Promise<void> => {
+     const job = await cancelAiJob(id);
+     setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+@@ -536,22 +427,6 @@
+     toast(job.resumable ? `已继续生成「${job.domain}」` : `已重新提交「${job.domain}」`, 'success');
+   }, []);
+ 
+-  const handleApplyAiJobDraft = useCallback(async (id: string): Promise<void> => {
+-    const job = await applyAiJobDraft(id);
+-    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+-    applyCompletedJobs([job]);
+-    setAiTaskPanelOpen(true);
+-    toast('已确认，AI 将开始应用调整', 'success');
+-  }, [applyCompletedJobs]);
+-
+-  const handleRevertAiJobApply = useCallback(async (id: string): Promise<void> => {
+-    const job = await revertAiJobApply(id);
+-    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+-    applyCompletedJobs([job]);
+-    if (job.status === 'failed') toast(`撤销失败：${job.error ?? '请稍后重试'}`, 'error');
+-    else toast('已撤销本次 AI 调整', 'success');
+-  }, [applyCompletedJobs]);
+-
+   const handleClearAiJobHistory = useCallback(async (): Promise<void> => {
+     const jobs = await clearAiJobHistory();
+     setAiJobs(jobs);
+@@ -610,27 +485,9 @@
+   }, []);
+ 
+   const handleMoveKbToCategory = useCallback(async (id: string, categoryId?: string | null): Promise<void> => {
+-    const normalizedCategoryId = categoryId ?? null;
+-    const previous = kbs.find((item) => item.id === id) ?? null;
+-    const version = (kbCategoryMoveVersionRef.current.get(id) ?? 0) + 1;
+-    kbCategoryMoveVersionRef.current.set(id, version);
+-    if (previous) {
+-      setKbs((prev) => prev.map((item) => (
+-        item.id === id ? { ...item, categoryId: normalizedCategoryId, updatedAt: Date.now() } : item
+-      )));
+-    }
+-    try {
+-      const kb = await moveKbToCategory(id, normalizedCategoryId);
+-      if (kbCategoryMoveVersionRef.current.get(id) === version) {
+-        setKbs((prev) => prev.map((item) => (item.id === id ? kb : item)));
+-      }
+-    } catch (err) {
+-      if (previous && kbCategoryMoveVersionRef.current.get(id) === version) {
+-        setKbs((prev) => prev.map((item) => (item.id === id ? previous : item)));
+-      }
+-      throw err;
+-    }
+-  }, [kbs]);
++    const kb = await moveKbToCategory(id, categoryId);
++    setKbs((prev) => prev.map((item) => (item.id === id ? kb : item)));
++  }, []);
+ 
+   // 文件夹回调
+   const handleCreateFolder = useCallback(async (input: { kbId: string; parentId?: string | null; name: string }): Promise<Folder> => {
+@@ -576,7 +427,6 @@
+       onPickTag={(tag) => { setQuery(tag); setSel(0); setOpenId(null); setSugSel(-1); setKpOpen(false); }}
+       viewType={viewType}
+       onViewType={(v) => { setViewType(v); setOpenId(null); }}
+-      doubleCommandEnabled={doubleCommandEnabled}
+     />
+   ) : undefined;
+ 
+@@ -586,16 +436,7 @@
+   return (
+     <div className={`ik-theme-${theme}`} style={{ ...themeVars(t), height: '100vh', overflow: 'hidden', background: 'var(--app-bg, var(--bg))', color: 'var(--fg)', fontFamily: 'var(--font)', WebkitFontSmoothing: 'antialiased' }}>
+       <div style={{ width: '100%', height: '100%', maxWidth: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+-        <TopBar mode={mode} setMode={handleTopModeChange} theme={theme} setTheme={setTheme} searchSlot={searchField} searchTools={searchTools} trailing={
+-          <>
+-            <ShortcutMenu doubleCommandEnabled={doubleCommandEnabled} onDoubleCommandEnabled={setDoubleCommandShortcut} />
+-            {auth.authRequired && auth.authenticated && mode === 'free' && (
+-              <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-sm ik-topbar-logout" onClick={handleLogout}>
+-                <span className="ik-btn-leading-icon"><LogOut size={15} strokeWidth={2.25} /></span>退出登录
+-              </button>
+-            )}
+-          </>
+-        } />
++        <TopBar mode={mode} setMode={handleTopModeChange} theme={theme} setTheme={setTheme} searchSlot={searchField} searchTools={searchTools} />
+ 
+         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '0 clamp(16px, 2.4vw, 44px)' }}>
+           {mode === 'search' && (
+@@ -633,54 +474,47 @@
+ 
+           {mode === 'free' && (
+             <div className="ik-free-stage">
+-              {auth.authRequired && !auth.authenticated ? (
+-                <LoginPanel onLoggedIn={setAuth} />
+-              ) : (
+-                <FreeMode
+-                  entries={entries}
+-                  kbs={kbs}
+-                  kbCategories={kbCategories}
+-                  folders={folders}
+-                  freeKb={freeKb}
+-                  freeFolder={freeFolder}
+-                  setFreeKb={setFreeKb}
+-                  setFreeFolder={setFreeFolder}
+-                  onNew={() => setFormOpen(true)}
+-                  onCreate={handleCreate}
+-                  onUpdate={handleUpdate}
+-                  onDelete={handleDelete}
+-                  onReorderEntries={handleReorder}
+-                  onImported={handleImported}
+-                  onGeneratedEntry={handleGeneratedEntry}
+-                  onStartKnowledgeBaseJob={handleStartKnowledgeBaseJob}
+-                  onStartFolderInitJob={handleStartFolderInitJob}
+-                  onStartFolderEntriesJob={handleStartFolderEntriesJob}
+-                  onStartAnalyzeJob={handleStartAnalyzeJob}
+-                  onStartAnalyzeEntryJob={handleStartAnalyzeEntryJob}
+-                  onStartAgentEditJob={handleStartAgentEditJob}
+-                  onCreateKb={handleCreateKb}
+-                  onCreateKbCategory={handleCreateKbCategory}
+-                  onRenameKbCategory={handleRenameKbCategory}
+-                  onDeleteKbCategory={handleDeleteKbCategory}
+-                  onMoveKbToCategory={handleMoveKbToCategory}
+-                  onCreateFolder={handleCreateFolder}
+-                  onRenameKb={handleRenameKb}
+-                  onDeleteKb={handleDeleteKb}
+-                  onRenameFolder={handleRenameFolder}
+-                  onDeleteFolder={handleDeleteFolder}
+-                  onMoveFolder={handleMoveFolder}
+-                  onReorderFolders={handleReorderFolders}
+-                  aiJobs={aiJobs}
+-                  aiTaskPanelOpen={aiTaskPanelOpen}
+-                  onAiTaskPanelOpenChange={setAiTaskPanelOpen}
+-                  onOpenAiJobResult={handleOpenAiJobResult}
+-                  onCancelAiJob={handleCancelAiJob}
+-                  onRetryAiJob={handleRetryAiJob}
+-                  onApplyAiJobDraft={handleApplyAiJobDraft}
+-                  onRevertAiJobApply={handleRevertAiJobApply}
+-                  onClearAiJobHistory={handleClearAiJobHistory}
+-                />
+-              )}
++              <FreeMode
++                entries={entries}
++                kbs={kbs}
++                kbCategories={kbCategories}
++                folders={folders}
++                freeKb={freeKb}
++                freeFolder={freeFolder}
++                setFreeKb={setFreeKb}
++                setFreeFolder={setFreeFolder}
++                onNew={() => setFormOpen(true)}
++                onCreate={handleCreate}
++                onUpdate={handleUpdate}
++                onDelete={handleDelete}
++                onReorderEntries={handleReorder}
++                onImported={handleImported}
++                onGeneratedEntry={handleGeneratedEntry}
++                onStartKnowledgeBaseJob={handleStartKnowledgeBaseJob}
++                onStartFolderInitJob={handleStartFolderInitJob}
++                onStartFolderEntriesJob={handleStartFolderEntriesJob}
++                onStartAnalyzeJob={handleStartAnalyzeJob}
++                onStartAnalyzeEntryJob={handleStartAnalyzeEntryJob}
++                onCreateKb={handleCreateKb}
++                onCreateKbCategory={handleCreateKbCategory}
++                onRenameKbCategory={handleRenameKbCategory}
++                onDeleteKbCategory={handleDeleteKbCategory}
++                onMoveKbToCategory={handleMoveKbToCategory}
++                onCreateFolder={handleCreateFolder}
++                onRenameKb={handleRenameKb}
++                onDeleteKb={handleDeleteKb}
++                onRenameFolder={handleRenameFolder}
++                onDeleteFolder={handleDeleteFolder}
++                onMoveFolder={handleMoveFolder}
++                onReorderFolders={handleReorderFolders}
++                aiJobs={aiJobs}
++                aiTaskPanelOpen={aiTaskPanelOpen}
++                onAiTaskPanelOpenChange={setAiTaskPanelOpen}
++                onOpenAiJobResult={handleOpenAiJobResult}
++                onCancelAiJob={handleCancelAiJob}
++                onRetryAiJob={handleRetryAiJob}
++                onClearAiJobHistory={handleClearAiJobHistory}
++              />
+             </div>
+           )}
+ 
+@@ -743,8 +577,6 @@
+           onOpenResult={handleOpenAiJobResult}
+           onCancel={handleCancelAiJob}
+           onRetry={handleRetryAiJob}
+-          onApplyAgentEdit={handleApplyAiJobDraft}
+-          onRevertAgentEdit={handleRevertAiJobApply}
+           onClearHistory={handleClearAiJobHistory}
+         />
+       )}

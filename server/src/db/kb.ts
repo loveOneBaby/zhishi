@@ -63,11 +63,11 @@ export async function renameKb(id: string, name: string): Promise<KnowledgeBase 
 }
 
 export async function updateKbCategory(id: string, categoryId?: string | null): Promise<KnowledgeBase | null> {
-  if (!await getKb(id)) return null;
   const now = Date.now();
-  await db.prepare('UPDATE knowledge_bases SET categoryId = ?, updatedAt = ? WHERE id = ?')
-    .run(await normalizeCategoryId(categoryId), now, id);
-  return getKb(id);
+  const normalizedCategoryId = await normalizeCategoryId(categoryId);
+  const row = await db.prepare('UPDATE knowledge_bases SET categoryId = ?, updatedAt = ? WHERE id = ? RETURNING *')
+    .get(normalizedCategoryId, now, id) as unknown as KbRow | undefined;
+  return row ? rowToKb(row) : null;
 }
 
 // 删除知识库：级联删除其下所有文件夹与知识点

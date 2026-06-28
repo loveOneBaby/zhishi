@@ -1,9 +1,28 @@
 import { randomUUID } from 'node:crypto';
-import { clearStoredAiJobHistory, getKb, listEntries, listFolders, listStoredAiJobs, markInterruptedAiJobs, pruneStoredAiJobs, saveAiJob } from '../db.js';
+import {
+  clearStoredAiJobHistory,
+  createEntry,
+  createEntryVersion,
+  deleteEntry,
+  deleteFolder,
+  ensureFolder,
+  getEntry,
+  getFolder,
+  getKb,
+  listEntries,
+  listFolders,
+  listStoredAiJobs,
+  markInterruptedAiJobs,
+  pruneStoredAiJobs,
+  renameFolder,
+  saveAiJob,
+  updateEntry,
+} from '../db.js';
 import {
   generateEntryInputStream,
   generateFolderTreeDraftStream,
   generateKnowledgeBasePlanStream,
+  rewriteEntryInputStream,
   type GenerateEntryEvent,
   type GenerateKnowledgeBaseEvent,
   type GenerateFolderTreeEvent,
@@ -16,13 +35,14 @@ import { createFoldersFromDraft, createKnowledgeBaseWriterFromDraft, createKnowl
 import { folderPathLabel } from './utils.js';
 import { searchEntries } from '../search.js';
 import { analyzeKnowledgeBase, analyzeEntry, type KbAnalysis } from '../ai-analyze.js';
-import type { Folder } from '../types.js';
+import { planKnowledgeBaseEdit, type AgentEditAction, type AgentEditPlan } from '../ai-agent-edit.js';
+import type { Entry, Folder } from '../types.js';
 
 export type AiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface AiKnowledgeBaseJob {
   id: string;
-  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze';
+  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze' | 'agent-edit';
   domain: string;
   questionCount: number;
   kbId?: string;
@@ -30,13 +50,16 @@ export interface AiKnowledgeBaseJob {
   entryId?: string;
   parentId?: string | null;
   targetPath?: string;
+  instruction?: string;
   status: AiJobStatus;
   logs: string[];
   modelOutput: string;
   parsed?: { kbName: string; folders: number; questions: number };
-  plan?: GeneratedKbDraft;
+  plan?: GeneratedKbDraft | AgentEditPlan;
   result?: GeneratedKnowledgeBaseResult;
   analysis?: KbAnalysis;
+  agentPhase?: 'draft' | 'applying' | 'applied' | 'reverted';
+  rollback?: AgentEditRollback;
   resumable?: boolean;
   error?: string;
   abortRequested?: boolean;
@@ -49,14 +72,28 @@ export interface AiKnowledgeBaseJob {
   totalTokens: number;
 }
 
+export interface AgentEditRollback {
+  createdFolderIds: string[];
+  createdEntryIds: string[];
+  updatedEntries: Entry[];
+  renamedFolders: Folder[];
+  appliedAt: number;
+  revertedAt?: number;
+}
+
 export const aiJobs = new Map<string, AiKnowledgeBaseJob>();
 
 const MAX_JOB_OUTPUT = 160_000;
+const MAX_JOB_LIST_OUTPUT = 12_000;
 const MAX_JOBS = 30;
 const runningControllers = new Map<string, AbortController>();
 
 function trimJobOutput(value: string): string {
   return value.length > MAX_JOB_OUTPUT ? value.slice(-MAX_JOB_OUTPUT) : value;
+}
+
+function trimJobListOutput(value: string): string {
+  return value.length > MAX_JOB_LIST_OUTPUT ? value.slice(-MAX_JOB_LIST_OUTPUT) : value;
 }
 
 async function persistJob(job: AiKnowledgeBaseJob): Promise<void> {
@@ -105,6 +142,8 @@ export async function jobSnapshot(job: AiKnowledgeBaseJob): Promise<AiKnowledgeB
   const kbExists = job.kbId ? Boolean(await getKb(job.kbId)) : false;
   const resumable = job.kind === 'analyze'
     ? (Boolean(job.entryId) || (Boolean(job.kbId && job.kbName) && kbExists))
+    : job.kind === 'agent-edit'
+      ? Boolean(job.kbId && job.instruction && kbExists)
     : job.kind === 'folder-init' || job.kind === 'folder-entries'
       ? (Boolean(job.kbId && job.kbName) && kbExists)
       : await canResumeKnowledgeBaseJob(job);
@@ -120,9 +159,45 @@ export async function jobSnapshot(job: AiKnowledgeBaseJob): Promise<AiKnowledgeB
   };
 }
 
+function cheapResumable(job: AiKnowledgeBaseJob): boolean {
+  if (job.status === 'queued' || job.status === 'running') return false;
+  if (job.kind === 'analyze') return Boolean(job.entryId || (job.kbId && job.kbName));
+  if (job.kind === 'agent-edit') return Boolean(job.kbId && job.instruction);
+  if (job.kind === 'folder-init' || job.kind === 'folder-entries') return Boolean(job.kbId && job.kbName);
+  return Boolean(job.plan || job.kbId || job.modelOutput);
+}
+
+function compactRollback(rollback: AgentEditRollback | undefined): AgentEditRollback | undefined {
+  if (!rollback) return undefined;
+  // 列表接口只需要知道“可撤销”，不需要把所有旧知识点正文反复轮询下发。
+  return {
+    createdFolderIds: [],
+    createdEntryIds: [],
+    updatedEntries: [],
+    renamedFolders: [],
+    appliedAt: rollback.appliedAt,
+    revertedAt: rollback.revertedAt,
+  };
+}
+
+function listJobSnapshot(job: AiKnowledgeBaseJob): AiKnowledgeBaseJob {
+  return {
+    ...job,
+    resumable: cheapResumable(job),
+    logs: [...job.logs],
+    modelOutput: trimJobListOutput(job.modelOutput),
+    rollback: compactRollback(job.rollback),
+    result: job.result ? {
+      kb: job.result.kb,
+      folders: [...job.result.folders],
+      entries: [...job.result.entries],
+    } : undefined,
+  };
+}
+
 export async function listJobSnapshots(): Promise<AiKnowledgeBaseJob[]> {
   const jobs = [...aiJobs.values()].sort((a, b) => b.createdAt - a.createdAt);
-  return Promise.all(jobs.map(jobSnapshot));
+  return jobs.map(listJobSnapshot);
 }
 
 export async function clearAiJobHistory(): Promise<AiKnowledgeBaseJob[]> {
@@ -149,6 +224,7 @@ function createBaseJob(input: {
   entryId?: string;
   parentId?: string | null;
   targetPath?: string;
+  instruction?: string;
   logs: string[];
 }): AiKnowledgeBaseJob {
   const now = Date.now();
@@ -162,6 +238,7 @@ function createBaseJob(input: {
     entryId: input.entryId,
     parentId: input.parentId,
     targetPath: input.targetPath,
+    instruction: input.instruction,
     status: 'queued',
     logs: input.logs,
     modelOutput: '',
@@ -181,6 +258,7 @@ function scheduleJob(job: AiKnowledgeBaseJob): void {
     if (job.kind === 'folder-init') void runFolderInitJob(job.id, job.questionCount || 18);
     else if (job.kind === 'folder-entries') void runFolderEntriesJob(job.id);
     else if (job.kind === 'analyze') void runAnalyzeJob(job.id);
+    else if (job.kind === 'agent-edit') void runAgentEditJob(job.id);
     else void runKnowledgeBaseJob(job.id);
   }, 0);
 }
@@ -205,9 +283,14 @@ function extractPlanFromOutput(job: AiKnowledgeBaseJob): GeneratedKbDraft | null
   }
 }
 
+function isGeneratedKbDraft(value: unknown): value is GeneratedKbDraft {
+  const draft = value as GeneratedKbDraft | undefined;
+  return Boolean(draft && typeof draft === 'object' && typeof draft.kbName === 'string' && Array.isArray(draft.folders) && Array.isArray(draft.questions));
+}
+
 async function canResumeKnowledgeBaseJob(job: AiKnowledgeBaseJob): Promise<boolean> {
   if (job.kbId && !await getKb(job.kbId)) return false;
-  return Boolean(job.plan || extractPlanFromOutput(job));
+  return Boolean(isGeneratedKbDraft(job.plan) || extractPlanFromOutput(job));
 }
 
 export async function discardAiJobResultsForKb(kbId: string): Promise<void> {
@@ -318,6 +401,33 @@ export async function startAnalyzeEntryJob(input: { entryId: string; entryTitle:
   return job;
 }
 
+export async function startAgentEditJob(input: {
+  kbId: string;
+  kbName: string;
+  instruction: string;
+  parentId?: string | null;
+  entryId?: string;
+  targetPath?: string;
+}): Promise<AiKnowledgeBaseJob> {
+  const title = input.instruction.replace(/\s+/g, ' ').trim().slice(0, 64);
+  const job = createBaseJob({
+    kind: 'agent-edit',
+    domain: title ? `调整「${input.kbName}」：${title}` : `调整「${input.kbName}」`,
+    kbId: input.kbId,
+    kbName: input.kbName,
+    parentId: input.parentId ?? null,
+    entryId: input.entryId,
+    targetPath: input.targetPath,
+    instruction: input.instruction,
+    logs: ['AI 调整任务已创建，等待后台执行'],
+  });
+  aiJobs.set(job.id, job);
+  await persistJob(job);
+  await pruneJobs();
+  scheduleJob(job);
+  return job;
+}
+
 // 启动时恢复：把上次中断的 queued/running 任务重置为 queued，重建内存表，并继续调度。
 export async function initAiJobs(): Promise<void> {
   await markInterruptedAiJobs();
@@ -329,7 +439,11 @@ export async function initAiJobs(): Promise<void> {
         ? '服务已恢复，继续目录初始化任务'
         : job.kind === 'folder-entries'
           ? '服务已恢复，继续目录知识点生成任务'
-          : '服务已恢复，继续 AI 建库任务');
+          : job.kind === 'analyze'
+            ? '服务已恢复，继续 AI 分析任务'
+            : job.kind === 'agent-edit'
+              ? '服务已恢复，继续 AI 调整任务'
+              : '服务已恢复，继续 AI 建库任务');
       scheduleJob(job);
     }
   }
@@ -407,6 +521,19 @@ export async function retryAiJob(id: string): Promise<AiKnowledgeBaseJob | null>
     scheduleJob(job);
     return jobSnapshot(job);
   }
+  if (job.kind === 'agent-edit') {
+    if (!job.kbId || !job.kbName || !job.instruction) return null;
+    job.status = 'queued';
+    job.error = undefined;
+    job.abortRequested = false;
+    job.agentPhase = undefined;
+    job.rollback = undefined;
+    job.plan = undefined;
+    job.result = undefined;
+    await pushJobLog(job, '重新提交 AI 调整任务，将基于当前知识库重新规划');
+    scheduleJob(job);
+    return jobSnapshot(job);
+  }
   if (job.kind === 'folder-init' || job.kind === 'folder-entries') {
     if (!job.kbId || !job.kbName) return null;
     job.status = 'queued';
@@ -425,6 +552,132 @@ export async function retryAiJob(id: string): Promise<AiKnowledgeBaseJob | null>
     return jobSnapshot(job);
   }
   return startKnowledgeBaseJob(job.domain, job.questionCount || 18);
+}
+
+export async function applyAgentEditJob(id: string): Promise<AiKnowledgeBaseJob | null> {
+  const job = aiJobs.get(id);
+  if (!job || job.kind !== 'agent-edit') return null;
+  if (job.status === 'queued' || job.status === 'running') return jobSnapshot(job);
+  const plan = planFromJob(job);
+  if (!plan) return null;
+  if (!job.kbId || !job.kbName || !job.instruction || !await getKb(job.kbId)) return null;
+  if (job.agentPhase === 'applied') return jobSnapshot(job);
+  job.plan = plan;
+  job.status = 'queued';
+  job.error = undefined;
+  job.abortRequested = false;
+  job.agentPhase = 'applying';
+  job.rollback = undefined;
+  await pushJobLog(job, '用户已确认调整计划，等待后台应用');
+  scheduleJob(job);
+  return jobSnapshot(job);
+}
+
+function folderDepthById(folderId: string, folders: Folder[]): number {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  let depth = 0;
+  let cursor = byId.get(folderId);
+  const seen = new Set<string>();
+  while (cursor?.parentId && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    depth += 1;
+    cursor = byId.get(cursor.parentId);
+  }
+  return depth;
+}
+
+function folderSubtreeFromSnapshot(folderId: string, folders: Folder[]): Set<string> {
+  const ids = new Set<string>([folderId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of folders) {
+      if (folder.parentId && ids.has(folder.parentId) && !ids.has(folder.id)) {
+        ids.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
+}
+
+async function revertAgentEditRollback(job: AiKnowledgeBaseJob): Promise<void> {
+  if (!job.kbId || !job.rollback) throw new Error('缺少可撤销的 AI 调整记录');
+  const rollback = job.rollback;
+  const createdEntryIds = new Set(rollback.createdEntryIds);
+  const createdFolderIds = new Set(rollback.createdFolderIds);
+
+  for (const before of rollback.updatedEntries) {
+    const current = await getEntry(before.id);
+    if (!current) continue;
+    await createEntryVersion(current, 'ai-agent-rollback');
+    await updateEntry(before.id, entryToInput(before));
+    await pushJobLog(job, `撤销：已恢复知识点「${before.title}」`);
+  }
+
+  for (const before of rollback.renamedFolders) {
+    const current = await getFolder(before.id);
+    if (!current) continue;
+    await renameFolder(before.id, before.name);
+    await pushJobLog(job, `撤销：已恢复目录名「${before.name}」`);
+  }
+
+  for (const entryId of [...createdEntryIds]) {
+    const current = await getEntry(entryId);
+    if (!current) continue;
+    await deleteEntry(entryId);
+    await pushJobLog(job, `撤销：已删除新增知识点「${current.title}」`);
+  }
+
+  const foldersForDepth = await listFolders();
+  const folderIds = [...createdFolderIds].sort((a, b) => folderDepthById(b, foldersForDepth) - folderDepthById(a, foldersForDepth));
+  for (const folderId of folderIds) {
+    const folders = await listFolders();
+    const current = folders.find((folder) => folder.id === folderId);
+    if (!current) continue;
+    const subtree = folderSubtreeFromSnapshot(folderId, folders);
+    const hasForeignFolder = folders.some((folder) => subtree.has(folder.id) && !createdFolderIds.has(folder.id));
+    const entries = await listEntries();
+    const hasForeignEntry = entries.some((entry) => entry.folderId && subtree.has(entry.folderId) && !createdEntryIds.has(entry.id));
+    if (hasForeignFolder || hasForeignEntry) {
+      await pushJobLog(job, `撤销：跳过目录「${current.name}」，其中已有非本次 AI 新增内容`);
+      continue;
+    }
+    await deleteFolder(folderId);
+    await pushJobLog(job, `撤销：已删除新增目录「${current.name}」`);
+  }
+
+  rollback.revertedAt = Date.now();
+  job.rollback = rollback;
+}
+
+export async function revertAgentEditJob(id: string): Promise<AiKnowledgeBaseJob | null> {
+  const job = aiJobs.get(id);
+  if (!job || job.kind !== 'agent-edit') return null;
+  if (job.status === 'queued' || job.status === 'running') return jobSnapshot(job);
+  if (job.agentPhase !== 'applied' || !job.rollback) return null;
+  job.status = 'running';
+  job.error = undefined;
+  job.abortRequested = false;
+  resetJobStats(job);
+  await pushJobLog(job, '开始撤销本次 AI 调整');
+  try {
+    await revertAgentEditRollback(job);
+    job.agentPhase = 'reverted';
+    job.status = 'succeeded';
+    job.abortRequested = false;
+    await pushJobLog(job, 'AI 调整已撤销');
+    await refreshAgentEditResult(job);
+  } catch (err) {
+    job.status = 'failed';
+    job.error = err instanceof Error ? err.message : String(err);
+    await pushJobLog(job, job.error);
+    await touchJob(job);
+  } finally {
+    finishJobTimer(job);
+    await touchJob(job);
+  }
+  return jobSnapshot(job);
 }
 
 function isAbortError(err: unknown): boolean {
@@ -462,6 +715,299 @@ async function stopJobForDeletedKb(job: AiKnowledgeBaseJob): Promise<void> {
   await pushJobLog(job, '知识库已删除，任务已停止');
 }
 
+function agentEditCounts(actions: AgentEditAction[]): { structure: number; content: number } {
+  return {
+    structure: actions.filter((action) => action.kind === 'create-folder' || action.kind === 'rename-folder' || action.kind === 'move-entry').length,
+    content: actions.filter((action) => action.kind === 'create-entry' || action.kind === 'rewrite-entry').length,
+  };
+}
+
+function isAgentEditPlan(value: unknown): value is AgentEditPlan {
+  const plan = value as AgentEditPlan | undefined;
+  return Boolean(plan && typeof plan === 'object' && typeof plan.summary === 'string' && Array.isArray(plan.actions));
+}
+
+function planFromJob(job: AiKnowledgeBaseJob): AgentEditPlan | null {
+  if (isAgentEditPlan(job.plan)) return job.plan;
+  const marker = job.modelOutput.indexOf('---JSON---');
+  if (marker < 0) return null;
+  try {
+    const parsed = JSON.parse(job.modelOutput.slice(marker + '---JSON---'.length).trim()) as unknown;
+    return isAgentEditPlan(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function entryToInput(entry: Entry) {
+  return {
+    title: entry.title,
+    kbId: entry.kbId,
+    folderId: entry.folderId,
+    cat: entry.cat,
+    py: entry.py,
+    tags: [...entry.tags],
+    summary: entry.summary,
+    intro: entry.intro,
+    nodes: cloneJson(entry.nodes),
+    doc: entry.doc ? cloneJson(entry.doc) : undefined,
+  };
+}
+
+async function findExistingFolder(kbId: string, name: string, parentId: string | null): Promise<Folder | null> {
+  const target = name.trim();
+  if (!target) return null;
+  return (await listFolders()).find((folder) => folder.kbId === kbId && folder.parentId === parentId && folder.name === target) ?? null;
+}
+
+async function resolveAgentActionFolder(
+  kbId: string,
+  action: AgentEditAction,
+  folderRefs: Map<string, string>,
+  fallback: string | null,
+): Promise<string | null> {
+  if (action.folderRef) {
+    const refId = folderRefs.get(action.folderRef);
+    if (!refId) throw new Error(`目录引用尚未创建：${action.folderRef}`);
+    return refId;
+  }
+  if (action.folderId === undefined) return fallback;
+  if (action.folderId === null) return null;
+  const folder = await getFolder(action.folderId);
+  if (!folder || folder.kbId !== kbId) throw new Error(`目标目录不存在或不属于当前知识库：${action.folderId}`);
+  return folder.id;
+}
+
+async function refreshAgentEditResult(job: AiKnowledgeBaseJob): Promise<void> {
+  const result = await hydrateKnowledgeBaseResult(job);
+  if (result) await updateJobResult(job, result);
+  else await touchJob(job);
+}
+
+async function buildAgentEditDraft(job: AiKnowledgeBaseJob, controller: AbortController, jobId: string): Promise<void> {
+  if (!job.kbId || !job.instruction) throw new Error('缺少知识库或调整指令');
+  const kb = await getKb(job.kbId);
+  if (!kb) throw new Error('知识库不存在');
+
+  await pushJobLog(job, 'Agent 第 1 步：读取当前目录和知识点，生成调整计划');
+  const planned = await planKnowledgeBaseEdit({
+    kbId: kb.id,
+    kbName: kb.name,
+    instruction: job.instruction,
+    folderId: job.parentId ?? null,
+    entryId: job.entryId,
+    signal: controller.signal,
+    onUsage: (usage) => void recordUsage(job, usage),
+  });
+  if (isJobCancelled(jobId)) return;
+
+  const counts = agentEditCounts(planned.plan.actions);
+  job.plan = planned.plan;
+  job.agentPhase = 'draft';
+  job.rollback = undefined;
+  job.result = undefined;
+  job.modelOutput = trimJobOutput([
+    `用户想法：${job.instruction}`,
+    '',
+    `执行摘要：${planned.plan.summary}`,
+    '',
+    '---JSON---',
+    JSON.stringify(planned.plan, null, 2),
+  ].join('\n'));
+  job.parsed = { kbName: kb.name, folders: counts.structure, questions: counts.content };
+  job.status = 'succeeded';
+  job.abortRequested = false;
+  await pushJobLog(job, `计划已生成：${counts.structure} 个结构动作 · ${counts.content} 个内容动作，等待确认应用`);
+  await touchJob(job);
+}
+
+async function applyAgentEditPlanToKb(job: AiKnowledgeBaseJob, controller: AbortController, jobId: string): Promise<void> {
+  if (!job.kbId || !job.instruction) throw new Error('缺少知识库或调整指令');
+  const kb = await getKb(job.kbId);
+  if (!kb) throw new Error('知识库不存在');
+  const plan = planFromJob(job);
+  if (!plan) throw new Error('缺少待应用的 AI 调整计划');
+  job.plan = plan;
+  job.agentPhase = 'applying';
+  await refreshAgentEditResult(job);
+
+  const rollback: AgentEditRollback = {
+    createdFolderIds: [],
+    createdEntryIds: [],
+    updatedEntries: [],
+    renamedFolders: [],
+    appliedAt: Date.now(),
+  };
+  const recordEntry = (entry: Entry): void => {
+    if (!rollback.updatedEntries.some((item) => item.id === entry.id)) rollback.updatedEntries.push(cloneJson(entry));
+  };
+  const recordFolder = (folder: Folder): void => {
+    if (!rollback.renamedFolders.some((item) => item.id === folder.id)) rollback.renamedFolders.push(cloneJson(folder));
+  };
+
+  const folderRefs = new Map<string, string>();
+  const actions = plan.actions;
+  await pushJobLog(job, `开始应用调整计划：${actions.length} 个动作`);
+  for (let index = 0; index < actions.length; index += 1) {
+    if (isJobCancelled(jobId)) return;
+    if (!await getKb(kb.id)) {
+      await stopJobForDeletedKb(job);
+      return;
+    }
+    const action = actions[index];
+    const label = `${index + 1}/${actions.length}`;
+    if (action.kind === 'note') {
+      await pushJobLog(job, `动作 ${label}：${action.title}`);
+      continue;
+    }
+
+    if (action.kind === 'create-folder') {
+      const parentId = await resolveAgentActionFolder(kb.id, action, folderRefs, job.parentId ?? null);
+      const existed = await findExistingFolder(kb.id, action.name ?? action.title, parentId);
+      const folder = await ensureFolder(kb.id, action.name ?? action.title, parentId);
+      if (!existed && !rollback.createdFolderIds.includes(folder.id)) rollback.createdFolderIds.push(folder.id);
+      if (action.ref) folderRefs.set(action.ref, folder.id);
+      if (action.name) folderRefs.set(action.name, folder.id);
+      await pushJobLog(job, `动作 ${label}：已创建/复用目录「${folder.name}」`);
+      await refreshAgentEditResult(job);
+      continue;
+    }
+
+    if (action.kind === 'rename-folder') {
+      if (!action.folderId || !action.name) throw new Error('目录改名动作缺少目录或新名称');
+      const folder = await getFolder(action.folderId);
+      if (!folder || folder.kbId !== kb.id) throw new Error('目录不存在或不属于当前知识库');
+      recordFolder(folder);
+      const renamed = await renameFolder(folder.id, action.name);
+      await pushJobLog(job, `动作 ${label}：已重命名目录为「${renamed?.name ?? action.name}」`);
+      await refreshAgentEditResult(job);
+      continue;
+    }
+
+    if (action.kind === 'move-entry') {
+      if (!action.entryId) throw new Error('移动知识点动作缺少 entryId');
+      const current = await getEntry(action.entryId);
+      if (!current || current.kbId !== kb.id) throw new Error('知识点不存在或不属于当前知识库');
+      recordEntry(current);
+      const targetFolderId = await resolveAgentActionFolder(kb.id, action, folderRefs, job.parentId ?? null);
+      const moved = await updateEntry(current.id, { kbId: current.kbId, folderId: targetFolderId });
+      await pushJobLog(job, `动作 ${label}：已移动知识点「${moved?.title ?? current.title}」`);
+      await refreshAgentEditResult(job);
+      continue;
+    }
+
+    if (action.kind === 'create-entry') {
+      const targetFolderId = await resolveAgentActionFolder(kb.id, action, folderRefs, job.parentId ?? null);
+      const topic = [action.topic || action.name || action.title, action.detail].filter(Boolean).join('\n');
+      const pathLabel = await folderPathLabel(targetFolderId);
+      await pushJobLog(job, `动作 ${label}：生成知识点「${action.topic || action.name || action.title}」`);
+      job.modelOutput = trimJobOutput(`${job.modelOutput}\n\n---AGENT CREATE ${label}: ${action.title}---\n`);
+      await touchJob(job);
+      const context = searchEntries((await listEntries()).filter((entry) => entry.kbId === kb.id), topic);
+      const input = await generateEntryInputStream({
+        topic,
+        kbName: kb.name,
+        folderPath: pathLabel,
+        context,
+        signal: controller.signal,
+      }, (event: GenerateEntryEvent) => {
+        const current = aiJobs.get(jobId);
+        if (!current || current.status === 'cancelled') return;
+        if (event.type === 'stage') void pushJobLog(current, `动作 ${label}：${event.message}`);
+        if (event.type === 'model-delta') {
+          current.modelOutput = trimJobOutput(`${current.modelOutput}${event.content}`);
+          void touchJob(current);
+        }
+        if (event.type === 'parsed') void pushJobLog(current, `动作 ${label}：解析完成「${event.title}」`);
+        if (event.type === 'usage') void recordUsage(current, event.usage);
+      });
+      if (isJobCancelled(jobId)) return;
+      const entry = await createEntry({ ...input, kbId: kb.id, folderId: targetFolderId });
+      rollback.createdEntryIds.push(entry.id);
+      await pushJobLog(job, `动作 ${label}：已新增知识点「${entry.title}」`);
+      await refreshAgentEditResult(job);
+      continue;
+    }
+
+    if (action.kind === 'rewrite-entry') {
+      if (!action.entryId) throw new Error('改写知识点动作缺少 entryId');
+      const current = await getEntry(action.entryId);
+      if (!current || current.kbId !== kb.id) throw new Error('知识点不存在或不属于当前知识库');
+      recordEntry(current);
+      const instruction = action.instruction || action.detail || job.instruction;
+      await pushJobLog(job, `动作 ${label}：改写知识点「${current.title}」`);
+      job.modelOutput = trimJobOutput(`${job.modelOutput}\n\n---AGENT REWRITE ${label}: ${current.title}---\n`);
+      await touchJob(job);
+      const input = await rewriteEntryInputStream({
+        entry: current,
+        instruction,
+        signal: controller.signal,
+      }, (event: GenerateEntryEvent) => {
+        const running = aiJobs.get(jobId);
+        if (!running || running.status === 'cancelled') return;
+        if (event.type === 'stage') void pushJobLog(running, `动作 ${label}：${event.message}`);
+        if (event.type === 'model-delta') {
+          running.modelOutput = trimJobOutput(`${running.modelOutput}${event.content}`);
+          void touchJob(running);
+        }
+        if (event.type === 'parsed') void pushJobLog(running, `动作 ${label}：改写解析完成「${event.title}」`);
+        if (event.type === 'usage') void recordUsage(running, event.usage);
+      });
+      if (isJobCancelled(jobId)) return;
+      await createEntryVersion(current, 'ai-agent-edit');
+      const rewritten = await updateEntry(current.id, {
+        ...input,
+        kbId: current.kbId,
+        folderId: current.folderId,
+      });
+      await pushJobLog(job, `动作 ${label}：已改写知识点「${rewritten?.title ?? current.title}」`);
+      await refreshAgentEditResult(job);
+    }
+  }
+
+  job.rollback = rollback;
+  job.agentPhase = 'applied';
+  job.status = 'succeeded';
+  job.abortRequested = false;
+  await pushJobLog(job, `AI 调整已应用：${kb.name}`);
+  await refreshAgentEditResult(job);
+}
+
+async function runAgentEditJob(jobId: string): Promise<void> {
+  const job = aiJobs.get(jobId);
+  if (!job || job.status === 'cancelled') return;
+  if (runningControllers.has(jobId)) return;
+  const controller = new AbortController();
+  runningControllers.set(jobId, controller);
+  job.status = 'running';
+  job.abortRequested = false;
+  resetJobStats(job);
+  await pushJobLog(job, job.agentPhase === 'applying' ? '开始应用 AI 调整计划' : 'AI 调整任务已启动');
+  try {
+    if (job.agentPhase === 'applying') await applyAgentEditPlanToKb(job, controller, jobId);
+    else await buildAgentEditDraft(job, controller, jobId);
+  } catch (err) {
+    if (isJobCancelled(jobId) || isAbortError(err)) {
+      job.status = 'cancelled';
+      job.error = '用户已取消任务';
+      await pushJobLog(job, '任务已取消');
+    } else {
+      job.status = 'failed';
+      job.error = err instanceof Error ? err.message : String(err);
+      await pushJobLog(job, job.error);
+    }
+    await touchJob(job);
+  } finally {
+    finishJobTimer(job);
+    await touchJob(job);
+    runningControllers.delete(jobId);
+  }
+}
+
 async function runKnowledgeBaseJob(jobId: string): Promise<void> {
   const job = aiJobs.get(jobId);
   if (!job || job.status === 'cancelled') return;
@@ -473,7 +1019,7 @@ async function runKnowledgeBaseJob(jobId: string): Promise<void> {
   resetJobStats(job);
   await pushJobLog(job, '后台任务已启动');
   try {
-    let plan = job.plan ?? extractPlanFromOutput(job);
+    let plan = isGeneratedKbDraft(job.plan) ? job.plan : extractPlanFromOutput(job);
     const recoveredPlan = Boolean(plan);
     if (plan) {
       job.plan = plan;

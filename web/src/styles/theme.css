@@ -1,15 +1,20 @@
 /* 毛玻璃主题:环境有玻璃感,正文和树保持清晰可读 */
 .ik-theme-glass {
-  --app-bg: linear-gradient(135deg, #edf4fb 0%, #f8fafc 42%, #edf8f6 100%);
-  --chrome-bg: rgba(247,250,255,.76);
-  --glass-panel: rgba(255,255,255,.68);
-  --glass-panel-strong: rgba(255,255,255,.86);
-  --glass-border: rgba(255,255,255,.64);
-  --glass-reader-bg: rgba(255,255,255,.82);
-  --glass-shadow: 0 18px 46px rgba(40,54,82,.1), inset 0 1px 0 rgba(255,255,255,.5);
-  --glass-shadow-soft: 0 8px 28px rgba(40,54,82,.07);
+  --app-bg:
+    linear-gradient(120deg, rgba(215,226,244,.82) 0%, rgba(246,249,253,.92) 38%, rgba(224,241,238,.82) 72%, rgba(235,240,252,.9) 100%);
+  --chrome-bg: rgba(246,250,255,.62);
+  --glass-panel: rgba(255,255,255,.54);
+  --glass-panel-mid: rgba(255,255,255,.66);
+  --glass-panel-strong: rgba(255,255,255,.82);
+  --glass-border: rgba(255,255,255,.68);
+  --glass-border-cool: rgba(104,122,154,.26);
+  --glass-reader-bg: rgba(255,255,255,.76);
+  --glass-sheen: linear-gradient(135deg, rgba(255,255,255,.62), rgba(255,255,255,.18) 42%, rgba(151,169,205,.1));
+  --glass-shadow: 0 22px 58px rgba(34,50,78,.14), 0 2px 10px rgba(34,50,78,.05), inset 0 1px 0 rgba(255,255,255,.76), inset 0 -1px 0 rgba(104,122,154,.1);
+  --glass-shadow-soft: 0 12px 34px rgba(34,50,78,.09), inset 0 1px 0 rgba(255,255,255,.62);
+  --glass-shadow-tight: 0 8px 22px rgba(34,50,78,.08), inset 0 1px 0 rgba(255,255,255,.68);
   --tree-hover-bg: rgba(255,255,255,.52);
-  --tree-active-bg: rgba(255,255,255,.7);
+  --tree-active-bg: rgba(255,255,255,.72);
 }
 .ik-theme-glass .ik-topbar,
 .ik-theme-glass .ik-action-bar,
@@ -20,15 +25,166 @@
 .ik-theme-glass .ik-command-overlay,
 .ik-theme-glass .ik-command-dialog,
 .ik-theme-glass .ik-ai-task-dock,
-.ik-theme-glass .ik-ai-task-panel {
-  backdrop-filter: blur(18px) saturate(1.25);
-  -webkit-backdrop-filter: blur(18px) saturate(1.25);
-}
-.ik-theme-glass .ik-surface,
+.ik-theme-glass .ik-ai-task-panel,
+.ik-theme-glass .ik-searchbox,
+.ik-theme-glass .ik-results-panel,
+.ik-theme-glass .ik-kp-popover,
+.ik-theme-glass .ik-kb-picker,
+.ik-theme-glass .ik-shortcuts-menu,
+.ik-theme-glass .ik-theme-menu,
+.ik-theme-glass .ik-ai-command-pop,
+.ik-theme-glass .ik-import-modal,
+.ik-theme-glass .ik-tree-panel,
+.ik-theme-glass .ik-detail-panel,
+.ik-theme-glass .ik-kb-category-panel,
 .ik-theme-glass .ik-kb-card,
 .ik-theme-glass .ik-kb-create {
+  backdrop-filter: blur(24px) saturate(1.38);
+  -webkit-backdrop-filter: blur(24px) saturate(1.38);
+}
+.ik-theme-glass .ik-surface,
+.ik-theme-glass .ik-kb-category-panel,
+.ik-theme-glass .ik-kb-card,
+.ik-theme-glass .ik-kb-create,
+.ik-theme-glass .ik-kb-picker,
+.ik-theme-glass .ik-results-panel,
+.ik-theme-glass .ik-detail-panel,
+.ik-theme-glass .ik-tree-panel,
+.ik-theme-glass .ik-ai-task-panel,
+.ik-theme-glass .ik-command-dialog,
+.ik-theme-glass .ik-import-modal {
   border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow-soft);
+  background:
+    var(--glass-sheen),
+    var(--glass-panel);
+  box-shadow: var(--glass-shadow);
+}
+.ik-theme-glass .ik-searchbox,
+.ik-theme-glass .ik-mode-switch,
+.ik-theme-glass .ik-searchbox-seg,
+.ik-theme-glass .ik-scope-chip,
+.ik-theme-glass .ik-kb-hero-stats span,
+.ik-theme-glass .ik-search-result-head,
+.ik-theme-glass .ik-ai-task-status,
+.ik-theme-glass .ik-ai-task-stats,
+.ik-theme-glass .ik-agent-plan,
+.ik-theme-glass .ik-ai-growth,
+.ik-theme-glass .ik-ai-command-zone {
+  border-color: var(--glass-border);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.6), rgba(255,255,255,.22) 55%, rgba(151,169,205,.08)),
+    rgba(255,255,255,.44);
+  box-shadow: var(--glass-shadow-tight);
+}
+.ik-theme-glass .ik-btn-secondary,
+.ik-theme-glass .ik-searchbox-btn,
+.ik-theme-glass .ik-kp-chip,
+.ik-theme-glass .ik-kb-picker-row,
+.ik-theme-glass .ik-search-suggest-chips button,
+.ik-theme-glass .ik-shortcut-row,
+.ik-theme-glass .ik-theme-menu-item,
+.ik-theme-glass .ik-ai-command-card,
+.ik-theme-glass .ik-ai-task-secondary,
+.ik-theme-glass .ik-agent-action,
+.ik-theme-glass .ik-result-kb,
+.ik-theme-glass .ik-row-action-btn {
+  border-color: rgba(255,255,255,.58);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.5), rgba(255,255,255,.18)),
+    rgba(255,255,255,.36);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.68), 0 5px 16px rgba(34,50,78,.05);
+}
+.ik-theme-glass .ik-btn-default,
+.ik-theme-glass .ik-agent-plan-primary,
+.ik-theme-glass .ik-ai-task-open {
+  border-color: rgba(255,255,255,.34);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.24), rgba(255,255,255,0) 42%),
+    color-mix(in srgb, var(--accent) 88%, #24345d);
+  box-shadow: 0 12px 28px rgba(75,98,217,.2), inset 0 1px 0 rgba(255,255,255,.28);
+}
+.ik-theme-glass .ik-result-row:hover {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.42), rgba(255,255,255,.16)),
+    rgba(255,255,255,.32);
+}
+.ik-theme-glass .ik-result-row.is-active,
+.ik-theme-glass .ik-kt-root.is-active,
+.ik-theme-glass .ik-kt-node.is-active,
+.ik-theme-glass .ik-ai-task-row.is-active {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.62), rgba(255,255,255,.24)),
+    rgba(255,255,255,.5);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.68);
+}
+.ik-theme-glass .ik-searchbox:focus-within {
+  border-color: rgba(75,98,217,.44);
+  box-shadow: 0 0 0 3px rgba(75,98,217,.13), var(--glass-shadow-tight);
+}
+.ik-theme-glass .ik-kp-popover::before {
+  border-color: var(--glass-border);
+  background: rgba(255,255,255,.72);
+}
+.ik-theme-glass .ik-kp-head,
+.ik-theme-glass .ik-kb-picker-head,
+.ik-theme-glass .ik-ai-growth-head,
+.ik-theme-glass .ik-agent-plan-head,
+.ik-theme-glass .ik-shortcuts-head,
+.ik-theme-glass .ik-ai-task-panel-head {
+  background:
+    linear-gradient(to bottom, rgba(255,255,255,.56), rgba(255,255,255,.24)),
+    rgba(255,255,255,.34);
+  border-color: rgba(255,255,255,.52);
+}
+.ik-theme-glass .ik-detail-body,
+.ik-theme-glass .ik-results-scroll,
+.ik-theme-glass .ik-ai-task-detail,
+.ik-theme-glass .ik-ai-task-list {
+  background: linear-gradient(to bottom, rgba(255,255,255,.18), rgba(255,255,255,.06));
+}
+.ik-theme-glass .ik-searchbox-btn:hover,
+.ik-theme-glass .ik-kp-chip:hover,
+.ik-theme-glass .ik-kb-picker-row.is-hover,
+.ik-theme-glass .ik-search-suggest-chips button:hover,
+.ik-theme-glass .ik-ai-command-card:hover:not(:disabled),
+.ik-theme-glass .ik-ai-task-secondary:hover,
+.ik-theme-glass .ik-theme-menu-item:hover,
+.ik-theme-glass .ik-shortcut-row:hover {
+  border-color: rgba(255,255,255,.78);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.7), rgba(255,255,255,.28)),
+    rgba(255,255,255,.54);
+  box-shadow: var(--glass-shadow-tight);
+}
+.ik-theme-glass .ik-kp-trigger {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--mut) 78%, var(--fg));
+}
+.ik-theme-glass .ik-kp-trigger:hover {
+  border-color: rgba(255,255,255,.46);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.34), rgba(255,255,255,.12)),
+    rgba(255,255,255,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.58);
+}
+.ik-theme-glass .ik-kp-trigger.is-active {
+  border-color: rgba(255,255,255,.34);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.22), rgba(255,255,255,0) 48%),
+    #142034;
+  color: #f8fbff;
+  box-shadow: 0 10px 22px rgba(20,32,52,.16), inset 0 1px 0 rgba(255,255,255,.24);
+}
+.ik-theme-glass .ik-searchbox-btn.is-active:not(.ik-kp-trigger),
+.ik-theme-glass .ik-searchbox-seg button.is-active {
+  border-color: rgba(255,255,255,.34);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.22), rgba(255,255,255,0) 48%),
+    #142034;
+  color: #f8fbff;
+  box-shadow: 0 10px 22px rgba(20,32,52,.18), inset 0 1px 0 rgba(255,255,255,.24);
 }
 .ik-theme-glass ::-webkit-scrollbar { width: 6px; height: 6px; }
 .ik-theme-glass ::-webkit-scrollbar-thumb {

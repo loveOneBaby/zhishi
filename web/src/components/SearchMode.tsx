@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Entry, Theme, KnowledgeBase, Folder } from '../types';
 import { folderPathName } from '../tree';
 import type { SearchSuggestion } from '../search';
@@ -32,8 +32,11 @@ interface Props {
   onScopeKb: (id: string | null) => void;
 }
 
+const RESULT_ROW_HEIGHT = 74;
+const RESULT_OVERSCAN = 8;
+
 export default function SearchMode(
-  { query, results, sel, viewType, theme, selectedEntry, selectedId, onOpen, onOpenAI, kbs, folders }: Props
+  { query, results, suggestions, sel, viewType, theme, selectedEntry, selectedId, onOpen, onOpenAI, onSuggest, kbs, folders, searchKb }: Props
 ) {
   const isList = viewType === 'list';
   const isCanvas = viewType === 'canvas';
@@ -41,18 +44,61 @@ export default function SearchMode(
   const selClamped = Math.min(sel, Math.max(0, results.length - 1));
   const noMatch = hasQuery && results.length === 0;
   const kbNameOf = useMemo(() => new Map(kbs.map((k) => [k.id, k.name] as const)), [kbs]);
+  const activeIndex = selectedId ? results.findIndex((entry) => entry.id === selectedId) : selClamped;
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const visibleStart = Math.max(0, Math.floor(scrollTop / RESULT_ROW_HEIGHT) - RESULT_OVERSCAN);
+  const visibleEnd = Math.min(results.length, Math.ceil((scrollTop + viewportHeight) / RESULT_ROW_HEIGHT) + RESULT_OVERSCAN);
+  const visibleResults = results.slice(visibleStart, visibleEnd);
+  const topPad = visibleStart * RESULT_ROW_HEIGHT;
+  const bottomPad = Math.max(0, (results.length - visibleEnd) * RESULT_ROW_HEIGHT);
+  const suggestionChips = hasQuery ? suggestions.filter((item) => item.value !== query).slice(0, 5) : [];
+  const scopedKbName = searchKb ? kbNameOf.get(searchKb) : null;
 
-  // 当前高亮行(键盘 ↑↓ 或点击)滚动进可视区
-  const activeRowRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    activeRowRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [selClamped, selectedId]);
+    if (!isList) return undefined;
+    const el = listRef.current;
+    if (!el) return undefined;
+    const update = (): void => setViewportHeight(el.clientHeight);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isList]);
+
+  useEffect(() => {
+    if (!isList) return;
+    const el = listRef.current;
+    if (!el || activeIndex < 0) return;
+    const rowTop = activeIndex * RESULT_ROW_HEIGHT;
+    const rowBottom = rowTop + RESULT_ROW_HEIGHT;
+    if (rowTop < el.scrollTop) el.scrollTop = rowTop;
+    else if (rowBottom > el.scrollTop + el.clientHeight) el.scrollTop = rowBottom - el.clientHeight;
+  }, [activeIndex, isList, results.length]);
 
   return (
     <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
       {isList && (
         <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(540px, 1.35fr)', gap: 22, alignItems: 'stretch', paddingBottom: 18 }}>
-          <div style={{ border: '1px solid var(--bd)', borderRadius: 14, background: 'var(--panel)', overflow: 'hidden', height: '100%', overflowY: 'auto' }}>
+          <div className="ik-results-panel">
+            <div className="ik-search-result-head">
+              <span>{hasQuery ? `找到 ${results.length} 条` : `共 ${results.length} 条`}{scopedKbName ? ` · ${scopedKbName}` : ''}</span>
+              {suggestionChips.length > 0 && (
+                <div className="ik-search-suggest-chips">
+                  {suggestionChips.map((suggestion) => (
+                    <button type="button" key={`${suggestion.kind}-${suggestion.value}`} onClick={() => onSuggest(suggestion)}>
+                      <b>{suggestion.kind}</b>{suggestion.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div
+              ref={listRef}
+              className="ik-results-scroll"
+              onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+            >
             {results.length === 0 ? (
               noMatch ? (
                 <div onClick={onOpenAI} style={{ padding: 26, cursor: 'pointer', textAlign: 'center' }}>
@@ -63,16 +109,19 @@ export default function SearchMode(
                 <div style={{ padding: 26, textAlign: 'center', color: 'var(--mut)', fontSize: 13 }}>暂无知识点</div>
               )
             ) : (
-              results.map((item, index) => {
+              <>
+                {topPad > 0 && <div style={{ height: topPad }} />}
+                {visibleResults.map((item, offset) => {
+                const index = visibleStart + offset;
                 const active = item.id === selectedId || (!selectedId && index === selClamped);
                 const path = folderPathName(folders, item.folderId);
                 return (
                   <div
                     key={item.id}
-                    ref={active ? activeRowRef : undefined}
                     className={`ik-result-row ${active ? 'is-active' : ''}`}
                     onClick={() => onOpen(item.id, index)}
                     style={{
+                      height: RESULT_ROW_HEIGHT,
                       borderLeft: `3px solid ${active ? 'var(--accent)' : 'transparent'}`,
                       borderBottom: index === results.length - 1 ? 'none' : '1px solid color-mix(in srgb, var(--bd) 60%, transparent)',
                     }}
@@ -87,8 +136,11 @@ export default function SearchMode(
                     </div>
                   </div>
                 );
-              })
+              })}
+                {bottomPad > 0 && <div style={{ height: bottomPad }} />}
+              </>
             )}
+            </div>
           </div>
           <DetailSidePanel entry={selectedEntry} query={query} />
         </div>

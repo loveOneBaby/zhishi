@@ -4,7 +4,7 @@ import { listEntries } from '../db.js';
 import { searchEntries } from '../search.js';
 import { askAI } from '../ask.js';
 import { rateLimit } from '../rateLimit.js';
-import { aiJobs, cancelAiJob, clearAiJobHistory, jobSnapshot, listJobSnapshots, retryAiJob } from '../services/ai-jobs.js';
+import { aiJobs, applyAgentEditJob, cancelAiJob, clearAiJobHistory, jobSnapshot, listJobSnapshots, retryAiJob, revertAgentEditJob } from '../services/ai-jobs.js';
 
 // /ask 默认需要登录；显式 AI_PUBLIC_ASK=true 时公开，仍按 IP 收紧限流防刷额度消耗。
 const askLimiter = rateLimit({ windowMs: 60_000, max: 20, message: 'AI 问答过于频繁,请稍后再试' });
@@ -35,6 +35,18 @@ export function registerAiRoutes(api: Router): void {
     const job = await retryAiJob(req.params.id);
     if (!job) return res.status(404).json({ error: '任务不存在或缺少重试参数' });
     res.status(202).json({ job: await jobSnapshot(job) });
+  }));
+
+  api.post('/ai/jobs/:id/apply', asyncHandler(async (req, res) => {
+    const job = await applyAgentEditJob(req.params.id);
+    if (!job) return res.status(404).json({ error: '任务不存在或缺少可应用的调整计划' });
+    res.status(202).json({ job });
+  }));
+
+  api.post('/ai/jobs/:id/revert', asyncHandler(async (req, res) => {
+    const job = await revertAgentEditJob(req.params.id);
+    if (!job) return res.status(404).json({ error: '任务不存在或缺少可撤销的调整记录' });
+    res.json({ job });
   }));
 
   // AI 问答（预留接口）
