@@ -676,7 +676,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [openId]);
 
-  const openEntry = openId ? fullEntry ?? entries.find((e) => e.id === openId) ?? null : null;
+  const openEntry = openId ? (fullEntry && fullEntry.id === openId ? fullEntry : entries.find((e) => e.id === openId) ?? null) : null;
   const selectedListEntry = isSearchList
     ? (results.find((e) => e.id === openId) ?? results[Math.min(sel, Math.max(0, results.length - 1))] ?? null)
     : null;

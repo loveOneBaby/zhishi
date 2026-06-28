@@ -93,7 +93,7 @@ export default function FreeMode(props: Props): ReactNode {
   const currentKb = kbs.find((k) => k.id === freeKb) ?? null;
   const kbEntries = useMemo(() => (freeKb ? entriesOfKb(freeKb) : []), [entriesOfKb, freeKb]);
   const selectedEntry = useMemo(
-    () => fullEntry ?? kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
+    () => (fullEntry && fullEntry.id === selectedEntryId ? fullEntry : null) ?? kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
     [kbEntries, selectedEntryId, fullEntry],
   );
   const currentFolderId = selectedEntry?.folderId ?? freeFolder;
