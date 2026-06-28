@@ -9,6 +9,7 @@ import {
 import { appendAiIllustration } from '../ai-image.js';
 import {
   listEntries,
+  listEntrySummaries,
   getEntry,
   createEntry,
   updateEntry,
@@ -30,7 +31,7 @@ export function registerEntryRoutes(api: Router): void {
   // ───────────── 知识点 ─────────────
   // 全部知识点
   api.get('/entries', asyncHandler(async (_req, res) => {
-    res.json({ entries: await listEntries() });
+    res.json({ entries: await listEntrySummaries() });
   }));
 
   // 检索

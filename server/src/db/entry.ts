@@ -23,9 +23,55 @@ export async function listEntries(): Promise<Entry[]> {
   return entries;
 }
 
+// 轻量列表：只返回列表页需要的字段（不含 doc/intro/nodes），响应体从 7MB 降到 ~100KB
+export interface EntrySummary {
+  id: string;
+  cat: string;
+  kbId: string;
+  folderId: string | null;
+  title: string;
+  py: string;
+  tags: string[];
+  summary: string;
+  sort: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+let summaryCache: { data: EntrySummary[]; ts: number } | null = null;
+
+export async function listEntrySummaries(): Promise<EntrySummary[]> {
+  const now = Date.now();
+  if (summaryCache && now - summaryCache.ts < CACHE_TTL) {
+    return summaryCache.data;
+  }
+  const kbs = new Map((await listKbs()).map((k) => [k.id, k.name]));
+  const rows = await db.prepare('SELECT id, cat, kbId, folderId, title, py, tags, summary, sort, createdAt, updatedAt FROM entries ORDER BY sort ASC, createdAt ASC').all() as unknown as EntryRow[];
+  const summaries: EntrySummary[] = rows.map((r) => {
+    let tags: string[] = [];
+    try { tags = JSON.parse(r.tags); } catch { tags = []; }
+    return {
+      id: r.id,
+      cat: kbs.get(r.kbId ?? '') ?? '未分类',
+      kbId: r.kbId ?? '',
+      folderId: r.folderId ?? null,
+      title: r.title,
+      py: r.py,
+      tags,
+      summary: r.summary,
+      sort: r.sort ?? r.createdAt,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    };
+  });
+  summaryCache = { data: summaries, ts: now };
+  return summaries;
+}
+
 // 写操作后清除缓存
 export function clearEntriesCache(): void {
   entriesCache = null;
+  summaryCache = null;
 }
 
 export async function getEntry(id: string): Promise<Entry | null> {
