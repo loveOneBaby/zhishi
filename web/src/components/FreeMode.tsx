@@ -92,10 +92,11 @@ export default function FreeMode(props: Props): ReactNode {
   const entriesOfKb = useMemo(() => (kbId: string) => orderEntries(entries.filter((e) => e.kbId === kbId)), [entries]);
   const currentKb = kbs.find((k) => k.id === freeKb) ?? null;
   const kbEntries = useMemo(() => (freeKb ? entriesOfKb(freeKb) : []), [entriesOfKb, freeKb]);
-  const selectedEntry = useMemo(
-    () => (fullEntry && fullEntry.id === selectedEntryId ? fullEntry : null) ?? kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
-    [kbEntries, selectedEntryId, fullEntry],
-  );
+  const selectedEntry = useMemo(() => {
+    const entry = (fullEntry && fullEntry.id === selectedEntryId ? fullEntry : null) ?? kbEntries.find((entry) => entry.id === selectedEntryId) ?? null;
+    if (entry) console.log('[FreeMode] selectedEntry:', entry.id, 'has doc:', Boolean(entry.doc), 'source:', fullEntry?.id === entry.id ? 'full' : 'lite');
+    return entry;
+  }, [kbEntries, selectedEntryId, fullEntry]);
   const currentFolderId = selectedEntry?.folderId ?? freeFolder;
   const currentFolderChain = useMemo(() => folderChain(folders, currentFolderId), [currentFolderId, folders]);
   const operationPath = [
@@ -152,7 +153,14 @@ export default function FreeMode(props: Props): ReactNode {
   useEffect(() => {
     if (!selectedEntryId) { setFullEntry(null); return; }
     let cancelled = false;
-    onFetchEntry(selectedEntryId).then((e) => { if (!cancelled) setFullEntry(e); }).catch(() => {});
+    onFetchEntry(selectedEntryId)
+      .then((e) => {
+        console.log('[FreeMode] fetchEntry success:', e.id, 'has doc:', Boolean(e.doc));
+        if (!cancelled) setFullEntry(e);
+      })
+      .catch((err) => {
+        console.error('[FreeMode] fetchEntry failed:', err);
+      });
     return () => { cancelled = true; };
   }, [selectedEntryId, onFetchEntry]);
 
