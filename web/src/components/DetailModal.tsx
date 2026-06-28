@@ -34,7 +34,7 @@ export default function DetailModal({ entry, onClose }: Props) {
             <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-.01em', lineHeight: 1.12, marginBottom: 10 }}>{entry.title}</div>
             {entry.summary && <div style={{ fontSize: 14.5, lineHeight: 1.7, color: 'var(--mut)', marginBottom: 12 }}>{entry.summary}</div>}
             {/* 原生 BlockNote 只读渲染 */}
-            <BlockEditor key={entry.id} editable={false} initialBlocks={entry.doc} />
+            <BlockEditor key={`${entry.id}:${entry.doc ? 'full' : 'lite'}`} editable={false} initialBlocks={entry.doc} />
           </div>
         </div>
       </div>
