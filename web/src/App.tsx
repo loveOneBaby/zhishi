@@ -54,10 +54,10 @@ import ShortcutMenu from './components/ShortcutMenu';
 import Toaster from './components/Toaster';
 import { toast } from './toast';
 
-// 轻量哈希路由:把「模块 + 视图 + 当前知识库/文件夹」写进 URL,刷新/前进后退/分享都能恢复
+// 轻量哈希路由:把「模块 + 视图 + 当前知识库/文件夹 + 知识点 ID」写进 URL,刷新/前进后退/分享都能恢复
 // free 模式:#/library(知识库画廊) | #/kb/{kbId} | #/kb/{kbId}/folder/{folderId}
-// search 模式:#/search/list | #/search/canvas
-type Route = { mode: AppMode; viewType: 'list' | 'canvas'; kbId: string | null; folderId: string | null };
+// search 模式:#/search/list | #/search/canvas | #/search/list/{entryId} | #/search/canvas/{entryId}
+type Route = { mode: AppMode; viewType: 'list' | 'canvas'; kbId: string | null; folderId: string | null; entryId: string | null };
 function parseRoute(): Route {
   const raw = window.location.hash.replace(/^#\/?/, '');
   const parts = raw.split('/').filter(Boolean);
@@ -65,12 +65,18 @@ function parseRoute(): Route {
   if (seg === 'library' || seg === 'free' || seg === 'kb') {
     const kbId = parts[1] ?? null;
     const folderId = parts[2] === 'folder' && parts[3] ? parts[3] : null;
-    return { mode: 'free', viewType: 'list', kbId, folderId };
+    return { mode: 'free', viewType: 'list', kbId, folderId, entryId: null };
   }
-  return { mode: 'search', viewType: parts[1] === 'canvas' ? 'canvas' : 'list', kbId: null, folderId: null };
+  // search 模式：#/search/list | #/search/canvas | #/search/list/{entryId} | #/search/canvas/{entryId}
+  const viewType = parts[1] === 'canvas' ? 'canvas' : 'list';
+  const entryId = (parts[2] && parts[2] !== 'list' && parts[2] !== 'canvas') ? parts[2] : null;
+  return { mode: 'search', viewType, kbId: null, folderId: null, entryId };
 }
 function routeToHash(route: Route): string {
-  if (route.mode === 'search') return `#/search/${route.viewType}`;
+  if (route.mode === 'search') {
+    const base = `#/search/${route.viewType}`;
+    return route.entryId ? `${base}/${route.entryId}` : base;
+  }
   if (route.kbId) return route.folderId ? `#/kb/${route.kbId}/folder/${route.folderId}` : `#/kb/${route.kbId}`;
   return '#/library';
 }
@@ -118,7 +124,7 @@ export default function App() {
   const [freeKb, setFreeKb] = useState<string | null>(() => initialRoute.kbId ?? localStorage.getItem('ik_free_kb') ?? null);
   const [freeFolder, setFreeFolder] = useState<string | null>(() => initialRoute.folderId ?? localStorage.getItem('ik_free_folder') ?? null);
 
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(() => initialRoute.entryId ?? null);
   const [fullEntry, setFullEntry] = useState<Entry | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -137,14 +143,14 @@ export default function App() {
 
   // 路由同步:状态变化 → 写 URL(用户操作走 pushState,可前进后退;回退触发的那次走 replaceState)
   useEffect(() => {
-    const target = routeToHash({ mode, viewType, kbId: freeKb, folderId: freeFolder });
+    const target = routeToHash({ mode, viewType, kbId: freeKb, folderId: freeFolder, entryId: mode === 'search' ? openId : null });
     const skip = skipPushRef.current;
     skipPushRef.current = false;
     if (window.location.hash !== target) {
       if (skip) window.history.replaceState(null, '', target);
       else window.history.pushState(null, '', target);
     }
-  }, [mode, viewType, freeKb, freeFolder]);
+  }, [mode, viewType, freeKb, freeFolder, openId]);
   useEffect(() => {
     const onPop = (): void => {
       const next = parseRoute();
@@ -153,6 +159,7 @@ export default function App() {
       setViewType(next.viewType);
       setFreeKb(next.kbId);
       setFreeFolder(next.folderId);
+      if (next.mode === 'search') setOpenId(next.entryId);
     };
     window.addEventListener('hashchange', onPop);
     window.addEventListener('popstate', onPop);
