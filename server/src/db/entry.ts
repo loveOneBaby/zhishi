@@ -10,17 +10,54 @@ import type { IndexTree } from '../index-tree.js';
 // 内存缓存：避免短时间内重复查询 Turso（远程数据库有 100-200ms 延迟）
 let entriesCache: { data: Entry[]; ts: number } | null = null;
 const CACHE_TTL = 5000; // 5 秒缓存
+const DETAIL_CACHE_TTL = 5 * 60_000; // 单条详情读多写少，写操作会主动清理
+let entriesRefresh: Promise<Entry[]> | null = null;
+let cacheVersion = 0;
+const entryDetailCache = new Map<string, { data: Entry; ts: number; version: number }>();
 
-export async function listEntries(): Promise<Entry[]> {
+async function refreshEntriesCache(): Promise<Entry[]> {
   const now = Date.now();
-  if (entriesCache && now - entriesCache.ts < CACHE_TTL) {
-    return entriesCache.data;
-  }
+  const version = cacheVersion;
   const kbs = new Map((await listKbs()).map((k) => [k.id, k.name]));
   const rows = await db.prepare('SELECT * FROM entries ORDER BY sort ASC, createdAt ASC').all() as unknown as EntryRow[];
   const entries = await Promise.all(rows.map((r) => rowToEntry(r, kbs.get(r.kbId ?? ''))));
-  entriesCache = { data: entries, ts: now };
+  if (version === cacheVersion) {
+    entriesCache = { data: entries, ts: now };
+    entryDetailCache.clear();
+    for (const entry of entries) entryDetailCache.set(entry.id, { data: entry, ts: now, version });
+  }
   return entries;
+}
+
+export async function listEntries(): Promise<Entry[]> {
+  const now = Date.now();
+  if (entriesCache && now - entriesCache.ts < CACHE_TTL) return entriesCache.data;
+  if (entriesCache) {
+    scheduleEntriesRefresh();
+    return entriesCache.data;
+  }
+  if (!entriesRefresh) entriesRefresh = refreshEntriesCache().finally(() => { entriesRefresh = null; });
+  return entriesRefresh;
+}
+
+// 后台预热完整详情缓存：列表页仍返回轻量 summaries，但用户点击详情时尽量从内存命中。
+export function warmEntriesCache(): Promise<Entry[]> {
+  if (entriesCache && Date.now() - entriesCache.ts < CACHE_TTL) return Promise.resolve(entriesCache.data);
+  if (!entriesRefresh) entriesRefresh = refreshEntriesCache().finally(() => { entriesRefresh = null; });
+  return entriesRefresh;
+}
+
+function scheduleEntriesRefresh(): void {
+  if (entriesRefresh) return;
+  setTimeout(() => {
+    if (entriesRefresh || !entriesCache) return;
+    entriesRefresh = refreshEntriesCache()
+      .catch((err) => {
+        console.warn('[db] 后台刷新 entries 缓存失败:', err);
+        return entriesCache?.data ?? [];
+      })
+      .finally(() => { entriesRefresh = null; });
+  }, 0);
 }
 
 // 轻量列表：只返回列表页需要的字段（不含 doc/intro/nodes），响应体从 7MB 降到 ~100KB
@@ -39,12 +76,11 @@ export interface EntrySummary {
 }
 
 let summaryCache: { data: EntrySummary[]; ts: number } | null = null;
+let summaryRefresh: Promise<EntrySummary[]> | null = null;
 
-export async function listEntrySummaries(): Promise<EntrySummary[]> {
+async function refreshSummaryCache(): Promise<EntrySummary[]> {
   const now = Date.now();
-  if (summaryCache && now - summaryCache.ts < CACHE_TTL) {
-    return summaryCache.data;
-  }
+  const version = cacheVersion;
   const kbs = new Map((await listKbs()).map((k) => [k.id, k.name]));
   const rows = await db.prepare('SELECT id, cat, kbId, folderId, title, py, tags, summary, sort, createdAt, updatedAt FROM entries ORDER BY sort ASC, createdAt ASC').all() as unknown as EntryRow[];
   const summaries: EntrySummary[] = rows.map((r) => {
@@ -64,19 +100,87 @@ export async function listEntrySummaries(): Promise<EntrySummary[]> {
       updatedAt: r.updatedAt,
     };
   });
-  summaryCache = { data: summaries, ts: now };
+  if (version === cacheVersion) summaryCache = { data: summaries, ts: now };
   return summaries;
+}
+
+export async function listEntrySummaries(): Promise<EntrySummary[]> {
+  const now = Date.now();
+  if (summaryCache && now - summaryCache.ts < CACHE_TTL) return summaryCache.data;
+  if (summaryCache) {
+    scheduleSummaryRefresh();
+    return summaryCache.data;
+  }
+  if (!summaryRefresh) summaryRefresh = refreshSummaryCache().finally(() => { summaryRefresh = null; });
+  return summaryRefresh;
+}
+
+function scheduleSummaryRefresh(): void {
+  if (summaryRefresh) return;
+  setTimeout(() => {
+    if (summaryRefresh || !summaryCache) return;
+    summaryRefresh = refreshSummaryCache()
+      .catch((err) => {
+        console.warn('[db] 后台刷新 entry summaries 缓存失败:', err);
+        return summaryCache?.data ?? [];
+      })
+      .finally(() => { summaryRefresh = null; });
+  }, 0);
+}
+
+function rememberEntryDetail(entry: Entry): void {
+  entryDetailCache.set(entry.id, { data: entry, ts: Date.now(), version: cacheVersion });
+}
+
+function parseStoredTags(value: string): string[] {
+  try {
+    const tags = JSON.parse(value);
+    return Array.isArray(tags) ? tags.map((tag) => String(tag).trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
 }
 
 // 写操作后清除缓存
 export function clearEntriesCache(): void {
+  cacheVersion += 1;
   entriesCache = null;
   summaryCache = null;
+  entriesRefresh = null;
+  summaryRefresh = null;
+  entryDetailCache.clear();
 }
 
 export async function getEntry(id: string): Promise<Entry | null> {
-  const row = await db.prepare('SELECT * FROM entries WHERE id = ?').get(id) as unknown as EntryRow | undefined;
-  return row ? await rowToEntry(row) : null;
+  const now = Date.now();
+  const cached = entryDetailCache.get(id);
+  if (cached && cached.version === cacheVersion && now - cached.ts < DETAIL_CACHE_TTL) return cached.data;
+
+  const listCache = entriesCache;
+  const listCached = listCache?.data.find((entry) => entry.id === id);
+  if (listCached && listCache && now - listCache.ts < CACHE_TTL) {
+    entryDetailCache.set(id, { data: listCached, ts: now, version: cacheVersion });
+    return listCached;
+  }
+
+  if (entriesRefresh) {
+    const fresh = (await entriesRefresh).find((entry) => entry.id === id) ?? null;
+    if (fresh) {
+      entryDetailCache.set(id, { data: fresh, ts: Date.now(), version: cacheVersion });
+      return fresh;
+    }
+  }
+
+  const row = await db.prepare(`
+    SELECT entries.*, knowledge_bases.name AS kbName
+    FROM entries
+    LEFT JOIN knowledge_bases ON knowledge_bases.id = entries.kbId
+    WHERE entries.id = ?
+  `).get(id) as unknown as (EntryRow & { kbName?: string | null }) | undefined;
+  if (!row) return null;
+  const entry = await rowToEntry(row, row.kbName ?? '未分类');
+  entryDetailCache.set(id, { data: entry, ts: Date.now(), version: cacheVersion });
+  return entry;
 }
 
 export interface EntryInput {
@@ -131,6 +235,7 @@ export async function createEntry(input: EntryInput): Promise<Entry> {
     idx, sort: entry.sort, createdAt: now, updatedAt: now,
   });
   clearEntriesCache();
+  rememberEntryDetail(entry);
   return entry;
 }
 
@@ -187,6 +292,7 @@ export async function updateEntry(id: string, input: Partial<EntryInput>): Promi
     idx, updatedAt: next.updatedAt,
   });
   clearEntriesCache();
+  rememberEntryDetail(next);
   return next;
 }
 
@@ -194,4 +300,30 @@ export async function deleteEntry(id: string): Promise<boolean> {
   const info = await db.prepare('DELETE FROM entries WHERE id = ?').run(id);
   clearEntriesCache();
   return Number(info.changes) > 0;
+}
+
+export async function deleteTagFromKb(kbId: string, tag: string): Promise<number> {
+  const target = tag.trim();
+  if (!target) return 0;
+
+  const rows = await db.prepare('SELECT id, tags FROM entries WHERE kbId = ?').all(kbId) as Array<Pick<EntryRow, 'id' | 'tags'>>;
+  const updates = rows
+    .map((row) => {
+      const tags = parseStoredTags(row.tags);
+      const nextTags = tags.filter((item) => item !== target);
+      return { id: row.id, tags: nextTags, changed: nextTags.length !== tags.length };
+    })
+    .filter((row) => row.changed);
+
+  if (!updates.length) return 0;
+
+  const now = Date.now();
+  const stmt = db.prepare('UPDATE entries SET tags = :tags, updatedAt = :updatedAt WHERE id = :id');
+  await db.tx(async () => {
+    for (const row of updates) {
+      await stmt.run({ id: row.id, tags: JSON.stringify(row.tags), updatedAt: now });
+    }
+  });
+  clearEntriesCache();
+  return updates.length;
 }

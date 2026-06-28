@@ -117,7 +117,7 @@ function isPublicRoute(req: Request): boolean {
   if (path === '/health') return true;
   if (path === '/auth' || path.startsWith('/auth/')) return true;
   if (method === 'GET' || method === 'HEAD') {
-    if (path === '/entries' || path === '/search' || path === '/kbs' || path === '/kb-categories' || path === '/folders') return true;
+    if (path === '/bootstrap' || path === '/entries' || path === '/search' || path === '/kbs' || path === '/kb-categories' || path === '/folders') return true;
     if (/^\/entries\/[^/]+$/.test(path)) return true;        // 单条详情(不含 /versions /analyze 等子路径)
     if (/^\/assets\/[^/]+(\/raw)?$/.test(path)) return true; // 资源元信息与原图
   }

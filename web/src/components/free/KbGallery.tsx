@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { Check, ChevronRight, Download, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Tags, Trash2, Upload } from 'lucide-react';
+import { Check, ChevronRight, Download, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Search, Tags, Trash2, Upload, X } from 'lucide-react';
 import type { Entry, Folder as KbFolder, KnowledgeBase, KbCategory } from '../../types';
 import ImportPreviewModal from '../ImportPreviewModal';
 import CommandDialog from '../CommandDialog';
@@ -56,6 +56,10 @@ function categoryName(category: KbCategory | undefined): string {
   return category?.name ?? '未分类';
 }
 
+function normalizeGallerySearch(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 export function KbGallery(props: KbGalleryProps): ReactNode {
   const {
     kbs, categories, entries, folders, newKb,
@@ -67,6 +71,10 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
   const [activeCategory, setActiveCategory] = useState<ActiveCategory>(ALL_CATEGORIES);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [categoryCommand, setCategoryCommand] = useState<CategoryCommand | null>(null);
+  const [categoryQuery, setCategoryQuery] = useState('');
+  const [kbQuery, setKbQuery] = useState('');
+  const categoryNeedle = normalizeGallerySearch(categoryQuery);
+  const kbNeedle = normalizeGallerySearch(kbQuery);
 
   const categoryById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
   const childrenByParent = useMemo(() => {
@@ -144,12 +152,21 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
     return cache;
   }, [categories, childrenByParent]);
 
-  const visibleKbs = useMemo(() => {
+  const scopedKbs = useMemo(() => {
     if (activeCategory === ALL_CATEGORIES) return kbs;
     if (activeCategory === UNCATEGORIZED) return kbs.filter((kb) => !kb.categoryId);
     const ids = subtreeIds.get(activeCategory) ?? new Set([activeCategory]);
     return kbs.filter((kb) => kb.categoryId && ids.has(kb.categoryId));
   }, [activeCategory, kbs, subtreeIds]);
+
+  const visibleKbs = useMemo(() => {
+    if (!kbNeedle) return scopedKbs;
+    return scopedKbs.filter((kb) => {
+      const category = kb.categoryId ? categoryById.get(kb.categoryId) : undefined;
+      return kb.name.toLowerCase().includes(kbNeedle)
+        || categoryName(category).toLowerCase().includes(kbNeedle);
+    });
+  }, [categoryById, kbNeedle, scopedKbs]);
 
   const categoryExactCounts = useMemo(() => {
     const counts = new Map<string | null, number>();
@@ -202,6 +219,33 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
       depth: row.depth,
     })),
   ], [allCategoryRows]);
+  const searchedCategoryRows = useMemo(() => {
+    if (!categoryNeedle) return categoryRows;
+    const included = new Set<string>();
+    const includeParents = (category: KbCategory | undefined): void => {
+      let current = category;
+      while (current) {
+        if (included.has(current.id)) return;
+        included.add(current.id);
+        current = current.parentId ? categoryById.get(current.parentId) : undefined;
+      }
+    };
+    const includeChildren = (categoryId: string): void => {
+      for (const child of childrenByParent.get(categoryKey(categoryId)) ?? []) {
+        included.add(child.id);
+        includeChildren(child.id);
+      }
+    };
+    for (const category of categories) {
+      if (!category.name.toLowerCase().includes(categoryNeedle)) continue;
+      included.add(category.id);
+      includeParents(category.parentId ? categoryById.get(category.parentId) : undefined);
+      includeChildren(category.id);
+    }
+    return allCategoryRows.filter((row) => included.has(row.category.id));
+  }, [allCategoryRows, categories, categoryById, categoryNeedle, categoryRows, childrenByParent]);
+  const showAllCategoryRow = !categoryNeedle || '全部知识库'.includes(categoryNeedle);
+  const showUncategorizedRow = !categoryNeedle || '未分类'.includes(categoryNeedle);
 
   const createKbInActiveCategory = (): void => {
     if (activeCategory === ALL_CATEGORIES || activeCategory === UNCATEGORIZED) newKb(null);
@@ -285,14 +329,14 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
         <div className="ik-kb-gallery-actions" role="toolbar" aria-label="知识库操作">
           <button
             type="button"
-            className="ik-btn ik-btn-secondary ik-btn-size-md"
+            className="ik-btn ik-btn-secondary ik-btn-size-sm"
             onClick={onImportKnowledgeBases}
           >
             <span className="ik-btn-leading-icon"><Upload size={15} strokeWidth={2.3} /></span>导入知识库
           </button>
           <button
             type="button"
-            className={`ik-btn ik-btn-secondary ik-btn-size-md ik-export-btn ${exportProgress?.active ? 'is-exporting' : ''}`}
+            className={`ik-btn ik-btn-secondary ik-btn-size-sm ik-export-btn ${exportProgress?.active ? 'is-exporting' : ''}`}
             disabled={Boolean(exportProgress?.active)}
             onClick={() => {
               void onExportAll();
@@ -303,10 +347,10 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
             <span className="ik-btn-leading-icon"><Download size={15} strokeWidth={2.3} /></span>
             <span className="ik-export-btn-text">{exportProgress?.active ? `导出中 ${Math.round(exportProgress.percent)}%` : '导出全部'}</span>
           </button>
-          <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-md" onClick={() => setCategoryCommand({ kind: 'create', parentId: null })}>
+          <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-sm" onClick={() => setCategoryCommand({ kind: 'create', parentId: null })}>
             <span className="ik-btn-leading-icon"><FolderPlus size={15} strokeWidth={2.4} /></span>新建分类
           </button>
-          <button type="button" className="ik-btn ik-btn-default ik-btn-size-md" onClick={createKbInActiveCategory}>
+          <button type="button" className="ik-btn ik-btn-default ik-btn-size-sm" onClick={createKbInActiveCategory}>
             <span className="ik-btn-leading-icon"><Plus size={15} strokeWidth={2.4} /></span>新建知识库
           </button>
         </div>
@@ -316,32 +360,50 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
         <aside className="ik-kb-category-panel">
           <div className="ik-kb-category-title">
             <span>分类树</span>
-            <b>{visibleKbs.length} 个结果</b>
+            <b>{categoryNeedle ? `${searchedCategoryRows.length} 个分类` : `${categories.length} 个分类`}</b>
           </div>
+          <label className="ik-kb-search ik-kb-category-search">
+            <Search size={14} strokeWidth={2.15} aria-hidden="true" />
+            <input
+              value={categoryQuery}
+              onChange={(event) => setCategoryQuery(event.target.value)}
+              placeholder="搜索分类"
+              aria-label="搜索分类"
+              spellCheck={false}
+            />
+            {categoryQuery && (
+              <button type="button" aria-label="清空分类搜索" onClick={() => setCategoryQuery('')}>
+                <X size={13} strokeWidth={2.25} />
+              </button>
+            )}
+          </label>
           <div className="ik-kb-category-list">
-            <button
-              type="button"
-              className={`ik-kb-category-row is-root ${activeCategory === ALL_CATEGORIES ? 'is-active' : ''}`}
-              onClick={() => setActiveCategory(ALL_CATEGORIES)}
-            >
-              <span className="ik-kb-category-icon"><LibraryBig size={15} strokeWidth={2.05} /></span>
-              <span className="ik-kb-category-name">全部知识库</span>
-              <span className="ik-kb-category-count">{kbs.length}</span>
-            </button>
-            {categoryRows.map((row) => {
+            {showAllCategoryRow && (
+              <button
+                type="button"
+                className={`ik-kb-category-row is-root ${activeCategory === ALL_CATEGORIES ? 'is-active' : ''}`}
+                onClick={() => setActiveCategory(ALL_CATEGORIES)}
+              >
+                <span className="ik-kb-category-icon"><LibraryBig size={15} strokeWidth={2.05} /></span>
+                <span className="ik-kb-category-name">全部知识库</span>
+                <span className="ik-kb-category-count">{kbs.length}</span>
+              </button>
+            )}
+            {searchedCategoryRows.map((row) => {
               const { category, childCount } = row;
               const active = activeCategory === category.id;
+              const open = categoryNeedle ? true : expanded.has(category.id);
               return (
                 <div
                   key={category.id}
-                  className={`ik-kb-category-item ${active ? 'is-active' : ''} ${expanded.has(category.id) ? 'is-expanded' : ''}`}
+                  className={`ik-kb-category-item ${active ? 'is-active' : ''} ${open ? 'is-expanded' : ''}`}
                   style={{ paddingLeft: 4 + row.depth * 16 } as CSSProperties}
                 >
                   <button
                     type="button"
                     className="ik-kb-category-expand"
                     disabled={childCount === 0}
-                    title={expanded.has(category.id) ? '收起' : '展开'}
+                    title={open ? '收起' : '展开'}
                     onClick={() => toggleExpanded(category.id)}
                   >
                     <ChevronRight size={14} strokeWidth={2.15} />
@@ -384,19 +446,44 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
               );
             })}
 
-            <button
-              type="button"
-              className={`ik-kb-category-row ${activeCategory === UNCATEGORIZED ? 'is-active' : ''}`}
-              onClick={() => setActiveCategory(UNCATEGORIZED)}
-            >
-              <span className="ik-kb-category-icon"><Folder size={15} strokeWidth={2.05} /></span>
-              <span className="ik-kb-category-name">未分类</span>
-              <span className="ik-kb-category-count">{categoryExactCounts.get(null) ?? 0}</span>
-            </button>
+            {showUncategorizedRow && (
+              <button
+                type="button"
+                className={`ik-kb-category-row ${activeCategory === UNCATEGORIZED ? 'is-active' : ''}`}
+                onClick={() => setActiveCategory(UNCATEGORIZED)}
+              >
+                <span className="ik-kb-category-icon"><Folder size={15} strokeWidth={2.05} /></span>
+                <span className="ik-kb-category-name">未分类</span>
+                <span className="ik-kb-category-count">{categoryExactCounts.get(null) ?? 0}</span>
+              </button>
+            )}
+            {categoryNeedle && !showAllCategoryRow && searchedCategoryRows.length === 0 && !showUncategorizedRow && (
+              <div className="ik-kb-category-empty">没有匹配的分类。</div>
+            )}
           </div>
         </aside>
 
         <section className="ik-kb-library-main">
+          <div className="ik-kb-library-controls">
+            <label className="ik-kb-search ik-kb-library-search">
+              <Search size={15} strokeWidth={2.15} aria-hidden="true" />
+              <input
+                value={kbQuery}
+                onChange={(event) => setKbQuery(event.target.value)}
+                placeholder={`搜索${activeCategoryName}`}
+                aria-label="搜索知识库"
+                spellCheck={false}
+              />
+              {kbQuery && (
+                <button type="button" aria-label="清空知识库搜索" onClick={() => setKbQuery('')}>
+                  <X size={13} strokeWidth={2.25} />
+                </button>
+              )}
+            </label>
+            <span className="ik-kb-library-count">
+              {visibleKbs.length}{kbNeedle ? ` / ${scopedKbs.length}` : ''} 个知识库
+            </span>
+          </div>
           {visibleKbs.length > 0 ? (
             <div className="ik-kb-grid">
               {visibleKbs.map((kb) => {
@@ -478,8 +565,12 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
           ) : (
             <div className="ik-kb-empty">
               <LibraryBig size={24} strokeWidth={1.9} />
-              <span>当前分类还没有知识库。</span>
-              <button type="button" className="ik-btn ik-btn-default ik-btn-size-md" onClick={createKbInActiveCategory}>新建知识库</button>
+              <span>{kbNeedle ? '没有匹配的知识库。' : '当前分类还没有知识库。'}</span>
+              {kbNeedle ? (
+                <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-sm" onClick={() => setKbQuery('')}>清空搜索</button>
+              ) : (
+                <button type="button" className="ik-btn ik-btn-default ik-btn-size-sm" onClick={createKbInActiveCategory}>新建知识库</button>
+              )}
             </div>
           )}
         </section>

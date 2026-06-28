@@ -10,6 +10,7 @@ import {
   listKbCategories,
   listFolders,
   listEntries,
+  listEntrySummaries,
   getFolder,
   getKb,
   type ImportPayload,
@@ -173,7 +174,7 @@ export function registerImportRoutes(api: Router): void {
       const payload = await requestToImportPayload(req.body);
       if (payload.entries.length > 5000) return res.status(400).json({ error: '单次导入不超过 5000 条' });
       const { imported } = await importEntries(payload, Boolean(req.body?.replace));
-      res.json({ ok: true, imported, kbCategories: await listKbCategories(), kbs: await listKbs(), folders: await listFolders(), entries: await listEntries() });
+      res.json({ ok: true, imported, kbCategories: await listKbCategories(), kbs: await listKbs(), folders: await listFolders(), entries: await listEntrySummaries() });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }

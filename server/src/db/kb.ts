@@ -24,18 +24,46 @@ export async function resolveKbId(kbId?: string, cat?: string): Promise<string> 
 // 内存缓存：远程 Turso 查询有 100-200ms 延迟
 let kbsCache: { data: KnowledgeBase[]; ts: number } | null = null;
 const CACHE_TTL = 5000;
+let kbsRefresh: Promise<KnowledgeBase[]> | null = null;
+let kbsCacheVersion = 0;
+
+async function refreshKbsCache(): Promise<KnowledgeBase[]> {
+  const now = Date.now();
+  const version = kbsCacheVersion;
+  const rows = await db.prepare('SELECT * FROM knowledge_bases ORDER BY sort ASC, createdAt ASC').all() as unknown as KbRow[];
+  const data = rows.map(rowToKb);
+  if (version === kbsCacheVersion) kbsCache = { data, ts: now };
+  return data;
+}
 
 export async function listKbs(): Promise<KnowledgeBase[]> {
   const now = Date.now();
   if (kbsCache && now - kbsCache.ts < CACHE_TTL) return kbsCache.data;
-  const rows = await db.prepare('SELECT * FROM knowledge_bases ORDER BY sort ASC, createdAt ASC').all() as unknown as KbRow[];
-  const data = rows.map(rowToKb);
-  kbsCache = { data, ts: now };
-  return data;
+  if (kbsCache) {
+    scheduleKbsRefresh();
+    return kbsCache.data;
+  }
+  if (!kbsRefresh) kbsRefresh = refreshKbsCache().finally(() => { kbsRefresh = null; });
+  return kbsRefresh;
+}
+
+function scheduleKbsRefresh(): void {
+  if (kbsRefresh) return;
+  setTimeout(() => {
+    if (kbsRefresh || !kbsCache) return;
+    kbsRefresh = refreshKbsCache()
+      .catch((err) => {
+        console.warn('[db] 后台刷新 kbs 缓存失败:', err);
+        return kbsCache?.data ?? [];
+      })
+      .finally(() => { kbsRefresh = null; });
+  }, 0);
 }
 
 export function clearKbsCache(): void {
+  kbsCacheVersion += 1;
   kbsCache = null;
+  kbsRefresh = null;
 }
 
 export async function getKb(id: string): Promise<KnowledgeBase | null> {

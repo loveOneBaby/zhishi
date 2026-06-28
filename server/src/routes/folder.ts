@@ -7,7 +7,7 @@ import {
   moveFolder,
   deleteFolder,
   reorderFolders,
-  listEntries,
+  listEntrySummaries,
 } from '../db.js';
 
 export function registerFolderRoutes(api: Router): void {
@@ -48,7 +48,7 @@ export function registerFolderRoutes(api: Router): void {
   api.delete('/folders/:id', asyncHandler(async (req, res) => {
     const ok = await deleteFolder(req.params.id);
     if (!ok) return res.status(404).json({ error: 'not found' });
-    res.json({ ok: true, folders: await listFolders(), entries: await listEntries() });
+    res.json({ ok: true, folders: await listFolders(), entries: await listEntrySummaries() });
   }));
 
   api.post('/folders/reorder', asyncHandler(async (req, res) => {

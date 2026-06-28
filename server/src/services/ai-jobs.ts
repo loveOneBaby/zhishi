@@ -180,6 +180,11 @@ function compactRollback(rollback: AgentEditRollback | undefined): AgentEditRoll
   };
 }
 
+function compactJobEntry(entry: Entry): Entry {
+  const { doc: _doc, intro: _intro, nodes: _nodes, ...rest } = entry;
+  return { ...rest, intro: '', nodes: [], doc: [] };
+}
+
 function listJobSnapshot(job: AiKnowledgeBaseJob): AiKnowledgeBaseJob {
   return {
     ...job,
@@ -190,7 +195,7 @@ function listJobSnapshot(job: AiKnowledgeBaseJob): AiKnowledgeBaseJob {
     result: job.result ? {
       kb: job.result.kb,
       folders: [...job.result.folders],
-      entries: [...job.result.entries],
+      entries: job.result.entries.map(compactJobEntry),
     } : undefined,
   };
 }

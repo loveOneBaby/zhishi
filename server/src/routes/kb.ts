@@ -17,9 +17,11 @@ import {
   deleteKb,
   updateKbCategory,
   reorderKbs,
+  deleteTagFromKb,
   getFolder,
   listFolders,
   listEntries,
+  listEntrySummaries,
 } from '../db.js';
 import { createKnowledgeBaseFromDraft } from '../services/kb-draft-writer.js';
 import { discardAiJobResultsForKb, jobSnapshot, startAgentEditJob, startAnalyzeJob, startFolderEntriesJob, startFolderInitJob, startKnowledgeBaseJob } from '../services/ai-jobs.js';
@@ -207,13 +209,22 @@ export function registerKbRoutes(api: Router): void {
     res.json({ kb });
   }));
 
+  api.post('/kbs/:id/tags/delete', asyncHandler(async (req, res) => {
+    const kb = await getKb(req.params.id);
+    if (!kb) return res.status(404).json({ error: '知识库不存在' });
+    const tag = String(req.body?.tag ?? '').trim();
+    if (!tag) return res.status(400).json({ error: 'tag 不能为空' });
+    const removed = await deleteTagFromKb(kb.id, tag);
+    res.json({ ok: true, removed, entries: await listEntrySummaries() });
+  }));
+
   api.delete('/kbs/:id', asyncHandler(async (req, res) => {
     const kb = await getKb(req.params.id);
     if (!kb) return res.status(404).json({ error: 'not found' });
     await discardAiJobResultsForKb(kb.id);
     const ok = await deleteKb(kb.id);
     if (!ok) return res.status(404).json({ error: 'not found' });
-    res.json({ ok: true, kbs: await listKbs(), folders: await listFolders(), entries: await listEntries() });
+    res.json({ ok: true, kbs: await listKbs(), folders: await listFolders(), entries: await listEntrySummaries() });
   }));
 
   api.post('/kbs/reorder', asyncHandler(async (req, res) => {

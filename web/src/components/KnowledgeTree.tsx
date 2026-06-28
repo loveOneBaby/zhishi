@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   BookOpen,
   CheckSquare,
@@ -79,6 +80,7 @@ interface Props {
   onReorderFolders: (ids: string[]) => Promise<void>;
   onMoveEntry: (entry: Entry, folderId: string | null) => Promise<void>;
   onReorderEntries: (ids: string[]) => Promise<void>;
+  emptyState?: ReactNode;
 }
 
 function sortFolders(list: Folder[]): Folder[] {
@@ -117,13 +119,25 @@ function useMeasuredHeight(min = 260): readonly [(node: HTMLDivElement | null) =
   return [setNode, height] as const;
 }
 
-function clampMenuPosition(x: number, y: number): { x: number; y: number } {
-  const width = 210;
-  const height = 190;
+function menuSize(kind: MenuTarget['kind']): { width: number; height: number } {
+  if (kind === 'folder') return { width: 216, height: 258 };
+  if (kind === 'entry') return { width: 216, height: 132 };
+  return { width: 216, height: 184 };
+}
+
+function clampMenuPosition(x: number, y: number, kind: MenuTarget['kind']): { x: number; y: number } {
+  const { width, height } = menuSize(kind);
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
   return {
-    x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - width - 8)),
-    y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - height - 8)),
+    x: Math.min(Math.max(8, x), Math.max(8, viewportWidth - width - 8)),
+    y: Math.min(Math.max(8, y), Math.max(8, viewportHeight - height - 8)),
   };
+}
+
+function menuPortalTarget(): HTMLElement | null {
+  if (typeof document === 'undefined') return null;
+  return document.querySelector<HTMLElement>('[class^="ik-theme-"], [class*=" ik-theme-"]') ?? document.body;
 }
 
 function itemClass(active: boolean, selected: boolean, type: TreeItem['type'], dragging: boolean, dropTarget: boolean): string {
@@ -163,6 +177,7 @@ export default function KnowledgeTree(props: Props): ReactNode {
     onReorderFolders,
     onMoveEntry,
     onReorderEntries,
+    emptyState,
   } = props;
 
   const treeRef = useRef<TreeApi<TreeItem> | undefined>(undefined);
@@ -232,18 +247,27 @@ export default function KnowledgeTree(props: Props): ReactNode {
     };
     document.addEventListener('click', close);
     document.addEventListener('click', closeMove);
+    document.addEventListener('contextmenu', close);
+    document.addEventListener('scroll', close, true);
     document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', close);
     return () => {
       document.removeEventListener('click', close);
       document.removeEventListener('click', closeMove);
+      document.removeEventListener('contextmenu', close);
+      document.removeEventListener('scroll', close, true);
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', close);
     };
   }, [menu, moveMenuOpen]);
 
   const openMenu = (event: React.MouseEvent, next: MenuTarget): void => {
     event.preventDefault();
     event.stopPropagation();
-    const point = clampMenuPosition(event.clientX, event.clientY);
+    const targetRect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const rawX = event.clientX > 0 ? event.clientX : targetRect.left + 12;
+    const rawY = event.clientY > 0 ? event.clientY : targetRect.top + 12;
+    const point = clampMenuPosition(rawX + 4, rawY + 4, next.kind);
     setMenu({ ...next, ...point } as MenuState);
   };
 
@@ -496,6 +520,65 @@ export default function KnowledgeTree(props: Props): ReactNode {
     action();
   };
 
+  const menuNode = menu ? (
+    <div
+      className="ik-kt-menu"
+      style={{ '--menu-x': `${menu.x}px`, '--menu-y': `${menu.y}px` } as CSSProperties}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {menu.kind !== 'entry' && (
+        <div className="ik-kt-menu-group">
+          <span className="ik-kt-menu-label">新建</span>
+          <button type="button" onClick={() => runMenuAction(() => onCreateEntry(menu.kind === 'folder' ? menu.folder.id : null))}>
+            <Plus size={14} strokeWidth={2.1} />新建知识点
+          </button>
+          <button type="button" onClick={() => runMenuAction(() => onCreateFolder(menu.kind === 'folder' ? menu.folder.id : null))}>
+            <FolderPlus size={14} strokeWidth={2.1} />新建文件夹
+          </button>
+          {menu.kind === 'folder' ? (
+            <button type="button" onClick={() => runMenuAction(() => onImportToFolder(menu.folder))}>
+              <Upload size={14} strokeWidth={2.1} />导入 JSON 到此文件夹
+            </button>
+          ) : (
+            <button type="button" onClick={() => runMenuAction(onImportHere)}>
+              <Upload size={14} strokeWidth={2.1} />导入 JSON
+            </button>
+          )}
+          <button type="button" disabled={Boolean(exportProgress?.active)} onClick={() => runMenuAction(onExportAll)}>
+            <Download size={14} strokeWidth={2.1} />{exportProgress?.active ? `导出中 ${Math.round(exportProgress.percent)}%` : '导出全部'}
+          </button>
+        </div>
+      )}
+      {menu.kind === 'folder' && (
+        <div className="ik-kt-menu-group">
+          <span className="ik-kt-menu-label">管理</span>
+          <button type="button" onClick={() => runMenuAction(() => onRenameFolder(menu.folder))}>
+            <Pencil size={14} strokeWidth={2.1} />重命名
+          </button>
+          <span className="ik-kt-menu-label is-danger">危险操作</span>
+          <button type="button" className="danger" onClick={() => runMenuAction(() => onClearFolder(menu.folder))}>
+            <FolderX size={14} strokeWidth={2.1} />清空内容（保留文件夹）
+          </button>
+          <button type="button" className="danger" onClick={() => runMenuAction(() => onDeleteFolder(menu.folder))}>
+            <Trash2 size={14} strokeWidth={2.1} />删除文件夹及全部内容
+          </button>
+        </div>
+      )}
+      {menu.kind === 'entry' && (
+        <div className="ik-kt-menu-group">
+          <span className="ik-kt-menu-label">管理</span>
+          <button type="button" onClick={() => runMenuAction(() => onEditEntry(menu.entry))}>
+            <BookOpen size={14} strokeWidth={2.1} />编辑知识点
+          </button>
+          <span className="ik-kt-menu-label is-danger">危险操作</span>
+          <button type="button" className="danger" onClick={() => runMenuAction(() => onDeleteEntry(menu.entry))}>
+            <Trash2 size={14} strokeWidth={2.1} />删除知识点
+          </button>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div className="ik-kt-shell">
       <div className="ik-kt-toolbar">
@@ -606,6 +689,8 @@ export default function KnowledgeTree(props: Props): ReactNode {
           >
             {TreeNode}
           </Tree>
+        ) : emptyState ? (
+          emptyState
         ) : (
           <div className="ik-kt-empty">
             <span>当前知识库还没有文件夹或知识点。</span>
@@ -621,64 +706,7 @@ export default function KnowledgeTree(props: Props): ReactNode {
         )}
       </div>
 
-      {menu && (
-        <div
-          className="ik-kt-menu"
-          style={{ '--menu-x': `${menu.x}px`, '--menu-y': `${menu.y}px` } as CSSProperties}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {menu.kind !== 'entry' && (
-            <div className="ik-kt-menu-group">
-              <span className="ik-kt-menu-label">新建</span>
-              <button type="button" onClick={() => runMenuAction(() => onCreateEntry(menu.kind === 'folder' ? menu.folder.id : null))}>
-                <Plus size={14} strokeWidth={2.1} />新建知识点
-              </button>
-              <button type="button" onClick={() => runMenuAction(() => onCreateFolder(menu.kind === 'folder' ? menu.folder.id : null))}>
-                <FolderPlus size={14} strokeWidth={2.1} />新建文件夹
-              </button>
-              {menu.kind === 'folder' ? (
-                <button type="button" onClick={() => runMenuAction(() => onImportToFolder(menu.folder))}>
-                  <Upload size={14} strokeWidth={2.1} />导入 JSON 到此文件夹
-                </button>
-              ) : (
-                <button type="button" onClick={() => runMenuAction(onImportHere)}>
-                  <Upload size={14} strokeWidth={2.1} />导入 JSON
-                </button>
-              )}
-              <button type="button" disabled={Boolean(exportProgress?.active)} onClick={() => runMenuAction(onExportAll)}>
-                <Download size={14} strokeWidth={2.1} />{exportProgress?.active ? `导出中 ${Math.round(exportProgress.percent)}%` : '导出全部'}
-              </button>
-            </div>
-          )}
-          {menu.kind === 'folder' && (
-            <div className="ik-kt-menu-group">
-              <span className="ik-kt-menu-label">管理</span>
-              <button type="button" onClick={() => runMenuAction(() => onRenameFolder(menu.folder))}>
-                <Pencil size={14} strokeWidth={2.1} />重命名
-              </button>
-              <span className="ik-kt-menu-label is-danger">危险操作</span>
-              <button type="button" className="danger" onClick={() => runMenuAction(() => onClearFolder(menu.folder))}>
-                <FolderX size={14} strokeWidth={2.1} />清空内容（保留文件夹）
-              </button>
-              <button type="button" className="danger" onClick={() => runMenuAction(() => onDeleteFolder(menu.folder))}>
-                <Trash2 size={14} strokeWidth={2.1} />删除文件夹及全部内容
-              </button>
-            </div>
-          )}
-          {menu.kind === 'entry' && (
-            <div className="ik-kt-menu-group">
-              <span className="ik-kt-menu-label">管理</span>
-              <button type="button" onClick={() => runMenuAction(() => onEditEntry(menu.entry))}>
-                <BookOpen size={14} strokeWidth={2.1} />编辑知识点
-              </button>
-              <span className="ik-kt-menu-label is-danger">危险操作</span>
-              <button type="button" className="danger" onClick={() => runMenuAction(() => onDeleteEntry(menu.entry))}>
-                <Trash2 size={14} strokeWidth={2.1} />删除知识点
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      {menuNode && typeof document !== 'undefined' ? createPortal(menuNode, menuPortalTarget() ?? document.body) : null}
       <CommandDialog
         open={deleteConfirmOpen}
         tone="danger"

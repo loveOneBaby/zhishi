@@ -212,6 +212,7 @@ export function collectVisible(
   query: string,
   searchActive: boolean,
   collapsed: Set<string>,
+  expandedBeyondLimit: Set<string>,
   showFullTree: boolean
 ): Set<string> {
   const visible = new Set<string>();
@@ -226,7 +227,8 @@ export function collectVisible(
     while (stack.length) {
       const current = stack.pop()!;
       visible.add(current.id);
-      const shouldExpandChildren = current.depth < limit && !collapsed.has(current.id);
+      const shouldExpandChildren = !collapsed.has(current.id)
+        && (current.depth < limit || expandedBeyondLimit.has(current.id));
       if (shouldExpandChildren) {
         for (const child of map.get(current.id)?.children ?? []) {
           stack.push({ id: child, depth: current.depth + 1 });

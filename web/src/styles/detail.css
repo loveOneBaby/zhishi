@@ -24,6 +24,24 @@
   padding: 14px 18px 34px;
   background: transparent;
 }
+.ik-detail-loading {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--mut);
+  font-size: 13px;
+  font-weight: 650;
+}
+.ik-detail-loading-dot {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--mut) 22%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: ik-spin .8s linear infinite;
+}
 .ik-theme-glass .ik-detail-panel {
   border-color: rgba(255,255,255,.72);
   background: var(--glass-reader-bg);

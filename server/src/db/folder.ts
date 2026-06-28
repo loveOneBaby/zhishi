@@ -7,18 +7,46 @@ import type { Folder, FolderRow } from '../types.js';
 
 let foldersCache: { data: Folder[]; ts: number } | null = null;
 const CACHE_TTL = 5000;
+let foldersRefresh: Promise<Folder[]> | null = null;
+let foldersCacheVersion = 0;
+
+async function refreshFoldersCache(): Promise<Folder[]> {
+  const now = Date.now();
+  const version = foldersCacheVersion;
+  const rows = await db.prepare('SELECT * FROM folders ORDER BY sort ASC, createdAt ASC').all() as unknown as FolderRow[];
+  const data = rows.map(rowToFolder);
+  if (version === foldersCacheVersion) foldersCache = { data, ts: now };
+  return data;
+}
 
 export async function listFolders(): Promise<Folder[]> {
   const now = Date.now();
   if (foldersCache && now - foldersCache.ts < CACHE_TTL) return foldersCache.data;
-  const rows = await db.prepare('SELECT * FROM folders ORDER BY sort ASC, createdAt ASC').all() as unknown as FolderRow[];
-  const data = rows.map(rowToFolder);
-  foldersCache = { data, ts: now };
-  return data;
+  if (foldersCache) {
+    scheduleFoldersRefresh();
+    return foldersCache.data;
+  }
+  if (!foldersRefresh) foldersRefresh = refreshFoldersCache().finally(() => { foldersRefresh = null; });
+  return foldersRefresh;
+}
+
+function scheduleFoldersRefresh(): void {
+  if (foldersRefresh) return;
+  setTimeout(() => {
+    if (foldersRefresh || !foldersCache) return;
+    foldersRefresh = refreshFoldersCache()
+      .catch((err) => {
+        console.warn('[db] 后台刷新 folders 缓存失败:', err);
+        return foldersCache?.data ?? [];
+      })
+      .finally(() => { foldersRefresh = null; });
+  }, 0);
 }
 
 export function clearFoldersCache(): void {
+  foldersCacheVersion += 1;
   foldersCache = null;
+  foldersRefresh = null;
 }
 
 export async function getFolder(id: string): Promise<Folder | null> {

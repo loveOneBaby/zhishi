@@ -1,5 +1,5 @@
 import type { Entry, Folder, KnowledgeBase, KbCategory } from '../types';
-import { apiDelJson, apiGetKey, apiPostKey, apiPutKey, runSseStream } from './client';
+import { apiDelJson, apiGetKey, apiPostJson, apiPostKey, apiPutKey, runSseStream } from './client';
 import type { AiKnowledgeBaseJob, GenerateKnowledgeBaseResult } from './aiJobs';
 
 // ───────────── AI 分析知识库(后台任务) ─────────────
@@ -49,6 +49,10 @@ export async function deleteKb(id: string): Promise<{ kbs: KnowledgeBase[]; fold
 }
 export async function reorderKbs(ids: string[]): Promise<KnowledgeBase[]> {
   return apiPostKey<KnowledgeBase[]>('/kbs/reorder', { ids }, 'kbs');
+}
+
+export async function deleteKbTag(id: string, tag: string): Promise<{ ok: boolean; removed: number; entries: Entry[] }> {
+  return apiPostJson(`/kbs/${encodeURIComponent(id)}/tags/delete`, { tag });
 }
 
 // ───────────── AI 建库 ─────────────

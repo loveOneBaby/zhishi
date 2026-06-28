@@ -8,6 +8,7 @@ interface Props {
   query?: string;
   contextLabel?: string;
   actions?: ReactNode;
+  loading?: boolean;
 }
 
 function ActionBar({ label, actions }: { label?: string; actions?: ReactNode }) {
@@ -21,7 +22,7 @@ function ActionBar({ label, actions }: { label?: string; actions?: ReactNode }) 
   );
 }
 
-export default function DetailSidePanel({ entry, query = '', contextLabel, actions }: Props) {
+export default function DetailSidePanel({ entry, query = '', contextLabel, actions, loading = false }: Props) {
   if (!entry) {
     return (
       <aside
@@ -75,8 +76,15 @@ export default function DetailSidePanel({ entry, query = '', contextLabel, actio
       </div>
 
       <div className="ik-detail-body">
-        {/* 原生 BlockNote 只读渲染:图片/表格/代码/标题等都按块原样显示 */}
-        <BlockEditor key={`${entry.id}:${entry.doc ? 'full' : 'lite'}`} editable={false} initialBlocks={entry.doc} />
+        {loading ? (
+          <div className="ik-detail-loading" role="status" aria-live="polite">
+            <span className="ik-detail-loading-dot" />
+            <span>正在加载知识点...</span>
+          </div>
+        ) : (
+          /* 原生 BlockNote 只读渲染:图片/表格/代码/标题等都按块原样显示 */
+          <BlockEditor key={`${entry.id}:${entry.doc ? 'full' : 'lite'}`} editable={false} initialBlocks={entry.doc} />
+        )}
       </div>
     </aside>
   );

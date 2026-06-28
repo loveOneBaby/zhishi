@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerBootstrapRoutes } from './routes/bootstrap.js';
 import { registerAiRoutes } from './routes/ai.js';
 import { registerKbRoutes } from './routes/kb.js';
 import { registerFolderRoutes } from './routes/folder.js';
@@ -51,6 +52,43 @@ function securityHeaders(req: Request, res: Response, next: NextFunction): void 
 // 写操作(POST/PUT/DELETE)按 IP 限流,兜底防刷;读接口不限。
 const writeLimiter = rateLimit({ windowMs: 60_000, max: 120, message: '操作过于频繁,请稍后再试' });
 
+const SLOW_API_MS = Number(process.env.SLOW_API_MS ?? 100);
+const LARGE_API_BYTES = Number(process.env.LARGE_API_BYTES ?? 100 * 1024);
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0B';
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)}MB`;
+}
+
+function apiMetrics(req: Request, res: Response, next: NextFunction): void {
+  const started = process.hrtime.bigint();
+  let bodyBytes = 0;
+  const originalSend = res.send.bind(res);
+  res.send = ((body?: unknown): Response => {
+    if (typeof body === 'string') bodyBytes = Buffer.byteLength(body);
+    else if (Buffer.isBuffer(body)) bodyBytes = body.length;
+    else if (body != null) {
+      try { bodyBytes = Buffer.byteLength(JSON.stringify(body)); } catch { bodyBytes = 0; }
+    }
+    return originalSend(body as Parameters<Response['send']>[0]);
+  }) as Response['send'];
+
+  res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+    const headerLength = Number(res.getHeader('Content-Length') ?? 0);
+    const bytes = headerLength || bodyBytes;
+    const slow = durationMs >= SLOW_API_MS;
+    const large = bytes >= LARGE_API_BYTES;
+    if (!slow && !large) return;
+    const tags = [slow ? 'slow' : '', large ? 'large' : ''].filter(Boolean).join(',');
+    console.warn(`[api:${tags}] ${req.method} ${req.originalUrl} -> ${res.statusCode} ${durationMs.toFixed(1)}ms ${formatBytes(bytes)}`);
+  });
+
+  next();
+}
+
 export function createApp() {
   const app = express();
   // Render 等平台反代:信任一跳,使 req.ip / req.secure 取真实客户端。
@@ -59,6 +97,7 @@ export function createApp() {
   // 常规接口收紧 body 体积；导入与图片上传保留较大限额。
   app.use(['/api/import', '/api/assets'], express.json({ limit: '5mb' }));
   app.use('/api', express.json({ limit: '256kb' }));
+  app.use('/api', apiMetrics);
 
   const api = express.Router();
   // 写操作统一限流(在鉴权前,429 不必走鉴权)
@@ -70,6 +109,7 @@ export function createApp() {
   api.use(requireAuth);
 
   registerAuthRoutes(api);
+  registerBootstrapRoutes(api);
   registerHealthRoutes(api);
   registerAiRoutes(api);
   registerKbRoutes(api);

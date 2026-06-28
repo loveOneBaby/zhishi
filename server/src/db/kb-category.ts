@@ -4,6 +4,8 @@ import type { KbCategory, KbCategoryRow } from '../types.js';
 
 let kbCategoriesCache: { data: KbCategory[]; ts: number } | null = null;
 const CACHE_TTL = 5000;
+let kbCategoriesRefresh: Promise<KbCategory[]> | null = null;
+let kbCategoriesCacheVersion = 0;
 
 function normalizeParentId(parentId?: string | null): string | null {
   if (parentId == null) return null;
@@ -11,17 +13,43 @@ function normalizeParentId(parentId?: string | null): string | null {
   return trimmed || null;
 }
 
-export async function listKbCategories(): Promise<KbCategory[]> {
+async function refreshKbCategoriesCache(): Promise<KbCategory[]> {
   const now = Date.now();
-  if (kbCategoriesCache && now - kbCategoriesCache.ts < CACHE_TTL) return kbCategoriesCache.data;
+  const version = kbCategoriesCacheVersion;
   const rows = await db.prepare('SELECT * FROM kb_categories ORDER BY sort ASC, createdAt ASC').all() as unknown as KbCategoryRow[];
   const data = rows.map(rowToKbCategory);
-  kbCategoriesCache = { data, ts: now };
+  if (version === kbCategoriesCacheVersion) kbCategoriesCache = { data, ts: now };
   return data;
 }
 
+export async function listKbCategories(): Promise<KbCategory[]> {
+  const now = Date.now();
+  if (kbCategoriesCache && now - kbCategoriesCache.ts < CACHE_TTL) return kbCategoriesCache.data;
+  if (kbCategoriesCache) {
+    scheduleKbCategoriesRefresh();
+    return kbCategoriesCache.data;
+  }
+  if (!kbCategoriesRefresh) kbCategoriesRefresh = refreshKbCategoriesCache().finally(() => { kbCategoriesRefresh = null; });
+  return kbCategoriesRefresh;
+}
+
+function scheduleKbCategoriesRefresh(): void {
+  if (kbCategoriesRefresh) return;
+  setTimeout(() => {
+    if (kbCategoriesRefresh || !kbCategoriesCache) return;
+    kbCategoriesRefresh = refreshKbCategoriesCache()
+      .catch((err) => {
+        console.warn('[db] 后台刷新 kb categories 缓存失败:', err);
+        return kbCategoriesCache?.data ?? [];
+      })
+      .finally(() => { kbCategoriesRefresh = null; });
+  }, 0);
+}
+
 export function clearKbCategoriesCache(): void {
+  kbCategoriesCacheVersion += 1;
   kbCategoriesCache = null;
+  kbCategoriesRefresh = null;
 }
 
 export async function getKbCategory(id: string): Promise<KbCategory | null> {

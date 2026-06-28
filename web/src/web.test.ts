@@ -70,14 +70,35 @@ test('canvas model: buildModel / collectVisible / layout', () => {
   const kbId = kbs[0];
   assert.equal(map.get(kbId)!.type, 'cat');
   // 画布最小节点是知识点；知识点内部标题只参与检索，不再作为画布节点展开
-  const visible = collectVisible(map, kbId, '', false, new Set(), false);
+  const visible = collectVisible(map, kbId, '', false, new Set(), new Set(), false);
   assert.ok(visible.has('ent::k1'));
   assert.ok(![...visible].some((id) => map.get(id)!.label === '二级A'));
-  assert.ok(collectVisible(map, kbId, '二级A', true, new Set(), false).has('ent::k1'));
+  assert.ok(collectVisible(map, kbId, '二级A', true, new Set(), new Set(), false).has('ent::k1'));
   const layout = buildTreeLayout(map, kbId, visible);
   assert.ok(layout.nodes.length >= 2);
   assert.ok(layout.width > 0 && layout.height > 0);
   // 根在最左
   const root = layout.byId.get(kbId)!;
   assert.ok(layout.nodes.every((p) => p.x >= root.x));
+});
+
+test('canvas model: 第三级文件夹可显式展开', () => {
+  const folders: Folder[] = [
+    { id: 'f1', kbId: 'kb1', parentId: null, name: '一级', sort: 0, createdAt: 1, updatedAt: 1 },
+    { id: 'f2', kbId: 'kb1', parentId: 'f1', name: '二级', sort: 1, createdAt: 1, updatedAt: 1 },
+    { id: 'f3', kbId: 'kb1', parentId: 'f2', name: '三级', sort: 2, createdAt: 1, updatedAt: 1 },
+  ];
+  const list = [entry({ id: 'deep', title: '深层知识点', folderId: 'f3' })];
+  const { map, kbs } = buildModel(list, folders, kbAi);
+  const kbId = kbs[0];
+  const collapsed = new Set<string>();
+  const hidden = collectVisible(map, kbId, '', false, collapsed, new Set(), false);
+  assert.ok(hidden.has('fld::f3'));
+  assert.equal(hidden.has('ent::deep'), false);
+
+  const expanded = collectVisible(map, kbId, '', false, collapsed, new Set(['fld::f3']), false);
+  assert.ok(expanded.has('ent::deep'));
+
+  const full = collectVisible(map, kbId, '', false, collapsed, new Set(), true);
+  assert.ok(full.has('ent::deep'));
 });

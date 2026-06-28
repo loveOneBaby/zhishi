@@ -9,3 +9,4 @@ export * from './importExport';
 export * from './assets';
 export * from './ask';
 export * from './auth';
+export * from './bootstrap';

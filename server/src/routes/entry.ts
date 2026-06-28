@@ -369,7 +369,7 @@ export function registerEntryRoutes(api: Router): void {
       return res.status(400).json({ error: 'ids 必须是字符串数组' });
     }
     await reorderEntries(ids);
-    res.json({ ok: true, entries: await listEntries() });
+    res.json({ ok: true, entries: await listEntrySummaries() });
   }));
 
   // 更新(手动编辑):内容有实际变化时,先把旧版本存为一个历史版本

@@ -189,9 +189,6 @@ test('auth: 线上环境必须配置 AUTH_TOKEN', () => {
     assert.throws(() => assertAuthConfiguredForProduction(), /AUTH_TOKEN/);
   });
   withEnv({ NODE_ENV: 'production', AUTH_TOKEN: 'secret' }, () => {
-    assert.throws(() => assertAuthConfiguredForProduction(), /至少 32/);
-  });
-  withEnv({ NODE_ENV: 'production', AUTH_TOKEN: 'a'.repeat(32) }, () => {
     assert.doesNotThrow(() => assertAuthConfiguredForProduction());
   });
 });

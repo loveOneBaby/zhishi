@@ -79,7 +79,7 @@
 .ik-theme-glass .ik-btn-secondary,
 .ik-theme-glass .ik-searchbox-btn,
 .ik-theme-glass .ik-kp-chip,
-.ik-theme-glass .ik-kb-picker-row,
+.ik-theme-glass .ik-kb-picker-node,
 .ik-theme-glass .ik-search-suggest-chips button,
 .ik-theme-glass .ik-shortcut-row,
 .ik-theme-glass .ik-theme-menu-item,
@@ -144,7 +144,8 @@
 }
 .ik-theme-glass .ik-searchbox-btn:hover,
 .ik-theme-glass .ik-kp-chip:hover,
-.ik-theme-glass .ik-kb-picker-row.is-hover,
+.ik-theme-glass .ik-kb-picker-node:hover,
+.ik-theme-glass .ik-kb-picker-node.is-hover,
 .ik-theme-glass .ik-search-suggest-chips button:hover,
 .ik-theme-glass .ik-ai-command-card:hover:not(:disabled),
 .ik-theme-glass .ik-ai-task-secondary:hover,

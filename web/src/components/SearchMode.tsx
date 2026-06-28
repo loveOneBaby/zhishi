@@ -22,6 +22,7 @@ interface Props {
   theme: Theme;
   selectedEntry: Entry | null;
   selectedId: string | null;
+  selectedLoading?: boolean;
   onClear: () => void;
   onSuggest: (suggestion: SearchSuggestion) => void;
   onOpen: (id: string, index?: number) => void;
@@ -36,7 +37,7 @@ const RESULT_ROW_HEIGHT = 74;
 const RESULT_OVERSCAN = 8;
 
 export default function SearchMode(
-  { query, results, suggestions, sel, viewType, theme, selectedEntry, selectedId, onOpen, onOpenAI, onSuggest, kbs, folders, searchKb }: Props
+  { query, results, suggestions, sel, viewType, theme, selectedEntry, selectedId, selectedLoading = false, onOpen, onOpenAI, onSuggest, kbs, folders, searchKb }: Props
 ) {
   const isList = viewType === 'list';
   const isCanvas = viewType === 'canvas';
@@ -142,13 +143,24 @@ export default function SearchMode(
             )}
             </div>
           </div>
-          <DetailSidePanel entry={selectedEntry} query={query} />
+          <DetailSidePanel entry={selectedEntry} query={query} loading={selectedLoading} />
         </div>
       )}
 
       {isCanvas && (
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', paddingBottom: 14 }}>
-          <CanvasView entries={results} folders={folders} kbs={kbs} theme={theme} onOpen={onOpen} hasQuery={hasQuery} query={query} />
+          <CanvasView
+            entries={results}
+            folders={folders}
+            kbs={kbs}
+            theme={theme}
+            onOpen={onOpen}
+            hasQuery={hasQuery}
+            query={query}
+            selectedEntry={selectedEntry}
+            selectedId={selectedId}
+            selectedLoading={selectedLoading}
+          />
         </div>
       )}
     </div>

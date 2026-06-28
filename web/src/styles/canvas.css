@@ -53,6 +53,327 @@
   padding: 12px 16px 10px;
   border-bottom: 1px solid var(--bd);
 }
+.ik-workspace-search {
+  min-width: 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 0 8px 0 10px;
+  border: 1px solid color-mix(in srgb, var(--bd) 76%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 76%, transparent);
+  color: var(--mut);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.32);
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.ik-workspace-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--bd));
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent), inset 0 1px 0 rgba(255,255,255,.4);
+}
+.ik-workspace-search svg {
+  flex: 0 0 auto;
+}
+.ik-workspace-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 620;
+}
+.ik-workspace-search input::placeholder {
+  color: color-mix(in srgb, var(--mut) 76%, transparent);
+  opacity: 1;
+}
+.ik-workspace-search button {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: -2px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--mut);
+  cursor: pointer;
+}
+.ik-workspace-search button:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--fg);
+}
+.ik-kb-tags-panel {
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--bd) 72%, transparent);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--panel) 86%, transparent), color-mix(in srgb, var(--bg) 42%, transparent)),
+    color-mix(in srgb, var(--panel) 72%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.26);
+}
+.ik-kb-tags-panel.is-collapsed {
+  padding: 8px 9px;
+}
+.ik-kb-tags-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mut);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 780;
+  line-height: 1;
+}
+.ik-kb-tags-head span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ik-kb-tags-summary {
+  min-width: 0;
+  overflow: hidden;
+  margin-left: auto;
+  color: color-mix(in srgb, var(--mut) 86%, var(--fg));
+  font-size: 11.5px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ik-kb-tags-chevron {
+  flex: 0 0 auto;
+  opacity: .72;
+  transition: transform 140ms ease, opacity 140ms ease;
+}
+.ik-kb-tags-panel.is-open .ik-kb-tags-chevron {
+  transform: rotate(180deg);
+  opacity: .92;
+}
+.ik-kb-tags-head b,
+.ik-kb-tag-active b,
+.ik-kb-tag-chip b {
+  font-weight: 780;
+}
+.ik-kb-tag-search {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 7px;
+  padding: 0 7px 0 9px;
+  border: 1px solid color-mix(in srgb, var(--bd) 74%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  color: var(--mut);
+}
+.ik-kb-tag-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--bd));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.ik-kb-tag-search input {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+.ik-kb-tag-search input::placeholder {
+  color: color-mix(in srgb, var(--mut) 72%, transparent);
+  opacity: 1;
+}
+.ik-kb-tag-search button {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--mut);
+  cursor: pointer;
+}
+.ik-kb-tag-search button:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--fg);
+}
+.ik-kb-tag-active {
+  width: 100%;
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+  padding: 5px 8px 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--bd));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 11%, var(--panel));
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 760;
+  text-align: left;
+}
+.ik-kb-tag-active.is-compact {
+  min-height: 28px;
+  margin: 7px 0 0;
+  font-size: 11.8px;
+}
+.ik-kb-tag-active span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ik-kb-tag-active b {
+  color: var(--accent);
+  font-size: 11px;
+}
+.ik-kb-tag-list {
+  max-height: min(34vh, 260px);
+  overflow: auto;
+  display: grid;
+  gap: 5px;
+  padding-right: 2px;
+}
+.ik-kb-tag-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 5px;
+}
+.ik-kb-tag-chip,
+.ik-kb-tag-delete {
+  min-width: 0;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--bd) 72%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel) 76%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+}
+.ik-kb-tag-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 10px;
+  text-align: left;
+}
+.ik-kb-tag-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 720;
+}
+.ik-kb-tag-chip b {
+  min-width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--mut);
+  font-size: 11px;
+}
+.ik-kb-tag-delete {
+  width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: color-mix(in srgb, var(--danger) 70%, var(--mut));
+  opacity: .68;
+}
+.ik-kb-tag-row:hover .ik-kb-tag-chip {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--bd));
+  background: color-mix(in srgb, var(--sel) 78%, var(--panel));
+}
+.ik-kb-tag-row:hover .ik-kb-tag-delete,
+.ik-kb-tag-delete:focus-visible {
+  opacity: 1;
+}
+.ik-kb-tag-row.is-active .ik-kb-tag-chip {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--bd));
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 68%, transparent);
+}
+.ik-kb-tag-delete:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--bd));
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  color: var(--danger);
+}
+.ik-kb-tag-delete:disabled {
+  cursor: progress;
+  opacity: .45;
+}
+.ik-kb-tag-empty {
+  padding: 12px 8px;
+  border: 1px dashed color-mix(in srgb, var(--bd) 80%, transparent);
+  border-radius: 10px;
+  color: var(--mut);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+.ik-tag-delete-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 18%, var(--bd));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger) 7%, var(--panel));
+}
+.ik-tag-delete-preview span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ik-tag-delete-preview b {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: color-mix(in srgb, var(--danger) 82%, var(--fg));
+  font-size: 11.5px;
+  font-weight: 760;
+  white-space: nowrap;
+}
 .ik-tree-panel-counter {
   flex: none;
   padding: 4px 8px;
@@ -81,6 +402,60 @@
 .ik-theme-glass .ik-tree-panel-counter {
   border-color: rgba(105,120,148,.18);
   background: rgba(255,255,255,.5);
+}
+.ik-theme-glass .ik-workspace-search {
+  border-color: rgba(255,255,255,.54);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.52), rgba(255,255,255,.2)),
+    rgba(255,255,255,.34);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.64), 0 8px 20px rgba(34,50,78,.04);
+}
+.ik-theme-glass .ik-workspace-search:focus-within {
+  border-color: rgba(75,98,217,.38);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.68), rgba(255,255,255,.26)),
+    rgba(255,255,255,.48);
+  box-shadow: 0 0 0 3px rgba(75,98,217,.1), inset 0 1px 0 rgba(255,255,255,.72);
+}
+.ik-theme-glass .ik-kb-tags-panel {
+  border-color: rgba(255,255,255,.56);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.52), rgba(255,255,255,.18) 52%, rgba(151,169,205,.08)),
+    rgba(255,255,255,.32);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.68), 0 8px 20px rgba(34,50,78,.045);
+}
+.ik-theme-glass .ik-kb-tag-search,
+.ik-theme-glass .ik-kb-tag-chip,
+.ik-theme-glass .ik-kb-tag-delete,
+.ik-theme-glass .ik-kb-tag-active {
+  border-color: rgba(255,255,255,.52);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.54), rgba(255,255,255,.18)),
+    rgba(255,255,255,.3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.62);
+}
+.ik-theme-glass .ik-kb-tag-active,
+.ik-theme-glass .ik-kb-tag-row.is-active .ik-kb-tag-chip {
+  border-color: rgba(75,98,217,.24);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.68), rgba(255,255,255,.24)),
+    color-mix(in srgb, var(--accent) 10%, rgba(255,255,255,.36));
+}
+.ik-theme-glass .ik-kb-tag-row:hover .ik-kb-tag-chip {
+  border-color: rgba(255,255,255,.72);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.7), rgba(255,255,255,.25)),
+    rgba(255,255,255,.5);
+}
+.ik-theme-glass .ik-kb-tags-head:hover .ik-kb-tags-chevron {
+  opacity: 1;
+}
+.ik-theme-glass .ik-tag-delete-preview {
+  border-color: rgba(226,61,71,.18);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.58), rgba(255,255,255,.2)),
+    rgba(226,61,71,.06);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.62);
 }
 .ik-floating-toolbar {
   position: sticky;

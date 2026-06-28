@@ -4,11 +4,8 @@ import type { Entry, EntryInput, Folder, KnowledgeBase, KbCategory, ThemeKey } f
 import { THEMES, themeVars } from './themes';
 import { filterEntries, suggestQueries, type SearchSuggestion } from './search';
 import {
-  fetchEntries,
+  fetchBootstrap,
   fetchEntry,
-  fetchKbs,
-  fetchKbCategories,
-  fetchFolders,
   fetchAiJobs,
   createEntry,
   updateEntry,
@@ -21,6 +18,7 @@ import {
   moveKbToCategory,
   renameKb,
   deleteKb,
+  deleteKbTag,
   createFolder,
   renameFolder,
   deleteFolder,
@@ -40,7 +38,7 @@ import {
   type AiKnowledgeBaseJob,
   type EntryInput as ApiEntryInput,
 } from './api';
-import { fetchAuthStatus, logout, type AuthStatus } from './api';
+import { logout, type AuthStatus } from './api';
 import TopBar, { type AppMode } from './components/TopBar';
 import SearchBox from './components/SearchBox';
 import SearchMode from './components/SearchMode';
@@ -126,6 +124,7 @@ export default function App() {
 
   const [openId, setOpenId] = useState<string | null>(() => initialRoute.entryId ?? null);
   const [fullEntry, setFullEntry] = useState<Entry | null>(null);
+  const [entryLoadingId, setEntryLoadingId] = useState<string | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
 
@@ -171,13 +170,31 @@ export default function App() {
 
   // 加载数据 + 恢复主题
   useEffect(() => {
+    let cancelled = false;
     const saved = localStorage.getItem('ik_theme');
     if (saved && (saved in THEMES)) setThemeState(saved as ThemeKey);
-    fetchAuthStatus().then(setAuth).catch(() => { /* 取不到状态时按开放处理 */ });
-    Promise.all([fetchEntries(), fetchKbs(), fetchFolders(), fetchKbCategories()])
-      .then(([e, k, f, c]) => { setEntries(e); setKbs(k); setFolders(f); setKbCategories(c); })
-      .catch(() => { setEntries([]); setKbs([]); setFolders([]); setKbCategories([]); })
-      .finally(() => { setLoaded(true); setTimeout(() => inputRef.current?.focus(), 60); });
+    fetchBootstrap()
+      .then((data) => {
+        if (cancelled) return;
+        setAuth(data.auth);
+        setEntries(data.entries);
+        setKbs(data.kbs);
+        setFolders(data.folders);
+        setKbCategories(data.kbCategories);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setEntries([]);
+        setKbs([]);
+        setFolders([]);
+        setKbCategories([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoaded(true);
+        setTimeout(() => inputRef.current?.focus(), 60);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   const applyCompletedJobs = useCallback((jobs: AiKnowledgeBaseJob[]): void => {
@@ -269,6 +286,7 @@ export default function App() {
 
   useEffect(() => {
     // 管理类接口需登录:未登录时不轮询 AI 任务,避免 401 刷屏。
+    if (!loaded) return;
     if (auth.authRequired && !auth.authenticated) return;
     let stopped = false;
     let timer: number | null = null;
@@ -292,7 +310,7 @@ export default function App() {
       stopped = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [refreshAiJobs, auth.authRequired, auth.authenticated, aiTaskPanelOpen]);
+  }, [refreshAiJobs, auth.authRequired, auth.authenticated, aiTaskPanelOpen, loaded]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -366,13 +384,24 @@ export default function App() {
   }, []);
   const isSearchList = mode === 'search' && viewType === 'list';
 
-  // ⌘K / Ctrl+K 呼出搜索：切到检索模式 + 清空 + 聚焦输入框（任意页面可用）
+  useEffect(() => {
+    if (!isSearchList) return;
+    if (results.length === 0) {
+      if (openId) setOpenId(null);
+      return;
+    }
+    const currentVisible = openId ? results.some((entry) => entry.id === openId) : false;
+    if (currentVisible) return;
+    const clamped = Math.min(sel, results.length - 1);
+    setOpenId(results[Math.max(0, clamped)].id);
+  }, [isSearchList, openId, results, sel]);
+
+  // ⌘K / Ctrl+K / 双击 Command 呼出搜索：切到检索模式 + 清空 + 聚焦输入框（保留当前详情，避免重复加载）
   const summonSearch = useCallback(() => {
     setMode('search');
     setQuery('');
     setSel(0);
     setSugSel(-1);
-    setOpenId(null);
     setAiOpen(false);
     setFormOpen(false);
     setTimeout(() => inputRef.current?.focus(), 0);
@@ -429,16 +458,28 @@ export default function App() {
       if (mode !== 'search') return;
       if (viewType === 'canvas') { if (e.key === 'Escape' && query) { setQuery(''); setSel(0); } return; }
 
-      // 列表视图:↑↓ 在结果间移动(右侧实时预览),↵ 打开,esc 清空
+      // 列表视图:↑↓ 在结果间移动并加载完整详情,↵ 打开,esc 清空
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setOpenId(null);
-        setSel((s) => Math.min(s + 1, results.length - 1));
+        if (results.length === 0) {
+          setSel(0);
+          setOpenId(null);
+          return;
+        }
+        const next = Math.min(Math.min(sel, results.length - 1) + 1, results.length - 1);
+        setSel(next);
+        setOpenId(results[next]?.id ?? null);
       }
       else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setOpenId(null);
-        setSel((s) => Math.max(0, s - 1));
+        if (results.length === 0) {
+          setSel(0);
+          setOpenId(null);
+          return;
+        }
+        const next = Math.max(0, Math.min(sel, results.length - 1) - 1);
+        setSel(next);
+        setOpenId(results[next]?.id ?? null);
       }
       else if (e.key === 'Enter') {
         e.preventDefault();
@@ -605,6 +646,11 @@ export default function App() {
     setFreeFolder(null);
   }, []);
 
+  const handleDeleteKbTag = useCallback(async (kbId: string, tag: string): Promise<void> => {
+    const result = await deleteKbTag(kbId, tag);
+    setEntries(result.entries);
+  }, []);
+
   const handleCreateKbCategory = useCallback(async (input: { name: string; parentId?: string | null }): Promise<KbCategory> => {
     const category = await createKbCategory(input);
     setKbCategories((prev) => [...prev, category]);
@@ -677,19 +723,28 @@ export default function App() {
 
   // openId 变化时按需获取完整 entry（列表只有摘要，详情需要 doc/intro/nodes）
   useEffect(() => {
-    if (!openId) { setFullEntry(null); return; }
+    if (!openId) { setFullEntry(null); setEntryLoadingId(null); return; }
     let cancelled = false;
-    fetchEntry(openId).then((e) => { if (!cancelled) setFullEntry(e); }).catch(() => {});
+    setEntryLoadingId(openId);
+    fetchEntry(openId)
+      .then((e) => { if (!cancelled) setFullEntry(e); })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setEntryLoadingId((current) => (current === openId ? null : current));
+      });
     return () => { cancelled = true; };
   }, [openId]);
 
   // 先用列表轻量数据（标题/摘要/标签立即可见），fullEntry 到了替换完整 doc
   const openEntry = openId ? (fullEntry && fullEntry.id === openId ? fullEntry : entries.find((e) => e.id === openId) ?? null) : null;
-  // 搜索列表模式：优先用 openEntry（含完整 doc），否则回退到 results 轻量数据
-  const selectedListEntry = isSearchList
-    ? (openEntry ?? results.find((e) => e.id === openId) ?? results[Math.min(sel, Math.max(0, results.length - 1))] ?? null)
-    : null;
-  const selectedListId = selectedListEntry?.id ?? null;
+  // 搜索/画布模式：openEntry 到了以后用完整 doc；列表无选中时回退到当前高亮行
+  const selectedSearchEntry = openId
+    ? (openEntry ?? results.find((e) => e.id === openId) ?? null)
+    : isSearchList
+      ? (results[Math.min(sel, Math.max(0, results.length - 1))] ?? null)
+      : null;
+  const selectedSearchId = selectedSearchEntry?.id ?? openId ?? null;
+  const selectedSearchLoading = Boolean(openId && entryLoadingId === openId && selectedSearchId === openId);
   // 搜索列表/画布模式都不弹框（画布有自己的详情面板）
   const modalEntry = (isSearchList || viewType === 'canvas') ? null : openEntry;
 
@@ -718,6 +773,7 @@ export default function App() {
       onQuery={(v) => { setQuery(v); setSel(0); setOpenId(null); setSugSel(-1); }}
       onClear={clearSearch}
       kbs={kbs}
+      categories={kbCategories}
       searchKb={searchKb}
       onScopeKb={(id) => { setSearchKb(id); setSel(0); setOpenId(null); setSugSel(-1); }}
       inputRef={inputRef}
@@ -766,8 +822,9 @@ export default function App() {
               viewType={viewType}
               setViewType={(v) => { setViewType(v); setOpenId(null); }}
               theme={t}
-              selectedEntry={selectedListEntry}
-              selectedId={selectedListId}
+              selectedEntry={selectedSearchEntry}
+              selectedId={selectedSearchId}
+              selectedLoading={selectedSearchLoading}
               onClear={clearSearch}
               onSuggest={(suggestion) => {
                 setQuery(suggestion.value);
@@ -818,6 +875,7 @@ export default function App() {
                   onCreateFolder={handleCreateFolder}
                   onRenameKb={handleRenameKb}
                   onDeleteKb={handleDeleteKb}
+                  onDeleteKbTag={handleDeleteKbTag}
                   onRenameFolder={handleRenameFolder}
                   onDeleteFolder={handleDeleteFolder}
                   onMoveFolder={handleMoveFolder}

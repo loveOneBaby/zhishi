@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { FileText, FolderPlus, History, ImagePlus, LibraryBig, Pencil, Sparkles, Trash2 } from 'lucide-react';
+import { ChevronDown, FileText, FolderPlus, History, ImagePlus, LibraryBig, Pencil, Search, Sparkles, Tags, Trash2, X } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase, KbCategory } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
+import { matchesQuery, toSearchText } from '../pinyin-search';
 import DetailSidePanel from './DetailSidePanel';
 import LiveRewritePanel from './free/LiveRewritePanel';
 import EntryEditor from './EntryEditor';
 import ImportPreviewModal from './ImportPreviewModal';
 import VersionHistoryModal from './VersionHistoryModal';
 import KnowledgeTree from './KnowledgeTree';
+import CommandDialog from './CommandDialog';
 import type { SelectOption } from './SelectField';
 import { exportAllWithProgress, generateEntryDraftWithAIStream, generateEntryIllustrationWithAIStream, rewriteEntryDraftWithAIStream, commitRewriteEntryDraft, type ExportProgressEvent, type KbSuggestion } from '../api';
 import { toast } from '../toast';
@@ -28,6 +30,16 @@ export interface ExportProgressState {
   label: string;
   loaded?: number;
   total?: number;
+}
+
+function normalizeWorkspaceSearch(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+interface KbTagStat {
+  tag: string;
+  count: number;
+  searchText: string;
 }
 
 interface Props {
@@ -58,6 +70,7 @@ interface Props {
   onRenameKbCategory: (id: string, name: string) => Promise<void>;
   onDeleteKbCategory: (id: string) => Promise<void>;
   onMoveKbToCategory: (id: string, categoryId?: string | null) => Promise<void>;
+  onDeleteKbTag: (id: string, tag: string) => Promise<void>;
   onCreateFolder: (input: { kbId: string; parentId?: string | null; name: string }) => Promise<Folder>;
   onRenameKb: (id: string, name: string) => Promise<void>;
   onDeleteKb: (id: string) => Promise<void>;
@@ -79,19 +92,97 @@ interface Props {
 export default function FreeMode(props: Props): ReactNode {
   const { entries, kbs, kbCategories, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
     onCreate, onUpdate, onDelete, onFetchEntry, onImported, onGeneratedEntry, onStartKnowledgeBaseJob, onStartFolderInitJob,
-    onStartFolderEntriesJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onStartAgentEditJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
+    onStartFolderEntriesJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onStartAgentEditJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onDeleteKbTag, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
     aiJobs, aiTaskPanelOpen, onAiTaskPanelOpenChange, onOpenAiJobResult, onCancelAiJob, onRetryAiJob, onApplyAiJobDraft, onRevertAiJobApply, onClearAiJobHistory } = props;
 
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(() => localStorage.getItem('ik_free_entry') || null);
   const [fullEntry, setFullEntry] = useState<Entry | null>(null);
+  const [loadingEntryId, setLoadingEntryId] = useState<string | null>(null);
   const [panelMode, setPanelMode] = useState<'detail' | 'create' | 'edit'>('detail');
   const [exportProgress, setExportProgress] = useState<ExportProgressState | null>(null);
+  const [workspaceQuery, setWorkspaceQuery] = useState('');
+  const [tagQuery, setTagQuery] = useState('');
+  const [tagPanelOpen, setTagPanelOpen] = useState(false);
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [tagDeleteTarget, setTagDeleteTarget] = useState<KbTagStat | null>(null);
+  const [deletingTag, setDeletingTag] = useState<string | null>(null);
   const dirtyRef = useRef(false);
   const pendingGuardRef = useRef<(() => void) | null>(null);
 
   const entriesOfKb = useMemo(() => (kbId: string) => orderEntries(entries.filter((e) => e.kbId === kbId)), [entries]);
   const currentKb = kbs.find((k) => k.id === freeKb) ?? null;
   const kbEntries = useMemo(() => (freeKb ? entriesOfKb(freeKb) : []), [entriesOfKb, freeKb]);
+  const kbFolders = useMemo(() => folders.filter((folder) => folder.kbId === freeKb), [folders, freeKb]);
+  const kbTagStats = useMemo<KbTagStat[]>(() => {
+    const counts = new Map<string, number>();
+    for (const entry of kbEntries) {
+      const seen = new Set<string>();
+      for (const raw of entry.tags) {
+        const tag = raw.trim();
+        if (!tag || seen.has(tag)) continue;
+        seen.add(tag);
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count, searchText: toSearchText(tag) }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-Hans-CN'));
+  }, [kbEntries]);
+  const visibleTagStats = useMemo(() => {
+    const query = tagQuery.trim();
+    if (!query) return kbTagStats;
+    return kbTagStats.filter((item) => matchesQuery(item.searchText, query));
+  }, [kbTagStats, tagQuery]);
+  const workspaceNeedle = normalizeWorkspaceSearch(workspaceQuery);
+  const workspaceTree = useMemo(() => {
+    if (!workspaceNeedle && !activeTag) return { folders: kbFolders, entries: kbEntries };
+    const folderById = new Map(kbFolders.map((folder) => [folder.id, folder]));
+    const includeFolderIds = new Set<string>();
+    const includeFolderWithParents = (folderId: string | null | undefined): void => {
+      let currentId = folderId ?? null;
+      while (currentId) {
+        if (includeFolderIds.has(currentId)) return;
+        includeFolderIds.add(currentId);
+        currentId = folderById.get(currentId)?.parentId ?? null;
+      }
+    };
+    const includeFolderSubtree = (folderId: string): void => {
+      for (const id of folderSubtreeIds(kbFolders, folderId)) includeFolderIds.add(id);
+    };
+    const folderPath = (folder: Folder): string => folderPathName(kbFolders, folder.id) || folder.name;
+    const matchesFolder = (folder: Folder): boolean =>
+      !workspaceNeedle || `${folder.name} ${folderPath(folder)}`.toLowerCase().includes(workspaceNeedle);
+    const matchesTag = (entry: Entry): boolean =>
+      !activeTag || entry.tags.some((tag) => tag.trim() === activeTag);
+    const matchesEntry = (entry: Entry): boolean =>
+      !workspaceNeedle || [
+        entry.title,
+        entry.summary,
+        entry.py,
+        entry.tags.join(' '),
+        entry.folderId ? folderPathName(kbFolders, entry.folderId) : '根层级',
+      ].join(' ').toLowerCase().includes(workspaceNeedle);
+
+    const matchedFolders = kbFolders.filter(matchesFolder);
+    const matchedFolderSubtreeIds = new Set<string>();
+    for (const folder of matchedFolders) {
+      if (workspaceNeedle) {
+        includeFolderWithParents(folder.id);
+        includeFolderSubtree(folder.id);
+      }
+      for (const id of folderSubtreeIds(kbFolders, folder.id)) matchedFolderSubtreeIds.add(id);
+    }
+
+    const matchedEntries = kbEntries.filter((entry) => matchesTag(entry) && matchesEntry(entry));
+    for (const entry of matchedEntries) includeFolderWithParents(entry.folderId);
+
+    const visibleEntries = kbEntries.filter((entry) => matchesTag(entry) && (matchesEntry(entry) || Boolean(entry.folderId && matchedFolderSubtreeIds.has(entry.folderId))));
+    for (const entry of visibleEntries) includeFolderWithParents(entry.folderId);
+    return {
+      folders: kbFolders.filter((folder) => includeFolderIds.has(folder.id)),
+      entries: visibleEntries,
+    };
+  }, [activeTag, kbEntries, kbFolders, workspaceNeedle]);
   const selectedEntry = useMemo(
     () => (fullEntry && fullEntry.id === selectedEntryId ? fullEntry : null) ?? kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
     [kbEntries, selectedEntryId, fullEntry],
@@ -144,15 +235,33 @@ export default function FreeMode(props: Props): ReactNode {
   }, [freeKb, kbEntries, panelMode, selectedEntryId]);
 
   useEffect(() => {
+    setWorkspaceQuery('');
+    setTagQuery('');
+    setTagPanelOpen(false);
+    setActiveTag(null);
+    setTagDeleteTarget(null);
+  }, [freeKb]);
+
+  useEffect(() => {
+    if (activeTag && !kbTagStats.some((item) => item.tag === activeTag)) setActiveTag(null);
+  }, [activeTag, kbTagStats]);
+
+  useEffect(() => {
     if (selectedEntryId) localStorage.setItem('ik_free_entry', selectedEntryId);
     else localStorage.removeItem('ik_free_entry');
   }, [selectedEntryId]);
 
   // 列表只有摘要，选中时按需获取完整 doc/intro/nodes
   useEffect(() => {
-    if (!selectedEntryId) { setFullEntry(null); return; }
+    if (!selectedEntryId) { setFullEntry(null); setLoadingEntryId(null); return; }
     let cancelled = false;
-    onFetchEntry(selectedEntryId).then((e) => { if (!cancelled) setFullEntry(e); }).catch(() => {});
+    setLoadingEntryId(selectedEntryId);
+    onFetchEntry(selectedEntryId)
+      .then((e) => { if (!cancelled) setFullEntry(e); })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingEntryId((current) => (current === selectedEntryId ? null : current));
+      });
     return () => { cancelled = true; };
   }, [selectedEntryId, onFetchEntry]);
 
@@ -617,6 +726,48 @@ export default function FreeMode(props: Props): ReactNode {
     });
   }
 
+  function selectTag(tag: string): void {
+    guardPanel(() => {
+      const nextTag = activeTag === tag ? null : tag;
+      setActiveTag(nextTag);
+      setPanelMode('detail');
+      dirtyRef.current = false;
+      if (!nextTag) return;
+      const first = kbEntries.find((entry) => entry.tags.some((item) => item.trim() === nextTag));
+      setSelectedEntryId(first?.id ?? null);
+      setFreeFolder(first?.folderId ?? null);
+    });
+  }
+
+  function clearTagFilter(): void {
+    guardPanel(() => {
+      setActiveTag(null);
+      setPanelMode('detail');
+      dirtyRef.current = false;
+    });
+  }
+
+  async function deleteTagAction(target: KbTagStat): Promise<void> {
+    if (!freeKb || deletingTag) return;
+    setDeletingTag(target.tag);
+    try {
+      await onDeleteKbTag(freeKb, target.tag);
+      setFullEntry((current) => (
+        current && current.kbId === freeKb
+          ? { ...current, tags: current.tags.filter((item) => item.trim() !== target.tag) }
+          : current
+      ));
+      if (activeTag === target.tag) setActiveTag(null);
+      setTagDeleteTarget(null);
+      toast(`已从 ${target.count} 个知识点删除标签「${target.tag}」`, 'success');
+    } catch (err) {
+      toast('删除标签失败：' + (err instanceof Error ? err.message : String(err)), 'error');
+      throw err;
+    } finally {
+      setDeletingTag(null);
+    }
+  }
+
   function selectFolder(folder: Folder): void {
     guardPanel(() => {
       setFreeFolder(folder.id);
@@ -690,8 +841,8 @@ export default function FreeMode(props: Props): ReactNode {
   }
 
   function folderEntryCount(folderId: string): number {
-    const ids = folderSubtreeIds(folders, folderId);
-    return kbEntries.filter((entry) => entry.folderId && ids.has(entry.folderId)).length;
+    const ids = folderSubtreeIds(kbFolders, folderId);
+    return workspaceTree.entries.filter((entry) => entry.folderId && ids.has(entry.folderId)).length;
   }
 
   const commandDialog = (
@@ -922,6 +1073,7 @@ export default function FreeMode(props: Props): ReactNode {
   }
 
   const editorKey = `${panelMode}:${selectedEntry?.id ?? 'new'}:${freeKb}:${freeFolder ?? 'root'}`;
+  const activeTagStat = activeTag ? kbTagStats.find((item) => item.tag === activeTag) ?? null : null;
 
   return (
     <div className="ik-free-workspace">
@@ -940,16 +1092,103 @@ export default function FreeMode(props: Props): ReactNode {
                 {operationPathLabel}
               </button>
               <div className="ik-tree-panel-counter">
-                {folders.filter((folder) => folder.kbId === freeKb).length} / {kbEntries.length}
+                {workspaceNeedle || activeTag
+                  ? `${workspaceTree.folders.length} / ${workspaceTree.entries.length}`
+                  : `${kbFolders.length} / ${kbEntries.length}`}
               </div>
+            </div>
+            <label className="ik-workspace-search">
+              <Search size={14} strokeWidth={2.15} aria-hidden="true" />
+              <input
+                value={workspaceQuery}
+                onChange={(event) => setWorkspaceQuery(event.target.value)}
+                placeholder="搜索当前知识库"
+                aria-label="搜索当前知识库"
+                spellCheck={false}
+              />
+              {workspaceQuery && (
+                <button type="button" aria-label="清空知识库内搜索" onClick={() => setWorkspaceQuery('')}>
+                  <X size={13} strokeWidth={2.25} />
+                </button>
+              )}
+            </label>
+            <div className={`ik-kb-tags-panel ${tagPanelOpen ? 'is-open' : 'is-collapsed'}`}>
+              <button
+                type="button"
+                className="ik-kb-tags-head"
+                onClick={() => setTagPanelOpen((open) => !open)}
+                aria-expanded={tagPanelOpen}
+                title={tagPanelOpen ? '收起标签' : '展开标签'}
+              >
+                <span><Tags size={14} strokeWidth={2.1} />标签</span>
+                <span className="ik-kb-tags-summary">
+                  {activeTagStat ? `${activeTagStat.tag} · ${activeTagStat.count}` : `${kbTagStats.length}`}
+                </span>
+                <ChevronDown className="ik-kb-tags-chevron" size={14} strokeWidth={2.2} />
+              </button>
+              {activeTagStat && !tagPanelOpen && (
+                <button type="button" className="ik-kb-tag-active is-compact" onClick={clearTagFilter} title="清空标签筛选">
+                  <span>{activeTagStat.tag}</span>
+                  <b>{activeTagStat.count}</b>
+                  <X size={13} strokeWidth={2.25} />
+                </button>
+              )}
+              {tagPanelOpen && (
+                <>
+                  <label className="ik-kb-tag-search">
+                    <Search size={13} strokeWidth={2.1} aria-hidden="true" />
+                    <input
+                      value={tagQuery}
+                      onChange={(event) => setTagQuery(event.target.value)}
+                      placeholder="搜索标签"
+                      aria-label="搜索标签"
+                      spellCheck={false}
+                    />
+                    {tagQuery && (
+                      <button type="button" aria-label="清空标签搜索" onClick={() => setTagQuery('')}>
+                        <X size={12} strokeWidth={2.25} />
+                      </button>
+                    )}
+                  </label>
+                  {activeTagStat && (
+                    <button type="button" className="ik-kb-tag-active" onClick={clearTagFilter} title="清空标签筛选">
+                      <span>{activeTagStat.tag}</span>
+                      <b>{activeTagStat.count}</b>
+                      <X size={13} strokeWidth={2.25} />
+                    </button>
+                  )}
+                  <div className="ik-kb-tag-list">
+                    {visibleTagStats.length > 0 ? visibleTagStats.map((item) => (
+                      <div className={`ik-kb-tag-row ${activeTag === item.tag ? 'is-active' : ''}`} key={item.tag}>
+                        <button type="button" className="ik-kb-tag-chip" onClick={() => selectTag(item.tag)} title={`查看标签：${item.tag}`}>
+                          <span>{item.tag}</span>
+                          <b>{item.count}</b>
+                        </button>
+                        <button
+                          type="button"
+                          className="ik-kb-tag-delete"
+                          onClick={() => guardPanel(() => setTagDeleteTarget(item))}
+                          disabled={deletingTag === item.tag}
+                          title={`删除标签：${item.tag}`}
+                          aria-label={`删除标签 ${item.tag}`}
+                        >
+                          <Trash2 size={12} strokeWidth={2.2} />
+                        </button>
+                      </div>
+                    )) : (
+                      <div className="ik-kb-tag-empty">{tagQuery ? '没有匹配的标签。' : '当前知识库还没有标签。'}</div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
           <div className="ik-tree-panel-body">
             <KnowledgeTree
               kbId={freeKb}
-              folders={folders.filter((folder) => folder.kbId === freeKb)}
-              entries={kbEntries}
+              folders={workspaceTree.folders}
+              entries={workspaceTree.entries}
               selectedFolderId={freeFolder}
               selectedEntryId={selectedEntryId}
               folderEntryCount={folderEntryCount}
@@ -971,6 +1210,21 @@ export default function FreeMode(props: Props): ReactNode {
               onReorderFolders={onReorderFolders}
               onMoveEntry={moveEntryAction}
               onReorderEntries={onReorderEntries}
+              emptyState={workspaceNeedle ? (
+                <div className="ik-kt-empty ik-kt-search-empty">
+                  <span>{activeTag ? `没有标签「${activeTag}」下的匹配结果。` : '没有匹配的文件夹或知识点。'}</span>
+                  <button type="button" onClick={() => { setWorkspaceQuery(''); setActiveTag(null); }}>
+                    <X size={14} strokeWidth={2.1} />清空搜索
+                  </button>
+                </div>
+              ) : activeTag ? (
+                <div className="ik-kt-empty ik-kt-search-empty">
+                  <span>{`标签「${activeTag}」下还没有知识点。`}</span>
+                  <button type="button" onClick={clearTagFilter}>
+                    <X size={14} strokeWidth={2.1} />清空标签
+                  </button>
+                </div>
+              ) : undefined}
             />
           </div>
         </aside>
@@ -1025,6 +1279,7 @@ export default function FreeMode(props: Props): ReactNode {
                   entry={selectedEntry}
                   query=""
                   contextLabel={viewingPathLabel}
+                  loading={Boolean(selectedEntryId && loadingEntryId === selectedEntryId)}
                   actions={selectedEntry ? (
                     <>
                       <button type="button" className="ik-segbtn" onClick={restoreEntryVersionAction}>
@@ -1061,6 +1316,24 @@ export default function FreeMode(props: Props): ReactNode {
         />
       )}
       {commandDialog}
+      <CommandDialog
+        open={Boolean(tagDeleteTarget)}
+        title="删除标签"
+        description={tagDeleteTarget ? `会从 ${tagDeleteTarget.count} 个知识点中移除这个标签，知识点内容不会被删除。` : undefined}
+        confirmText="删除标签"
+        cancelText="取消"
+        tone="danger"
+        preview={tagDeleteTarget ? (
+          <div className="ik-tag-delete-preview">
+            <span>{tagDeleteTarget.tag}</span>
+            <b>{tagDeleteTarget.count} 个知识点</b>
+          </div>
+        ) : null}
+        onOpenChange={(open) => {
+          if (!open && !deletingTag) setTagDeleteTarget(null);
+        }}
+        onConfirm={() => tagDeleteTarget ? deleteTagAction(tagDeleteTarget) : undefined}
+      />
       {versionEntry && (
         <VersionHistoryModal
           entry={versionEntry}

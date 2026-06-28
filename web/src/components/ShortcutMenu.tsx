@@ -58,7 +58,7 @@ export default function ShortcutMenu({ doubleCommandEnabled, onDoubleCommandEnab
             {SHORTCUTS.map((item) => (
               <div className="ik-shortcut-row" key={`${item.title}-${item.keys.join('')}`}>
                 <span className="ik-shortcut-keys">
-                  {item.keys.map((key) => <kbd key={key}>{key}</kbd>)}
+                  {item.keys.map((key, index) => <kbd key={`${key}-${index}`}>{key}</kbd>)}
                 </span>
                 <span className="ik-shortcut-copy">
                   <b>{item.title}</b>

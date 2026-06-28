@@ -14,6 +14,7 @@ import {
   type GNode,
   type PlacedNode,
   type TreeLayout,
+  MAX_VISIBLE_DEPTH,
   clamp,
   buildModel,
   collectVisible,
@@ -29,6 +30,9 @@ interface Props {
   onOpen: (id: string) => void;
   hasQuery: boolean;
   query: string;
+  selectedEntry?: Entry | null;
+  selectedId?: string | null;
+  selectedLoading?: boolean;
 }
 
 interface Viewport {
@@ -40,7 +44,7 @@ interface Viewport {
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 1.5;
 
-export default function CanvasView({ entries, folders, kbs: kbList, theme: t, onOpen, hasQuery, query }: Props) {
+export default function CanvasView({ entries, folders, kbs: kbList, theme: t, onOpen, hasQuery, query, selectedEntry, selectedId, selectedLoading = false }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number } | null>(null);
 
@@ -52,7 +56,8 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
   const [viewport, setViewport] = useState<Viewport>({ x: 48, y: 48, scale: 1.1 });
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [showFullTree, setShowFullTree] = useState(false);
+  const [expandedBeyondLimit, setExpandedBeyondLimit] = useState<Set<string>>(() => new Set());
+  const [showFullTree, setShowFullTree] = useState(true);
   const [keyGridOpen, setKeyGridOpen] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
 
@@ -73,13 +78,15 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
 
   useEffect(() => {
     setCollapsed(new Set());
-    setShowFullTree(false);
+    setExpandedBeyondLimit(new Set());
+    setShowFullTree(true);
     setPreviewId(null);
+    pendingResetRef.current = true;
   }, [graphRoot?.id]);
 
   const visible = useMemo(
-    () => graphRoot ? collectVisible(model, graphRoot.id, activeQuery, searchActive, collapsed, showFullTree) : new Set<string>(),
-    [model, graphRoot, activeQuery, searchActive, collapsed, showFullTree]
+    () => graphRoot ? collectVisible(model, graphRoot.id, activeQuery, searchActive, collapsed, expandedBeyondLimit, showFullTree) : new Set<string>(),
+    [model, graphRoot, activeQuery, searchActive, collapsed, expandedBeyondLimit, showFullTree]
   );
   const layout = useMemo(
     () => graphRoot ? buildTreeLayout(model, graphRoot.id, visible) : null,
@@ -160,6 +167,14 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
 
   const pendingFocusRef = useRef<string | null>(null);
 
+  useEffect(() => {
+    if (!selectedId) return;
+    const node = Array.from(model.values()).find((item) => item.type === 'entry' && item.entryId === selectedId);
+    if (!node) return;
+    setPreviewId(node.id);
+    pendingFocusRef.current = node.id;
+  }, [model, selectedId]);
+
   // 布局更新后，把待定位的节点居中（保持当前缩放）
   useEffect(() => {
     const id = pendingFocusRef.current;
@@ -193,6 +208,7 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
   const collapseAllNodes = (): void => {
     setKeyGridOpen(false);
     setShowFullTree(false);
+    setExpandedBeyondLimit(new Set());
     setCollapsed(new Set(collapsibleNodeIds));
     pendingResetRef.current = true;
   };
@@ -200,6 +216,7 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
   const expandAllNodes = (): void => {
     setKeyGridOpen(false);
     setShowFullTree(true);
+    setExpandedBeyondLimit(new Set());
     setCollapsed(new Set());
     pendingResetRef.current = true;
   };
@@ -242,12 +259,26 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
     }
 
     if (!searchActive && node.children.length > 0) {
-      setCollapsed((cur) => {
-        const next = new Set(cur);
-        if (next.has(node.id)) next.delete(node.id);
-        else next.add(node.id);
-        return next;
-      });
+      if (!showFullTree && node.depth >= MAX_VISIBLE_DEPTH) {
+        setCollapsed((cur) => {
+          const next = new Set(cur);
+          next.delete(node.id);
+          return next;
+        });
+        setExpandedBeyondLimit((cur) => {
+          const next = new Set(cur);
+          if (next.has(node.id)) next.delete(node.id);
+          else next.add(node.id);
+          return next;
+        });
+      } else {
+        setCollapsed((cur) => {
+          const next = new Set(cur);
+          if (next.has(node.id)) next.delete(node.id);
+          else next.add(node.id);
+          return next;
+        });
+      }
     }
     pendingFocusRef.current = node.id;
     window.setTimeout(() => focusNode(node.id), 0);
@@ -467,7 +498,7 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
   // 点击知识点 → 悬浮在画布右侧的大预览(原生 BlockNote,链接可点)
   const previewNode = previewId ? model.get(previewId) ?? null : null;
   const previewEntry = previewNode?.type === 'entry' && previewNode.entryId
-    ? entries.find((e) => e.id === previewNode.entryId) ?? null
+    ? (selectedEntry?.id === previewNode.entryId ? selectedEntry : entries.find((e) => e.id === previewNode.entryId) ?? null)
     : null;
   let previewPath = '';
   if (previewNode) {
@@ -613,6 +644,7 @@ export default function CanvasView({ entries, folders, kbs: kbList, theme: t, on
             entry={previewEntry}
             query={activeQuery}
             contextLabel={previewPath || undefined}
+            loading={Boolean(selectedLoading && previewNode?.entryId === selectedId)}
             actions={(
               <button type="button" onClick={() => setPreviewId(null)} style={{ ...utilityButton, padding: '6px 11px' }}>关闭</button>
             )}
