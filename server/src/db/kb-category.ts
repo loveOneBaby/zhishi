@@ -1,5 +1,9 @@
 import { db, genId, rowToKbCategory } from './client.js';
+import { clearKbsCache } from './kb.js';
 import type { KbCategory, KbCategoryRow } from '../types.js';
+
+let kbCategoriesCache: { data: KbCategory[]; ts: number } | null = null;
+const CACHE_TTL = 5000;
 
 function normalizeParentId(parentId?: string | null): string | null {
   if (parentId == null) return null;
@@ -8,8 +12,16 @@ function normalizeParentId(parentId?: string | null): string | null {
 }
 
 export async function listKbCategories(): Promise<KbCategory[]> {
+  const now = Date.now();
+  if (kbCategoriesCache && now - kbCategoriesCache.ts < CACHE_TTL) return kbCategoriesCache.data;
   const rows = await db.prepare('SELECT * FROM kb_categories ORDER BY sort ASC, createdAt ASC').all() as unknown as KbCategoryRow[];
-  return rows.map(rowToKbCategory);
+  const data = rows.map(rowToKbCategory);
+  kbCategoriesCache = { data, ts: now };
+  return data;
+}
+
+export function clearKbCategoriesCache(): void {
+  kbCategoriesCache = null;
 }
 
 export async function getKbCategory(id: string): Promise<KbCategory | null> {
@@ -36,6 +48,7 @@ export async function createKbCategory(name: string, parentId?: string | null): 
       SELECT ?, NULL, ?, COALESCE((SELECT MAX(sort) FROM kb_categories WHERE parentId IS NULL), 0) + 1, ?, ?
       RETURNING *
     `).get(id, trimmed, now, now) as unknown as KbCategoryRow | undefined;
+  clearKbCategoriesCache();
   return row ? rowToKbCategory(row) : null;
 }
 
@@ -45,6 +58,7 @@ export async function renameKbCategory(id: string, name: string): Promise<KbCate
   const now = Date.now();
   const row = await db.prepare('UPDATE kb_categories SET name = ?, updatedAt = ? WHERE id = ? RETURNING *')
     .get(trimmed, now, id) as unknown as KbCategoryRow | undefined;
+  clearKbCategoriesCache();
   return row ? rowToKbCategory(row) : null;
 }
 
@@ -52,7 +66,7 @@ export async function deleteKbCategory(id: string): Promise<boolean> {
   const category = await getKbCategory(id);
   if (!category) return false;
   const now = Date.now();
-  return db.tx(async () => {
+  const result = await db.tx(async () => {
     await db.prepare('UPDATE kb_categories SET parentId = ?, updatedAt = ? WHERE parentId = ?')
       .run(category.parentId, now, id);
     await db.prepare('UPDATE knowledge_bases SET categoryId = ?, updatedAt = ? WHERE categoryId = ?')
@@ -60,4 +74,7 @@ export async function deleteKbCategory(id: string): Promise<boolean> {
     const info = await db.prepare('DELETE FROM kb_categories WHERE id = ?').run(id);
     return Number(info.changes) > 0;
   });
+  clearKbCategoriesCache();
+  clearKbsCache();
+  return result;
 }

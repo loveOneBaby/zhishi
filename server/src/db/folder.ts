@@ -1,12 +1,24 @@
 import { db, genId, rowToFolder } from './client.js';
 import { getKb } from './kb.js';
+import { clearEntriesCache } from './entry.js';
 import type { Folder, FolderRow } from '../types.js';
 
 // ───────────────────────── 文件夹 CRUD ─────────────────────────
 
+let foldersCache: { data: Folder[]; ts: number } | null = null;
+const CACHE_TTL = 5000;
+
 export async function listFolders(): Promise<Folder[]> {
+  const now = Date.now();
+  if (foldersCache && now - foldersCache.ts < CACHE_TTL) return foldersCache.data;
   const rows = await db.prepare('SELECT * FROM folders ORDER BY sort ASC, createdAt ASC').all() as unknown as FolderRow[];
-  return rows.map(rowToFolder);
+  const data = rows.map(rowToFolder);
+  foldersCache = { data, ts: now };
+  return data;
+}
+
+export function clearFoldersCache(): void {
+  foldersCache = null;
 }
 
 export async function getFolder(id: string): Promise<Folder | null> {
@@ -29,6 +41,7 @@ export async function createFolder(input: { kbId: string; parentId?: string | nu
     : (await db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM folders WHERE kbId = ? AND parentId IS NULL').get(kbId) as { m: number });
   const folder: Folder = { id, kbId, parentId, name: input.name.trim() || '未命名文件夹', sort: Number(maxRow.m) + 1, createdAt: now, updatedAt: now };
   await db.prepare('INSERT INTO folders (id, kbId, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, folder.kbId, folder.parentId, folder.name, folder.sort, now, now);
+  clearFoldersCache();
   return folder;
 }
 
@@ -36,6 +49,7 @@ export async function renameFolder(id: string, name: string): Promise<Folder | n
   if (!name.trim()) return null;
   const now = Date.now();
   await db.prepare('UPDATE folders SET name = ?, updatedAt = ? WHERE id = ?').run(name.trim(), now, id);
+  clearFoldersCache();
   return getFolder(id);
 }
 
@@ -68,6 +82,7 @@ export async function moveFolder(id: string, opts: { parentId?: string | null; k
     newParentId = parent.kbId === newKbId ? newParentId : null;
   }
   await db.prepare('UPDATE folders SET kbId = ?, parentId = ?, updatedAt = ? WHERE id = ?').run(newKbId, newParentId, Date.now(), id);
+  clearFoldersCache();
   return true;
 }
 
@@ -76,11 +91,14 @@ export async function deleteFolder(id: string): Promise<boolean> {
   const ids = [...(await folderSubtreeIds(id))];
   if (!ids.length) return false;
   const placeholders = ids.map(() => '?').join(',');
-  return db.tx(async () => {
+  const result = await db.tx(async () => {
     await db.prepare(`DELETE FROM entries WHERE folderId IN (${placeholders})`).run(...ids);
     await db.prepare(`DELETE FROM folders WHERE id IN (${placeholders})`).run(...ids);
     return true;
   });
+  clearFoldersCache();
+  clearEntriesCache();
+  return result;
 }
 
 export async function reorderFolders(ids: string[]): Promise<void> {
@@ -88,6 +106,7 @@ export async function reorderFolders(ids: string[]): Promise<void> {
   await db.tx(async () => {
     for (const [index, id] of ids.entries()) await stmt.run({ id, sort: index });
   });
+  clearFoldersCache();
 }
 
 // 按名 + 父查找文件夹；不存在则创建（幂等）

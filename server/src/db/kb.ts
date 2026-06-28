@@ -21,9 +21,21 @@ export async function resolveKbId(kbId?: string, cat?: string): Promise<string> 
 
 // ───────────────────────── 知识库 CRUD ─────────────────────────
 
+// 内存缓存：远程 Turso 查询有 100-200ms 延迟
+let kbsCache: { data: KnowledgeBase[]; ts: number } | null = null;
+const CACHE_TTL = 5000;
+
 export async function listKbs(): Promise<KnowledgeBase[]> {
+  const now = Date.now();
+  if (kbsCache && now - kbsCache.ts < CACHE_TTL) return kbsCache.data;
   const rows = await db.prepare('SELECT * FROM knowledge_bases ORDER BY sort ASC, createdAt ASC').all() as unknown as KbRow[];
-  return rows.map(rowToKb);
+  const data = rows.map(rowToKb);
+  kbsCache = { data, ts: now };
+  return data;
+}
+
+export function clearKbsCache(): void {
+  kbsCache = null;
 }
 
 export async function getKb(id: string): Promise<KnowledgeBase | null> {
@@ -52,6 +64,7 @@ export async function createKb(name: string, categoryId?: string | null): Promis
   };
   await db.prepare('INSERT INTO knowledge_bases (id, name, categoryId, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
     .run(id, kb.name, kb.categoryId, kb.sort, now, now);
+  clearKbsCache();
   return kb;
 }
 
@@ -59,6 +72,7 @@ export async function renameKb(id: string, name: string): Promise<KnowledgeBase 
   if (!name.trim()) return null;
   const now = Date.now();
   await db.prepare('UPDATE knowledge_bases SET name = ?, updatedAt = ? WHERE id = ?').run(name.trim(), now, id);
+  clearKbsCache();
   return getKb(id);
 }
 
@@ -67,17 +81,20 @@ export async function updateKbCategory(id: string, categoryId?: string | null): 
   const normalizedCategoryId = await normalizeCategoryId(categoryId);
   const row = await db.prepare('UPDATE knowledge_bases SET categoryId = ?, updatedAt = ? WHERE id = ? RETURNING *')
     .get(normalizedCategoryId, now, id) as unknown as KbRow | undefined;
+  clearKbsCache();
   return row ? rowToKb(row) : null;
 }
 
 // 删除知识库：级联删除其下所有文件夹与知识点
 export async function deleteKb(id: string): Promise<boolean> {
-  return db.tx(async () => {
+  const result = await db.tx(async () => {
     await db.prepare('DELETE FROM entries WHERE kbId = ?').run(id);
     await db.prepare('DELETE FROM folders WHERE kbId = ?').run(id);
     const info = await db.prepare('DELETE FROM knowledge_bases WHERE id = ?').run(id);
     return Number(info.changes) > 0;
   });
+  clearKbsCache();
+  return result;
 }
 
 export async function reorderKbs(ids: string[]): Promise<void> {
@@ -85,6 +102,7 @@ export async function reorderKbs(ids: string[]): Promise<void> {
   await db.tx(async () => {
     for (const [index, id] of ids.entries()) await stmt.run({ id, sort: index });
   });
+  clearKbsCache();
 }
 
 // 按名查找知识库；不存在则创建（幂等，供 seed / 迁移 / 导入复用）
