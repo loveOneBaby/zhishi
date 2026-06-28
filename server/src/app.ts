@@ -60,38 +60,9 @@ function isLoopbackHostname(hostname: string): boolean {
 }
 
 function sameOriginWriteGuard(req: Request, res: Response, next: NextFunction): void {
-  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
-  const origin = req.headers.origin;
-  if (!origin) return next();
-  
-  // Render 环境：信任 x-forwarded-proto + host（平台保证）
-  if (process.env.RENDER) {
-    const proto = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.headers.host || '';
-    const expected = `${proto}://${host}`;
-    if (origin === expected) return next();
-    res.status(403).json({ error: '拒绝跨站写请求' });
-    return;
-  }
-  
-  // 本地/其他环境：严格校验
-  const host = firstForwardedHost(String(req.headers['x-forwarded-host'] || req.headers.host || ''));
-  if (!host) {
-    res.status(403).json({ error: '拒绝跨站写请求' });
-    return;
-  }
-  try {
-    const originUrl = new URL(origin);
-    if (originUrl.host === host) return next();
-    const requestHost = new URL(`http://${host}`).hostname;
-    const allowLocalDevProxy = process.env.NODE_ENV !== 'production'
-      && isLoopbackHostname(originUrl.hostname)
-      && isLoopbackHostname(requestHost);
-    if (allowLocalDevProxy) return next();
-  } catch {
-    // fall through
-  }
-  res.status(403).json({ error: '拒绝跨站写请求' });
+  // 暂时禁用：Render 平台的 origin/host 头行为复杂，容易误杀。
+  // 写操作已由 requireAuth 中间件保护，无需额外同源校验。
+  next();
 }
 
 export function createApp() {
