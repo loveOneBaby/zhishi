@@ -28,6 +28,10 @@ server/data/
 .DS_Store
 Thumbs.db
 
+# patch/合并冲突残留
+*.orig
+*.rej
+
 # 编辑器
 .vscode/
 .idea/
