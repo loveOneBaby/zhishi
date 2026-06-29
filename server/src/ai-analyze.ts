@@ -61,6 +61,7 @@ function extractJson(text: string): unknown {
 
 const SYSTEM = `你是资深的知识库架构师与面试内容主编。会拿到一个知识库的目录结构和知识点清单(含 id)。
 请审视:目录是否合理(命名/层级/分组)、知识点覆盖是否完整、是否有重复或过薄的内容、是否缺少高频必备知识点。
+统一质量标准:目录是分类桶,不是单个面试题或单个机制;优先少目录、多知识点。知识点要是可复习的完整面试模块,先有基本概念,再有机制原理、对比辨析、工程场景、排查/优化和易错点。
 只输出一个 JSON 对象,不要任何解释或 markdown 代码块。`;
 
 function buildUserPrompt(kbName: string, folders: FolderLike[], entries: EntryLike[]): string {
@@ -102,7 +103,9 @@ ${entryLines || '(暂无知识点)'}
 要求:
 - 给 8-14 条建议,优先级从高到低排列。
 - folderId/entryId 必须是上面列出的真实 id,不要编造;不涉及具体目标的用 note。
-- create-entry 重点补全该领域高频但当前缺失的面试知识点;rewrite-entry 针对内容过薄(字数少)或质量差的知识点。
+- create-folder 只用于缺少稳定分类桶的情况,不要为了单个知识点新建目录;如果目录只会放 1 条知识点,建议合并或不创建。
+- create-entry 重点补全该领域高频但当前缺失的完整复习模块,标题要像“线程池核心参数与执行流程”“ThreadLocal 原理、泄漏与使用场景”,不要规划成只有一句定义的小题。
+- rewrite-entry 针对内容过薄(字数少)或质量差的知识点,detail 要明确要求补齐“基本概念 + 机制原理 + 对比/场景 + 追问/易错点”。
 - 只输出 JSON。`;
 }
 
@@ -160,6 +163,7 @@ export async function analyzeKnowledgeBase(kbId: string, signal?: AbortSignal, o
 
 const ENTRY_SYSTEM = `你是资深的面试内容主编与技术编辑。会拿到一个知识点的标题、摘要、标签和正文(markdown)。
 请从三个维度审视:页面结构(标题层级/分节是否清晰合理)、内容质量(是否完整、准确、覆盖面试高频考点、有无明显遗漏或错误)、排版规范(列表/代码块/表格/图片/重点标注是否得当、有无大段不分段)。
+统一质量标准:具体知识点要写深,宽主题/常见面试题要写成综合复习页;正文必须先覆盖基本概念,再补机制原理、对比辨析、工程场景、排查/优化和易错点。分节标题要用领域内自然模块名,不要机械套用泛标题。
 只输出一个 JSON 对象,不要任何解释或 markdown 代码块。`;
 
 export async function analyzeEntry(entryId: string, signal?: AbortSignal, onUsage?: (usage: TokenUsage) => void): Promise<KbAnalysis> {
@@ -190,7 +194,7 @@ ${md}
 要求:
 - 给 4-8 条建议,优先级从高到低。
 - 每条建议都要可一键应用:具体的改进点(补充某部分内容、调整结构、修正排版)用 kind=refine-entry;如果整体值得推倒重写,用 kind=rewrite-entry。
-- detail 要写成明确的改写指令,应用时会据此让 AI 改写本知识点。
+- detail 要写成明确的改写指令,应用时会据此让 AI 改写本知识点;必须说明需要补齐哪些基本要点、机制细节、对比场景、追问或易错点。
 - 只输出 JSON。`;
 
   const raw = await chatCompletion(

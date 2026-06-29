@@ -185,7 +185,7 @@ export function coerceGeneratedDraft(raw: unknown, topic: string): GeneratedDraf
         return {
           title: text(item.title),
           content: text(item.content),
-          bullets: textArray(item.bullets, 8),
+          bullets: textArray(item.bullets, 12),
         };
       }).filter((section) => section.title || section.content || section.bullets.length)
     : [];
@@ -196,9 +196,9 @@ export function coerceGeneratedDraft(raw: unknown, topic: string): GeneratedDraf
     summary,
     tags,
     sections,
-    interviewPoints: textArray(obj.interviewPoints, 10),
-    commonQuestions: textArray(obj.commonQuestions, 8),
-    pitfalls: textArray(obj.pitfalls, 8),
+    interviewPoints: textArray(obj.interviewPoints, 14),
+    commonQuestions: textArray(obj.commonQuestions, 12),
+    pitfalls: textArray(obj.pitfalls, 12),
     answerTemplate: text(obj.answerTemplate),
   };
 }

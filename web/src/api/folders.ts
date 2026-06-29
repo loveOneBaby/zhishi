@@ -1,4 +1,4 @@
-import type { Entry, Folder } from '../types';
+import type { Folder } from '../types';
 import { apiDelJson, apiGetKey, apiPostKey, apiPutKey } from './client';
 import type { AiKnowledgeBaseJob } from './aiJobs';
 
@@ -16,7 +16,13 @@ export async function renameFolder(id: string, name: string): Promise<Folder> {
 export async function moveFolder(id: string, opts: { parentId?: string | null; kbId?: string }): Promise<Folder[]> {
   return apiPostKey<Folder[]>('/folders/move', { id, ...opts }, 'folders');
 }
-export async function deleteFolder(id: string): Promise<{ folders: Folder[]; entries: Entry[] }> {
+export interface DeleteFolderResult {
+  ok: true;
+  folderIds: string[];
+  entryIds: string[];
+}
+
+export async function deleteFolder(id: string): Promise<DeleteFolderResult> {
   return apiDelJson(`/folders/${encodeURIComponent(id)}`);
 }
 export async function reorderFolders(ids: string[]): Promise<Folder[]> {
@@ -52,6 +58,23 @@ export async function startGenerateKnowledgePointsFromFoldersJob(input: Generate
   return apiPostKey<AiKnowledgeBaseJob>(
     `/kbs/${encodeURIComponent(input.kbId)}/folders/entries/jobs`,
     { parentId: input.parentId ?? null, domain: input.domain },
+    'job',
+  );
+}
+
+// ───────────── AI 一键生成目录和知识点 ─────────────
+
+export interface GenerateFoldersAndKnowledgePointsInput {
+  kbId: string;
+  parentId?: string | null;
+  domain?: string;
+  folderCount?: number;
+}
+
+export async function startGenerateFoldersAndKnowledgePointsJob(input: GenerateFoldersAndKnowledgePointsInput): Promise<AiKnowledgeBaseJob> {
+  return apiPostKey<AiKnowledgeBaseJob>(
+    `/kbs/${encodeURIComponent(input.kbId)}/folders/full/jobs`,
+    { parentId: input.parentId ?? null, domain: input.domain, folderCount: input.folderCount },
     'job',
   );
 }

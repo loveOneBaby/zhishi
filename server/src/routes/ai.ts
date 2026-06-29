@@ -4,7 +4,7 @@ import { listEntries } from '../db.js';
 import { searchEntries } from '../search.js';
 import { askAI } from '../ask.js';
 import { rateLimit } from '../rateLimit.js';
-import { aiJobs, applyAgentEditJob, cancelAiJob, clearAiJobHistory, jobSnapshot, listJobSnapshots, retryAiJob, revertAgentEditJob } from '../services/ai-jobs.js';
+import { aiJobs, applyAgentEditJob, cancelAiJob, clearAiJob, clearAiJobHistory, jobSnapshot, listJobSnapshots, retryAiJob, revertAgentEditJob } from '../services/ai-jobs.js';
 
 // /ask 默认需要登录；显式 AI_PUBLIC_ASK=true 时公开，仍按 IP 收紧限流防刷额度消耗。
 const askLimiter = rateLimit({ windowMs: 60_000, max: 20, message: 'AI 问答过于频繁,请稍后再试' });
@@ -23,6 +23,12 @@ export function registerAiRoutes(api: Router): void {
 
   api.delete('/ai/jobs/history', asyncHandler(async (_req, res) => {
     res.json({ jobs: await clearAiJobHistory() });
+  }));
+
+  api.delete('/ai/jobs/:id', asyncHandler(async (req, res) => {
+    const jobs = await clearAiJob(req.params.id);
+    if (!jobs) return res.status(404).json({ error: '任务不存在或仍在运行' });
+    res.json({ jobs });
   }));
 
   api.post('/ai/jobs/:id/cancel', asyncHandler(async (req, res) => {

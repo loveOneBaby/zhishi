@@ -19,12 +19,12 @@ import {
   reorderKbs,
   deleteTagFromKb,
   getFolder,
-  listFolders,
-  listEntries,
   listEntrySummaries,
+  clearFoldersCache,
+  clearEntriesCache,
 } from '../db.js';
 import { createKnowledgeBaseFromDraft } from '../services/kb-draft-writer.js';
-import { discardAiJobResultsForKb, jobSnapshot, startAgentEditJob, startAnalyzeJob, startFolderEntriesJob, startFolderInitJob, startKnowledgeBaseJob } from '../services/ai-jobs.js';
+import { compactJobSnapshot, discardAiJobResultsForKb, startAgentEditJob, startAnalyzeJob, startFolderEntriesJob, startFolderFullJob, startFolderInitJob, startKnowledgeBaseJob } from '../services/ai-jobs.js';
 import { folderPathLabel, sendSse } from '../services/utils.js';
 import { asyncHandler } from '../app.js';
 
@@ -76,7 +76,7 @@ export function registerKbRoutes(api: Router): void {
     const questionCount = Number(req.body?.questionCount ?? 18);
     if (!domain) return res.status(400).json({ error: 'domain 不能为空' });
     const job = await startKnowledgeBaseJob(domain, Number.isFinite(questionCount) ? questionCount : 18);
-    res.status(202).json({ job: await jobSnapshot(job) });
+    res.status(202).json({ job: compactJobSnapshot(job) });
   }));
 
   // AI 初始化当前知识库文件目录：只创建文件夹，不生成知识点。
@@ -89,16 +89,16 @@ export function registerKbRoutes(api: Router): void {
     if (parentId && !parent) return res.status(404).json({ error: '目标文件夹不存在' });
     if (parent && parent.kbId !== kb.id) return res.status(400).json({ error: '目标文件夹不属于当前知识库' });
     const domain = String(req.body?.domain ?? '').trim() || kb.name;
-    const folderCount = Number(req.body?.folderCount ?? 18);
+    const folderCount = Number(req.body?.folderCount ?? 10);
     const job = await startFolderInitJob({
       kbId: kb.id,
       kbName: kb.name,
       parentId,
       targetPath: await folderPathLabel(parentId),
       domain,
-      folderCount: Number.isFinite(folderCount) ? folderCount : 18,
+      folderCount: Number.isFinite(folderCount) ? folderCount : 10,
     });
-    res.status(202).json({ job: await jobSnapshot(job) });
+    res.status(202).json({ job: compactJobSnapshot(job) });
   }));
 
   // AI 按已有目录直接生成知识点：无需用户输入题目，按当前目录树自动补全空叶子目录。
@@ -118,7 +118,29 @@ export function registerKbRoutes(api: Router): void {
       targetPath: await folderPathLabel(parentId),
       domain,
     });
-    res.status(202).json({ job: await jobSnapshot(job) });
+    res.status(202).json({ job: compactJobSnapshot(job) });
+  }));
+
+  // AI 一键生成目录和知识点：先补齐目录骨架，再按空叶子目录生成知识点。
+  api.post('/kbs/:id/folders/full/jobs', asyncHandler(async (req, res) => {
+    const kb = await getKb(req.params.id);
+    if (!kb) return res.status(404).json({ error: '知识库不存在' });
+    const requestedParentId = req.body?.parentId == null ? '' : String(req.body.parentId).trim();
+    const parentId = requestedParentId || null;
+    const parent = parentId ? await getFolder(parentId) : null;
+    if (parentId && !parent) return res.status(404).json({ error: '目标文件夹不存在' });
+    if (parent && parent.kbId !== kb.id) return res.status(400).json({ error: '目标文件夹不属于当前知识库' });
+    const domain = String(req.body?.domain ?? '').trim() || kb.name;
+    const folderCount = Number(req.body?.folderCount ?? 6);
+    const job = await startFolderFullJob({
+      kbId: kb.id,
+      kbName: kb.name,
+      parentId,
+      targetPath: await folderPathLabel(parentId),
+      domain,
+      folderCount: Number.isFinite(folderCount) ? folderCount : 6,
+    });
+    res.status(202).json({ job: compactJobSnapshot(job) });
   }));
 
   // AI 新建知识库：按领域自动规划目录，并生成一批 Q&A 面试知识点。
@@ -160,7 +182,7 @@ export function registerKbRoutes(api: Router): void {
     const kb = await getKb(req.params.id);
     if (!kb) return res.status(404).json({ error: '知识库不存在' });
     const job = await startAnalyzeJob({ kbId: kb.id, kbName: kb.name });
-    res.status(202).json({ job: await jobSnapshot(job) });
+    res.status(202).json({ job: compactJobSnapshot(job) });
   }));
 
   // AI 控制台:用户用自然语言描述调整想法，后台规划并写入目录/知识点。
@@ -191,7 +213,7 @@ export function registerKbRoutes(api: Router): void {
       entryId: entry?.id,
       targetPath: await folderPathLabel(parentId),
     });
-    res.status(202).json({ job: await jobSnapshot(job) });
+    res.status(202).json({ job: compactJobSnapshot(job) });
   }));
 
   api.put('/kbs/:id', asyncHandler(async (req, res) => {
@@ -222,9 +244,11 @@ export function registerKbRoutes(api: Router): void {
     const kb = await getKb(req.params.id);
     if (!kb) return res.status(404).json({ error: 'not found' });
     await discardAiJobResultsForKb(kb.id);
-    const ok = await deleteKb(kb.id);
-    if (!ok) return res.status(404).json({ error: 'not found' });
-    res.json({ ok: true, kbs: await listKbs(), folders: await listFolders(), entries: await listEntrySummaries() });
+    const result = await deleteKb(kb.id);
+    if (!result) return res.status(404).json({ error: 'not found' });
+    clearFoldersCache();
+    clearEntriesCache();
+    res.json({ ok: true, ...result });
   }));
 
   api.post('/kbs/reorder', asyncHandler(async (req, res) => {

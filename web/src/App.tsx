@@ -27,6 +27,7 @@ import {
   startGenerateKnowledgeBaseJob,
   startInitKnowledgeBaseFoldersJob,
   startGenerateKnowledgePointsFromFoldersJob,
+  startGenerateFoldersAndKnowledgePointsJob,
   startAnalyzeJob,
   startAnalyzeEntryJob,
   startAgentEditJob,
@@ -34,6 +35,7 @@ import {
   retryAiJob,
   applyAiJobDraft,
   revertAiJobApply,
+  clearAiJob,
   clearAiJobHistory,
   type AiKnowledgeBaseJob,
   type EntryInput as ApiEntryInput,
@@ -79,15 +81,118 @@ function routeToHash(route: Route): string {
   return '#/library';
 }
 
-function mergeById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+function itemVersionKey(item: { id: string; updatedAt?: number; sort?: number }): string {
+  return `${item.id}:${item.updatedAt ?? ''}:${item.sort ?? ''}`;
+}
+
+function sameItems<T extends { id: string; updatedAt?: number; sort?: number }>(current: T[], incoming: T[]): boolean {
+  if (current.length !== incoming.length) return false;
+  return current.every((item, index) => itemVersionKey(item) === itemVersionKey(incoming[index]));
+}
+
+function isOlderVersion(existing: { updatedAt?: number }, incoming: { updatedAt?: number }): boolean {
+  const existingUpdatedAt = Number(existing.updatedAt ?? 0);
+  const incomingUpdatedAt = Number(incoming.updatedAt ?? 0);
+  return existingUpdatedAt > 0 && incomingUpdatedAt > 0 && incomingUpdatedAt < existingUpdatedAt;
+}
+
+function mergeById<T extends { id: string; updatedAt?: number; sort?: number }>(current: T[], incoming: T[]): T[] {
   if (!incoming.length) return current;
+  let changed = false;
   const map = new Map(current.map((item) => [item.id, item]));
-  for (const item of incoming) map.set(item.id, item);
+  for (const item of incoming) {
+    const existing = map.get(item.id);
+    if (!existing) {
+      map.set(item.id, item);
+      changed = true;
+      continue;
+    }
+    if (isOlderVersion(existing, item)) continue;
+    if (itemVersionKey(existing) !== itemVersionKey(item)) {
+      map.set(item.id, item);
+      changed = true;
+    }
+  }
+  if (!changed) return current;
   return [...map.values()];
 }
 
-function replaceByKb<T extends { kbId: string }>(current: T[], kbId: string, incoming: T[]): T[] {
+function replaceByKb<T extends { id: string; kbId: string; updatedAt?: number; sort?: number }>(current: T[], kbId: string, incoming: T[]): T[] {
+  const currentInKb = current.filter((item) => item.kbId === kbId);
+  if (sameItems(currentInKb, incoming)) return current;
   return [...current.filter((item) => item.kbId !== kbId), ...incoming];
+}
+
+function aiJobResultKey(job: AiKnowledgeBaseJob): string {
+  if (!job.result) return '';
+  return [
+    job.result.kb.id,
+    job.result.kb.updatedAt,
+    job.result.folders.length,
+    job.result.entries.length,
+    job.result.folders.map((folder) => `${folder.id}:${folder.updatedAt}`).join(','),
+    job.result.entries.map((entry) => `${entry.id}:${entry.updatedAt}`).join(','),
+  ].join('|');
+}
+
+function aiJobListKey(jobs: AiKnowledgeBaseJob[]): string {
+  return jobs.map((job) => [
+    job.id,
+    job.kind,
+    job.status,
+    job.agentPhase ?? '',
+    job.updatedAt,
+    job.logs.length,
+    job.modelOutput,
+    job.error ?? '',
+    job.resumable ? 1 : 0,
+    job.promptTokens,
+    job.completionTokens,
+    job.totalTokens,
+    job.analysis ? `${job.analysis.overview}|${job.analysis.suggestions.length}` : '',
+    job.rollback ? `${job.rollback.appliedAt}:${job.rollback.revertedAt ?? ''}` : '',
+    aiJobResultKey(job),
+  ].join('\u001f')).join('\u001e');
+}
+
+function sameAiJobs(current: AiKnowledgeBaseJob[], incoming: AiKnowledgeBaseJob[]): boolean {
+  return current.length === incoming.length && aiJobListKey(current) === aiJobListKey(incoming);
+}
+
+function collectFolderSubtreeIds(folders: Folder[], rootIds: Set<string>): Set<string> {
+  const ids = new Set(rootIds);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of folders) {
+      if (folder.parentId && ids.has(folder.parentId) && !ids.has(folder.id)) {
+        ids.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
+}
+
+function pruneAiJobResultItems(job: AiKnowledgeBaseJob, folderIds: Set<string>, entryIds: Set<string>): AiKnowledgeBaseJob {
+  if (!job.result || (!folderIds.size && !entryIds.size)) return job;
+  const resultFolderIds = collectFolderSubtreeIds(job.result.folders, folderIds);
+  const folders = job.result.folders.filter((folder) => !resultFolderIds.has(folder.id));
+  const entries = job.result.entries.filter((entry) => (
+    !entryIds.has(entry.id) && !(entry.folderId && resultFolderIds.has(entry.folderId))
+  ));
+  if (folders.length === job.result.folders.length && entries.length === job.result.entries.length) return job;
+  return { ...job, result: { ...job.result, folders, entries } };
+}
+
+function pruneAiJobsResultItems(jobs: AiKnowledgeBaseJob[], folderIds: Set<string>, entryIds: Set<string>): AiKnowledgeBaseJob[] {
+  let changed = false;
+  const next = jobs.map((job) => {
+    const pruned = pruneAiJobResultItems(job, folderIds, entryIds);
+    if (pruned !== job) changed = true;
+    return pruned;
+  });
+  return changed ? next : jobs;
 }
 
 function isKeyPointShortcut(event: KeyboardEvent): boolean {
@@ -132,8 +237,9 @@ export default function App() {
   const mergedJobIdsRef = useRef<Set<string>>(new Set());
   const notifiedJobIdsRef = useRef<Set<string>>(new Set());
   const notifiedJobEventsRef = useRef<Set<string>>(new Set());
-  const autoOpenedJobIdsRef = useRef<Set<string>>(new Set());
   const deletedKbIdsRef = useRef<Set<string>>(new Set());
+  const deletedFolderIdsRef = useRef<Set<string>>(new Set());
+  const deletedEntryIdsRef = useRef<Set<string>>(new Set());
   const kbCategoryMoveVersionRef = useRef<Map<string, number>>(new Map());
   const lastCommandTapRef = useRef(0);
   // 浏览器前进/后退触发的一次性标记:本轮 URL 同步用 replaceState(避免把回退后的地址又压成新历史)
@@ -198,36 +304,42 @@ export default function App() {
   }, []);
 
   const applyCompletedJobs = useCallback((jobs: AiKnowledgeBaseJob[]): void => {
-    const materialized = jobs.filter((job) => job.result && !deletedKbIdsRef.current.has(job.result.kb.id));
+    const materialized = jobs
+      .filter((job) => job.result && !deletedKbIdsRef.current.has(job.result.kb.id))
+      .map((job) => {
+        const result = job.result!;
+        return {
+          job,
+          result: {
+            ...result,
+            folders: result.folders.filter((folder) => !deletedFolderIdsRef.current.has(folder.id)),
+            entries: result.entries.filter((entry) => (
+              !deletedEntryIdsRef.current.has(entry.id)
+              && !(entry.folderId && deletedFolderIdsRef.current.has(entry.folderId))
+            )),
+          },
+        };
+      });
     if (materialized.length) {
-      setKbs((prev) => mergeById(prev, materialized.map((job) => job.result!.kb)));
-      const exact = materialized.filter((job) => job.kind === 'agent-edit' && (job.agentPhase === 'applied' || job.agentPhase === 'reverted'));
-      const merging = materialized.filter((job) => !exact.includes(job));
+      setKbs((prev) => mergeById(prev, materialized.map((item) => item.result.kb)));
+      const exact = materialized.filter((item) => item.job.kind === 'agent-edit' && (item.job.agentPhase === 'applied' || item.job.agentPhase === 'reverted'));
+      const merging = materialized.filter((item) => !(item.job.kind === 'agent-edit' && (item.job.agentPhase === 'applied' || item.job.agentPhase === 'reverted')));
       if (merging.length) {
-        setFolders((prev) => mergeById(prev, merging.flatMap((job) => job.result!.folders)));
-        setEntries((prev) => mergeById(prev, merging.flatMap((job) => job.result!.entries)));
+        setFolders((prev) => mergeById(prev, merging.flatMap((item) => item.result.folders)));
+        setEntries((prev) => mergeById(prev, merging.flatMap((item) => item.result.entries)));
       }
       if (exact.length) {
-        setFolders((prev) => exact.reduce((next, job) => replaceByKb(next, job.result!.kb.id, job.result!.folders), prev));
-        setEntries((prev) => exact.reduce((next, job) => replaceByKb(next, job.result!.kb.id, job.result!.entries), prev));
+        setFolders((prev) => exact.reduce((next, item) => replaceByKb(next, item.result.kb.id, item.result.folders), prev));
+        setEntries((prev) => exact.reduce((next, item) => replaceByKb(next, item.result.kb.id, item.result.entries), prev));
       }
     }
 
-    const streamingKb = materialized.find((job) =>
-      job.kind === 'kb-generate'
-      && (job.status === 'queued' || job.status === 'running')
-      && !autoOpenedJobIdsRef.current.has(job.id)
-    );
-    if (streamingKb?.result) {
-      autoOpenedJobIdsRef.current.add(streamingKb.id);
-      setMode('free');
-      setFreeKb(streamingKb.result.kb.id);
-      setFreeFolder(null);
-      setAiTaskPanelOpen(true);
-      toast(`AI 已创建「${streamingKb.result.kb.name}」目录骨架，知识点会逐条写入`, 'success');
-    }
-
-    const completed = jobs.filter((job) => job.status === 'succeeded' && job.result && !mergedJobIdsRef.current.has(job.id));
+    const completed = jobs.filter((job) => (
+      job.status === 'succeeded'
+      && job.result
+      && !deletedKbIdsRef.current.has(job.result.kb.id)
+      && !mergedJobIdsRef.current.has(job.id)
+    ));
     if (completed.length) {
       for (const job of completed) {
         mergedJobIdsRef.current.add(job.id);
@@ -238,9 +350,11 @@ export default function App() {
             ? `AI 已初始化「${job.result!.kb.name}」目录`
             : job.kind === 'folder-entries'
               ? `AI 已按目录补全「${job.result!.kb.name}」知识点`
-              : job.kind === 'agent-edit'
-                ? `AI 已调整「${job.result!.kb.name}」`
-                : `AI 已新建「${job.result!.kb.name}」`, 'success');
+              : job.kind === 'folder-full'
+                ? `AI 已生成「${job.result!.kb.name}」目录和知识点`
+                : job.kind === 'agent-edit'
+                  ? `AI 已调整「${job.result!.kb.name}」`
+                  : `AI 已新建「${job.result!.kb.name}」`, 'success');
         }
       }
     }
@@ -270,16 +384,18 @@ export default function App() {
           ? 'AI 初始化目录失败'
           : job.kind === 'folder-entries'
             ? 'AI 按目录生成知识点失败'
-            : job.kind === 'agent-edit'
-              ? 'AI 调整知识库失败'
-              : 'AI 建库失败'}：${job.error || job.domain}`, 'error');
+            : job.kind === 'folder-full'
+              ? 'AI 一键生成目录和知识点失败'
+              : job.kind === 'agent-edit'
+                ? 'AI 调整知识库失败'
+                : 'AI 建库失败'}：${job.error || job.domain}`, 'error');
       }
     }
   }, []);
 
   const refreshAiJobs = useCallback(async (): Promise<AiKnowledgeBaseJob[]> => {
     const jobs = await fetchAiJobs();
-    setAiJobs(jobs);
+    setAiJobs((prev) => sameAiJobs(prev, jobs) ? prev : jobs);
     applyCompletedJobs(jobs);
     return jobs;
   }, [applyCompletedJobs]);
@@ -497,18 +613,23 @@ export default function App() {
   // 知识点的增删改：同步到共享 entries，检索/画布即时反映
   const handleCreate = useCallback(async (input: ApiEntryInput): Promise<Entry> => {
     const entry = await createEntry(input);
+    deletedEntryIdsRef.current.delete(entry.id);
     setEntries((prev) => [...prev, entry]);
     return entry;
   }, []);
   const handleUpdate = useCallback(async (id: string, input: ApiEntryInput): Promise<Entry> => {
     const entry = await updateEntry(id, input);
+    deletedEntryIdsRef.current.delete(entry.id);
     setEntries((prev) => prev.map((e) => (e.id === id ? entry : e)));
     setOpenId((cur) => (cur === id ? null : cur));
     return entry;
   }, []);
   const handleDelete = useCallback(async (id: string) => {
     await deleteEntry(id);
+    const deletedEntryIds = new Set([id]);
+    deletedEntryIdsRef.current.add(id);
     setEntries((prev) => prev.filter((e) => e.id !== id));
+    setAiJobs((prev) => pruneAiJobsResultItems(prev, new Set(), deletedEntryIds));
     setOpenId((cur) => (cur === id ? null : cur));
   }, []);
   const handleReorder = useCallback(async (ids: string[]) => {
@@ -517,12 +638,15 @@ export default function App() {
   }, []);
   const handleImported = useCallback((nextEntries: Entry[], nextKbs: KnowledgeBase[], nextFolders: Folder[], nextCategories?: KbCategory[]) => {
     for (const kb of nextKbs) deletedKbIdsRef.current.delete(kb.id);
+    for (const folder of nextFolders) deletedFolderIdsRef.current.delete(folder.id);
+    for (const entry of nextEntries) deletedEntryIdsRef.current.delete(entry.id);
     setEntries(nextEntries);
     setKbs(nextKbs);
     setFolders(nextFolders);
     if (nextCategories) setKbCategories(nextCategories);
   }, []);
   const handleGeneratedEntry = useCallback((entry: Entry) => {
+    deletedEntryIdsRef.current.delete(entry.id);
     setEntries((prev) => [...prev.filter((item) => item.id !== entry.id), entry]);
   }, []);
   const handleStartKnowledgeBaseJob = useCallback(async (domain: string): Promise<void> => {
@@ -549,6 +673,13 @@ export default function App() {
     setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
     setAiTaskPanelOpen(true);
     toast(`「${input.domain || job.kbName || job.domain}」已开始按目录生成知识点`, 'success');
+  }, []);
+
+  const handleStartFolderFullJob = useCallback(async (input: { kbId: string; parentId?: string | null; domain?: string }): Promise<void> => {
+    const job = await startGenerateFoldersAndKnowledgePointsJob(input);
+    setAiJobs((prev) => mergeById(prev, [job]).sort((a, b) => b.createdAt - a.createdAt));
+    setAiTaskPanelOpen(true);
+    toast(`「${input.domain || job.kbName || job.domain}」已开始一键生成目录和知识点`, 'success');
   }, []);
 
   const handleStartAnalyzeJob = useCallback(async (kbId: string): Promise<void> => {
@@ -612,6 +743,12 @@ export default function App() {
     toast('已清除 AI 任务历史', 'success');
   }, []);
 
+  const handleClearAiJob = useCallback(async (id: string): Promise<void> => {
+    const jobs = await clearAiJob(id);
+    setAiJobs(jobs);
+    toast('已清理 AI 任务记录', 'success');
+  }, []);
+
   const handleOpenAiJobResult = useCallback((job: AiKnowledgeBaseJob): void => {
     if (!job.result) return;
     applyCompletedJobs([job]);
@@ -624,6 +761,7 @@ export default function App() {
   // 知识库回调
   const handleCreateKb = useCallback(async (name: string, categoryId?: string | null): Promise<KnowledgeBase> => {
     const kb = await createKb(name, categoryId);
+    deletedKbIdsRef.current.delete(kb.id);
     setKbs((prev) => [...prev, kb]);
     return kb;
   }, []);
@@ -634,11 +772,15 @@ export default function App() {
     setEntries((prev) => prev.map((e) => (e.kbId === id ? { ...e, cat: kb.name } : e)));
   }, []);
   const handleDeleteKb = useCallback(async (id: string): Promise<void> => {
-    const { kbs: nk, folders: nf, entries: ne } = await deleteKb(id);
+    const { folderIds, entryIds } = await deleteKb(id);
+    const deletedFolderIds = new Set(folderIds);
+    const deletedEntryIds = new Set(entryIds);
     deletedKbIdsRef.current.add(id);
-    setKbs(nk);
-    setFolders(nf);
-    setEntries(ne);
+    for (const folderId of deletedFolderIds) deletedFolderIdsRef.current.add(folderId);
+    for (const entryId of deletedEntryIds) deletedEntryIdsRef.current.add(entryId);
+    setKbs((prev) => prev.filter((kb) => kb.id !== id));
+    setFolders((prev) => prev.filter((folder) => folder.kbId !== id && !deletedFolderIds.has(folder.id)));
+    setEntries((prev) => prev.filter((entry) => entry.kbId !== id && !deletedEntryIds.has(entry.id)));
     setAiJobs((prev) => prev.map((job) => job.result?.kb.id === id ? { ...job, result: undefined, resumable: false } : job));
     setOpenId(null);
     setSearchKb((cur) => (cur === id ? null : cur));
@@ -694,6 +836,7 @@ export default function App() {
   // 文件夹回调
   const handleCreateFolder = useCallback(async (input: { kbId: string; parentId?: string | null; name: string }): Promise<Folder> => {
     const folder = await createFolder(input);
+    deletedFolderIdsRef.current.delete(folder.id);
     setFolders((prev) => [...prev, folder]);
     return folder;
   }, []);
@@ -702,15 +845,16 @@ export default function App() {
     setFolders((prev) => prev.map((f) => (f.id === id ? folder : f)));
   }, []);
   const handleDeleteFolder = useCallback(async (id: string): Promise<void> => {
-    const { folders: nf, entries: ne } = await deleteFolder(id);
-    setFolders(nf);
-    setEntries(ne);
-    setOpenId(null);
-    setFreeFolder((cur) => {
-      if (!cur) return cur;
-      // 若当前浏览的文件夹被删（或在其子树内），回退到其知识库根
-      return cur === id || nf.every((f) => f.id !== cur) ? null : cur;
-    });
+    const { folderIds, entryIds } = await deleteFolder(id);
+    const deletedFolderIds = new Set(folderIds);
+    const deletedEntryIds = new Set(entryIds);
+    for (const folderId of deletedFolderIds) deletedFolderIdsRef.current.add(folderId);
+    for (const entryId of deletedEntryIds) deletedEntryIdsRef.current.add(entryId);
+    setFolders((prev) => prev.filter((folder) => !deletedFolderIds.has(folder.id)));
+    setEntries((prev) => prev.filter((entry) => !deletedEntryIds.has(entry.id)));
+    setAiJobs((prev) => pruneAiJobsResultItems(prev, deletedFolderIds, deletedEntryIds));
+    setOpenId((cur) => (cur && deletedEntryIds.has(cur) ? null : cur));
+    setFreeFolder((cur) => (cur && deletedFolderIds.has(cur) ? null : cur));
   }, []);
   const handleMoveFolder = useCallback(async (id: string, opts: { parentId?: string | null; kbId?: string }): Promise<void> => {
     const next = await moveFolder(id, opts);
@@ -864,6 +1008,7 @@ export default function App() {
                   onStartKnowledgeBaseJob={handleStartKnowledgeBaseJob}
                   onStartFolderInitJob={handleStartFolderInitJob}
                   onStartFolderEntriesJob={handleStartFolderEntriesJob}
+                  onStartFolderFullJob={handleStartFolderFullJob}
                   onStartAnalyzeJob={handleStartAnalyzeJob}
                   onStartAnalyzeEntryJob={handleStartAnalyzeEntryJob}
                   onStartAgentEditJob={handleStartAgentEditJob}
@@ -888,6 +1033,7 @@ export default function App() {
                   onRetryAiJob={handleRetryAiJob}
                   onApplyAiJobDraft={handleApplyAiJobDraft}
                   onRevertAiJobApply={handleRevertAiJobApply}
+                  onClearAiJob={handleClearAiJob}
                   onClearAiJobHistory={handleClearAiJobHistory}
                 />
               )}
@@ -955,6 +1101,7 @@ export default function App() {
           onRetry={handleRetryAiJob}
           onApplyAgentEdit={handleApplyAiJobDraft}
           onRevertAgentEdit={handleRevertAiJobApply}
+          onClearJob={handleClearAiJob}
           onClearHistory={handleClearAiJobHistory}
         />
       )}

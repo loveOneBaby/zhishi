@@ -113,13 +113,24 @@ export async function updateKbCategory(id: string, categoryId?: string | null): 
   return row ? rowToKb(row) : null;
 }
 
+export interface DeleteKbResult {
+  kbId: string;
+  folderIds: string[];
+  entryIds: string[];
+}
+
 // 删除知识库：级联删除其下所有文件夹与知识点
-export async function deleteKb(id: string): Promise<boolean> {
+export async function deleteKb(id: string): Promise<DeleteKbResult | null> {
   const result = await db.tx(async () => {
-    await db.prepare('DELETE FROM entries WHERE kbId = ?').run(id);
-    await db.prepare('DELETE FROM folders WHERE kbId = ?').run(id);
-    const info = await db.prepare('DELETE FROM knowledge_bases WHERE id = ?').run(id);
-    return Number(info.changes) > 0;
+    const kbRow = await db.prepare('DELETE FROM knowledge_bases WHERE id = ? RETURNING id').get(id) as { id: string } | undefined;
+    if (!kbRow) return null;
+    const entryRows = await db.prepare('DELETE FROM entries WHERE kbId = ? RETURNING id').all(id) as { id: string }[];
+    const folderRows = await db.prepare('DELETE FROM folders WHERE kbId = ? RETURNING id').all(id) as { id: string }[];
+    return {
+      kbId: kbRow.id,
+      folderIds: folderRows.map((row) => row.id),
+      entryIds: entryRows.map((row) => row.id),
+    };
   });
   clearKbsCache();
   return result;

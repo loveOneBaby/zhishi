@@ -62,7 +62,7 @@ export interface AgentEditRollback {
 
 export interface AiKnowledgeBaseJob {
   id: string;
-  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze' | 'agent-edit';
+  kind: 'kb-generate' | 'folder-init' | 'folder-entries' | 'folder-full' | 'analyze' | 'agent-edit';
   domain: string;
   questionCount: number;
   kbId?: string;
@@ -117,6 +117,11 @@ export async function revertAiJobApply(id: string): Promise<AiKnowledgeBaseJob> 
 
 export async function clearAiJobHistory(): Promise<AiKnowledgeBaseJob[]> {
   const data = await apiDelJson<{ jobs: AiKnowledgeBaseJob[] }>('/ai/jobs/history');
+  return data.jobs;
+}
+
+export async function clearAiJob(id: string): Promise<AiKnowledgeBaseJob[]> {
+  const data = await apiDelJson<{ jobs: AiKnowledgeBaseJob[] }>(`/ai/jobs/${encodeURIComponent(id)}`);
   return data.jobs;
 }
 

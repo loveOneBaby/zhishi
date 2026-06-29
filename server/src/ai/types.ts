@@ -80,6 +80,7 @@ export interface GenerateFolderTreeOptions {
   targetPath?: string;
   existingFolders?: string[];
   folderCount?: number;
+  compact?: boolean;
   signal?: AbortSignal;
 }
 

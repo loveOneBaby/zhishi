@@ -283,7 +283,9 @@ ${PLAN_SCHEMA}
 
 规划要求:
 - 优先满足用户想法；如果用户只是表达方向，你可以合理补齐目录结构和高频知识点。
-- 需要补内容时用 create-entry；需要优化已有内容时用 rewrite-entry，并把 instruction 写成明确改写要求。
+- 统一粒度：目录是分类桶，不是单个面试题或单个机制；优先少目录、多知识点。只有能长期承载多条知识点的分类才用 create-folder。
+- 需要补内容时用 create-entry；topic 要是完整可复习的面试模块或具体机制，例如“线程池核心参数与执行流程”“ThreadLocal 原理、泄漏与使用场景”，不要生成只有一句定义的小题。
+- 需要优化已有内容时用 rewrite-entry，并把 instruction 写成明确改写要求，要求补齐“基本概念 + 机制原理 + 对比/场景 + 追问/易错点”。
 - 需要整理归类已有知识点时用 move-entry；目标目录可以是已有 folderId，也可以是本计划前面 create-folder 的 folderRef。
 - create-folder 的 ref 只用于本次计划内部引用，不是真实数据库 id。
 - 只输出 JSON。`;

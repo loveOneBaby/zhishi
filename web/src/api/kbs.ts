@@ -44,7 +44,14 @@ export async function renameKb(id: string, name: string): Promise<KnowledgeBase>
 export async function moveKbToCategory(id: string, categoryId?: string | null): Promise<KnowledgeBase> {
   return apiPutKey<KnowledgeBase>(`/kbs/${encodeURIComponent(id)}/category`, { categoryId }, 'kb');
 }
-export async function deleteKb(id: string): Promise<{ kbs: KnowledgeBase[]; folders: Folder[]; entries: Entry[] }> {
+export interface DeleteKbResult {
+  ok: true;
+  kbId: string;
+  folderIds: string[];
+  entryIds: string[];
+}
+
+export async function deleteKb(id: string): Promise<DeleteKbResult> {
   return apiDelJson(`/kbs/${encodeURIComponent(id)}`);
 }
 export async function reorderKbs(ids: string[]): Promise<KnowledgeBase[]> {

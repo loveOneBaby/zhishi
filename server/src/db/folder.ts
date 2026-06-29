@@ -81,18 +81,22 @@ export async function renameFolder(id: string, name: string): Promise<Folder | n
   return getFolder(id);
 }
 
+async function folderSubtreeRows(id: string): Promise<Array<{ id: string; kbId: string }>> {
+  return db.prepare(`
+    WITH RECURSIVE subtree(id, kbId) AS (
+      SELECT id, kbId FROM folders WHERE id = ?
+      UNION
+      SELECT folders.id, folders.kbId
+      FROM folders
+      JOIN subtree ON folders.kbId = subtree.kbId AND folders.parentId = subtree.id
+    )
+    SELECT id, kbId FROM subtree
+  `).all(id) as Promise<Array<{ id: string; kbId: string }>>;
+}
+
 // 收集某文件夹及其全部后代 id（用于级联删除与移动防环）
 async function folderSubtreeIds(id: string): Promise<Set<string>> {
-  const result = new Set<string>([id]);
-  const stack = [id];
-  while (stack.length) {
-    const cur = stack.pop()!;
-    const children = await db.prepare('SELECT id FROM folders WHERE parentId = ?').all(cur) as { id: string }[];
-    for (const c of children) {
-      if (!result.has(c.id)) { result.add(c.id); stack.push(c.id); }
-    }
-  }
-  return result;
+  return new Set((await folderSubtreeRows(id)).map((row) => row.id));
 }
 
 // 移动文件夹：改父 / 跨库。parentId 为 null 表示移到目标库根级；禁止移入自身或其后代
@@ -114,15 +118,27 @@ export async function moveFolder(id: string, opts: { parentId?: string | null; k
   return true;
 }
 
+export interface DeleteFolderResult {
+  folderIds: string[];
+  entryIds: string[];
+}
+
 // 删除文件夹：级联删除子文件夹与其中知识点
-export async function deleteFolder(id: string): Promise<boolean> {
-  const ids = [...(await folderSubtreeIds(id))];
-  if (!ids.length) return false;
+export async function deleteFolder(id: string): Promise<DeleteFolderResult | null> {
+  const subtree = await folderSubtreeRows(id);
+  if (!subtree.length) return null;
+  const ids = subtree.map((row) => row.id);
+  const kbId = subtree[0].kbId;
   const placeholders = ids.map(() => '?').join(',');
   const result = await db.tx(async () => {
-    await db.prepare(`DELETE FROM entries WHERE folderId IN (${placeholders})`).run(...ids);
-    await db.prepare(`DELETE FROM folders WHERE id IN (${placeholders})`).run(...ids);
-    return true;
+    const entryRows = await db.prepare(`DELETE FROM entries WHERE kbId = ? AND folderId IN (${placeholders}) RETURNING id`)
+      .all(kbId, ...ids) as { id: string }[];
+    const folderRows = await db.prepare(`DELETE FROM folders WHERE id IN (${placeholders}) RETURNING id`)
+      .all(...ids) as { id: string }[];
+    return {
+      folderIds: folderRows.map((row) => row.id),
+      entryIds: entryRows.map((row) => row.id),
+    };
   });
   clearFoldersCache();
   clearEntriesCache();

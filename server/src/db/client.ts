@@ -29,6 +29,11 @@ function resolveDbUrl(): string {
   return 'file:' + DEFAULT_FILE;
 }
 const DB_URL = resolveDbUrl();
+const DEFAULT_DB_MAX_CONCURRENCY = DB_URL.startsWith('file:') ? 1 : 4;
+const DB_MAX_CONCURRENCY = Math.max(
+  1,
+  Math.min(24, Number(process.env.DB_MAX_CONCURRENCY ?? DEFAULT_DB_MAX_CONCURRENCY) || DEFAULT_DB_MAX_CONCURRENCY),
+);
 
 // 本地 file: 模式需要目录存在（远程无文件）
 if (DB_URL.startsWith('file:') && !fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -68,6 +73,22 @@ interface AdapterCore {
   _run(stmt: InStatement): Promise<ResultSet>;
 }
 
+let activeDbOps = 0;
+const dbWaitQueue: Array<() => void> = [];
+
+async function withDbSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (activeDbOps >= DB_MAX_CONCURRENCY || dbWaitQueue.length > 0) {
+    await new Promise<void>((resolve) => dbWaitQueue.push(resolve));
+  }
+  activeDbOps += 1;
+  try {
+    return await fn();
+  } finally {
+    activeDbOps -= 1;
+    dbWaitQueue.shift()?.();
+  }
+}
+
 // 单个参数包：数组→positional；普通对象→named；基本类型→单 positional
 function isNamedArgs(v: unknown): v is Record<string, unknown> {
   return v != null && typeof v === 'object' && !Array.isArray(v) && !Buffer.isBuffer(v) && !(v instanceof Uint8Array);
@@ -92,8 +113,8 @@ function makePreparedStatement(sql: string): PreparedStatement {
 }
 
 const rootCore: AdapterCore = {
-  _exec: (sql) => client.executeMultiple(sql),
-  _run: (s) => client.execute(s),
+  _exec: (sql) => withDbSlot(() => client.executeMultiple(sql)),
+  _run: (s) => withDbSlot(() => client.execute(s)),
 };
 const txStorage = new AsyncLocalStorage<AdapterCore>();
 
@@ -105,20 +126,22 @@ export const db: Db = {
   exec: (sql) => currentCore()._exec(sql),
   prepare: (sql) => makePreparedStatement(sql),
   tx: async <T>(fn: () => Promise<T>): Promise<T> => {
-    const tx: Transaction = await client.transaction('write');
-    const core: AdapterCore = {
-      _exec: (sql) => tx.executeMultiple(sql),
-      _run: (s) => tx.execute(s),
-    };
-    return txStorage.run(core, async () => {
-      try {
-        const res = await fn();
-        await tx.commit();
-        return res;
-      } catch (e) {
-        try { await tx.rollback(); } catch { /* ignore rollback error */ }
-        throw e;
-      }
+    return withDbSlot(async () => {
+      const tx: Transaction = await client.transaction('write');
+      const core: AdapterCore = {
+        _exec: (sql) => tx.executeMultiple(sql),
+        _run: (s) => tx.execute(s),
+      };
+      return txStorage.run(core, async () => {
+        try {
+          const res = await fn();
+          await tx.commit();
+          return res;
+        } catch (e) {
+          try { await tx.rollback(); } catch { /* ignore rollback error */ }
+          throw e;
+        }
+      });
     });
   },
 };

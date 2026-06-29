@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import * as ContextMenu from '@radix-ui/react-context-menu';
 import {
   BookOpen,
   CheckSquare,
@@ -46,10 +46,6 @@ type TreeItem =
       summary: string;
     };
 
-type MenuState =
-  | { kind: 'root'; x: number; y: number }
-  | { kind: 'folder'; x: number; y: number; folder: Folder }
-  | { kind: 'entry'; x: number; y: number; entry: Entry };
 type MenuTarget =
   | { kind: 'root' }
   | { kind: 'folder'; folder: Folder }
@@ -119,22 +115,6 @@ function useMeasuredHeight(min = 260): readonly [(node: HTMLDivElement | null) =
   return [setNode, height] as const;
 }
 
-function menuSize(kind: MenuTarget['kind']): { width: number; height: number } {
-  if (kind === 'folder') return { width: 216, height: 258 };
-  if (kind === 'entry') return { width: 216, height: 132 };
-  return { width: 216, height: 184 };
-}
-
-function clampMenuPosition(x: number, y: number, kind: MenuTarget['kind']): { x: number; y: number } {
-  const { width, height } = menuSize(kind);
-  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-  return {
-    x: Math.min(Math.max(8, x), Math.max(8, viewportWidth - width - 8)),
-    y: Math.min(Math.max(8, y), Math.max(8, viewportHeight - height - 8)),
-  };
-}
-
 function menuPortalTarget(): HTMLElement | null {
   if (typeof document === 'undefined') return null;
   return document.querySelector<HTMLElement>('[class^="ik-theme-"], [class*=" ik-theme-"]') ?? document.body;
@@ -151,7 +131,7 @@ function itemClass(active: boolean, selected: boolean, type: TreeItem['type'], d
   ].filter(Boolean).join(' ');
 }
 
-export default function KnowledgeTree(props: Props): ReactNode {
+function KnowledgeTree(props: Props): ReactNode {
   const {
     kbId,
     folders,
@@ -182,7 +162,6 @@ export default function KnowledgeTree(props: Props): ReactNode {
 
   const treeRef = useRef<TreeApi<TreeItem> | undefined>(undefined);
   const [measureTree, treeHeight] = useMeasuredHeight();
-  const [menu, setMenu] = useState<MenuState | null>(null);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
@@ -236,40 +215,26 @@ export default function KnowledgeTree(props: Props): ReactNode {
   }, [entries, folders]);
 
   useEffect(() => {
-    if (!menu && !moveMenuOpen) return undefined;
-    const close = () => setMenu(null);
+    if (!moveMenuOpen) return undefined;
     const closeMove = () => setMoveMenuOpen(false);
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        close();
         closeMove();
       }
     };
-    document.addEventListener('click', close);
     document.addEventListener('click', closeMove);
-    document.addEventListener('contextmenu', close);
-    document.addEventListener('scroll', close, true);
+    document.addEventListener('contextmenu', closeMove);
+    document.addEventListener('scroll', closeMove, true);
     document.addEventListener('keydown', onKey);
-    window.addEventListener('resize', close);
+    window.addEventListener('resize', closeMove);
     return () => {
-      document.removeEventListener('click', close);
       document.removeEventListener('click', closeMove);
-      document.removeEventListener('contextmenu', close);
-      document.removeEventListener('scroll', close, true);
+      document.removeEventListener('contextmenu', closeMove);
+      document.removeEventListener('scroll', closeMove, true);
       document.removeEventListener('keydown', onKey);
-      window.removeEventListener('resize', close);
+      window.removeEventListener('resize', closeMove);
     };
-  }, [menu, moveMenuOpen]);
-
-  const openMenu = (event: React.MouseEvent, next: MenuTarget): void => {
-    event.preventDefault();
-    event.stopPropagation();
-    const targetRect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    const rawX = event.clientX > 0 ? event.clientX : targetRect.left + 12;
-    const rawY = event.clientY > 0 ? event.clientY : targetRect.top + 12;
-    const point = clampMenuPosition(rawX + 4, rawY + 4, next.kind);
-    setMenu({ ...next, ...point } as MenuState);
-  };
+  }, [moveMenuOpen]);
 
   const orderFoldersForMove = (dragId: string, parentId: string | null, index: number): string[] => {
     const current = folders.find((folder) => folder.id === dragId);
@@ -473,111 +438,155 @@ export default function KnowledgeTree(props: Props): ReactNode {
     const menuTarget: MenuTarget = data.type === 'folder' ? { kind: 'folder', folder: data.folder } : { kind: 'entry', entry: data.entry };
 
     return (
-      <div style={style} className="ik-kt-row-shell" onContextMenu={(event) => openMenu(event, menuTarget)}>
-        <div
-          ref={dragHandle}
-          className={`${itemClass(active, batchMode && node.isSelected, data.type, node.isDragging, node.willReceiveDrop)} ${batchMode ? 'is-batch' : ''}`}
-          onClick={(event) => handleNodeClick(event, node)}
-          onContextMenu={(event) => openMenu(event, menuTarget)}
-        >
-          {batchMode && (
-            <input
-              type="checkbox"
-              className="ik-kt-check"
-              checked={node.isSelected}
-              aria-label={`选择 ${data.name}`}
-              onClick={(event) => event.stopPropagation()}
-              onChange={(event) => toggleNodeSelection(event, node)}
-            />
-          )}
-          <button
-            type="button"
-            className={`ik-kt-caret ${hasChildren ? '' : 'is-empty'}`}
-            tabIndex={-1}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (node.isInternal) node.toggle();
-            }}
-          >
-            {node.isOpen ? <ChevronDown size={14} strokeWidth={2.2} /> : <ChevronRight size={14} strokeWidth={2.2} />}
-          </button>
-          <span className={`ik-kt-icon ik-kt-icon-${data.type}`} aria-hidden="true">
-            {data.type === 'folder'
-              ? (node.isOpen ? <FolderOpen size={16} strokeWidth={2.1} /> : <FolderIcon size={16} strokeWidth={2.1} />)
-              : <FileText size={15} strokeWidth={2.1} />}
-          </span>
-          <span className="ik-kt-main">
-            <span className="ik-kt-title">{data.name}</span>
-            {meta && <span className="ik-kt-meta">{meta}</span>}
-          </span>
-        </div>
-      </div>
+      <ContextMenu.Root modal={false}>
+        <ContextMenu.Trigger asChild>
+          <div style={style} className="ik-kt-row-shell" onContextMenu={(event) => event.stopPropagation()}>
+            <div
+              ref={dragHandle}
+              className={`${itemClass(active, batchMode && node.isSelected, data.type, node.isDragging, node.willReceiveDrop)} ${batchMode ? 'is-batch' : ''}`}
+              onClick={(event) => handleNodeClick(event, node)}
+            >
+              {batchMode && (
+                <input
+                  type="checkbox"
+                  className="ik-kt-check"
+                  checked={node.isSelected}
+                  aria-label={`选择 ${data.name}`}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => toggleNodeSelection(event, node)}
+                />
+              )}
+              <button
+                type="button"
+                className={`ik-kt-caret ${hasChildren ? '' : 'is-empty'}`}
+                tabIndex={-1}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (node.isInternal) node.toggle();
+                }}
+              >
+                {node.isOpen ? <ChevronDown size={14} strokeWidth={2.2} /> : <ChevronRight size={14} strokeWidth={2.2} />}
+              </button>
+              <span className={`ik-kt-icon ik-kt-icon-${data.type}`} aria-hidden="true">
+                {data.type === 'folder'
+                  ? (node.isOpen ? <FolderOpen size={16} strokeWidth={2.1} /> : <FolderIcon size={16} strokeWidth={2.1} />)
+                  : <FileText size={15} strokeWidth={2.1} />}
+              </span>
+              <span className="ik-kt-main">
+                <span className="ik-kt-title">{data.name}</span>
+                {meta && <span className="ik-kt-meta">{meta}</span>}
+              </span>
+            </div>
+          </div>
+        </ContextMenu.Trigger>
+        {renderContextMenu(menuTarget)}
+      </ContextMenu.Root>
     );
   };
 
-  const runMenuAction = (action: () => void): void => {
-    setMenu(null);
-    action();
-  };
+  const renderContextMenu = (target: MenuTarget): ReactNode => (
+    <ContextMenu.Portal container={menuPortalTarget() ?? undefined}>
+      <ContextMenu.Content className="ik-kt-menu" collisionPadding={10} loop>
+        {target.kind !== 'entry' && (
+          <ContextMenu.Group className="ik-kt-menu-group">
+            <ContextMenu.Label className="ik-kt-menu-label">新建</ContextMenu.Label>
+            <ContextMenu.Item className="ik-kt-menu-item" onSelect={() => onCreateEntry(target.kind === 'folder' ? target.folder.id : null)}>
+              <Plus size={14} strokeWidth={2.1} />新建知识点
+            </ContextMenu.Item>
+            <ContextMenu.Item className="ik-kt-menu-item" onSelect={() => onCreateFolder(target.kind === 'folder' ? target.folder.id : null)}>
+              <FolderPlus size={14} strokeWidth={2.1} />新建文件夹
+            </ContextMenu.Item>
+            {target.kind === 'folder' ? (
+              <ContextMenu.Item className="ik-kt-menu-item" onSelect={() => onImportToFolder(target.folder)}>
+                <Upload size={14} strokeWidth={2.1} />导入 JSON 到此文件夹
+              </ContextMenu.Item>
+            ) : (
+              <ContextMenu.Item className="ik-kt-menu-item" onSelect={onImportHere}>
+                <Upload size={14} strokeWidth={2.1} />导入 JSON
+              </ContextMenu.Item>
+            )}
+            <ContextMenu.Item className="ik-kt-menu-item" disabled={Boolean(exportProgress?.active)} onSelect={onExportAll}>
+              <Download size={14} strokeWidth={2.1} />{exportProgress?.active ? `导出中 ${Math.round(exportProgress.percent)}%` : '导出全部'}
+            </ContextMenu.Item>
+          </ContextMenu.Group>
+        )}
+        {target.kind === 'folder' && (
+          <>
+            <ContextMenu.Separator className="ik-kt-menu-sep" />
+            <ContextMenu.Group className="ik-kt-menu-group">
+              <ContextMenu.Label className="ik-kt-menu-label">管理</ContextMenu.Label>
+              <ContextMenu.Item className="ik-kt-menu-item" onSelect={() => onRenameFolder(target.folder)}>
+                <Pencil size={14} strokeWidth={2.1} />重命名
+              </ContextMenu.Item>
+              <ContextMenu.Separator className="ik-kt-menu-sep" />
+              <ContextMenu.Label className="ik-kt-menu-label is-danger">危险操作</ContextMenu.Label>
+              <ContextMenu.Item className="ik-kt-menu-item danger" onSelect={() => onClearFolder(target.folder)}>
+                <FolderX size={14} strokeWidth={2.1} />清空内容（保留文件夹）
+              </ContextMenu.Item>
+              <ContextMenu.Item className="ik-kt-menu-item danger" onSelect={() => onDeleteFolder(target.folder)}>
+                <Trash2 size={14} strokeWidth={2.1} />删除文件夹及全部内容
+              </ContextMenu.Item>
+            </ContextMenu.Group>
+          </>
+        )}
+        {target.kind === 'entry' && (
+          <ContextMenu.Group className="ik-kt-menu-group">
+            <ContextMenu.Label className="ik-kt-menu-label">管理</ContextMenu.Label>
+            <ContextMenu.Item className="ik-kt-menu-item" onSelect={() => onEditEntry(target.entry)}>
+              <BookOpen size={14} strokeWidth={2.1} />编辑知识点
+            </ContextMenu.Item>
+            <ContextMenu.Separator className="ik-kt-menu-sep" />
+            <ContextMenu.Label className="ik-kt-menu-label is-danger">危险操作</ContextMenu.Label>
+            <ContextMenu.Item className="ik-kt-menu-item danger" onSelect={() => onDeleteEntry(target.entry)}>
+              <Trash2 size={14} strokeWidth={2.1} />删除知识点
+            </ContextMenu.Item>
+          </ContextMenu.Group>
+        )}
+      </ContextMenu.Content>
+    </ContextMenu.Portal>
+  );
 
-  const menuNode = menu ? (
-    <div
-      className="ik-kt-menu"
-      style={{ '--menu-x': `${menu.x}px`, '--menu-y': `${menu.y}px` } as CSSProperties}
-      onClick={(event) => event.stopPropagation()}
-    >
-      {menu.kind !== 'entry' && (
-        <div className="ik-kt-menu-group">
-          <span className="ik-kt-menu-label">新建</span>
-          <button type="button" onClick={() => runMenuAction(() => onCreateEntry(menu.kind === 'folder' ? menu.folder.id : null))}>
-            <Plus size={14} strokeWidth={2.1} />新建知识点
-          </button>
-          <button type="button" onClick={() => runMenuAction(() => onCreateFolder(menu.kind === 'folder' ? menu.folder.id : null))}>
-            <FolderPlus size={14} strokeWidth={2.1} />新建文件夹
-          </button>
-          {menu.kind === 'folder' ? (
-            <button type="button" onClick={() => runMenuAction(() => onImportToFolder(menu.folder))}>
-              <Upload size={14} strokeWidth={2.1} />导入 JSON 到此文件夹
+  const treeContent = (
+    <div ref={measureTree} className="ik-kt-tree">
+      {treeData.length > 0 ? (
+        <Tree
+          ref={treeRef}
+          data={treeData}
+          width="100%"
+          height={treeHeight}
+          rowHeight={36}
+          indent={14}
+          overscanCount={8}
+          openByDefault
+          idAccessor="id"
+          childrenAccessor={(item) => (item.type === 'folder' ? item.children : null)}
+          disableDrop={({ parentNode, dragNodes }) =>
+            dragNodes.length !== 1 || (!parentNode.isRoot && parentNode.data.type !== 'folder')
+          }
+          onActivate={activateNode}
+          onSelect={(nodes) => setSelectedIds(nodes.map((node) => node.id))}
+          onMove={handleMove}
+          className="ik-kt-arborist"
+        >
+          {TreeNode}
+        </Tree>
+      ) : emptyState ? (
+        emptyState
+      ) : (
+        <div className="ik-kt-empty">
+          <span>当前知识库还没有文件夹或知识点。</span>
+          <div className="ik-kt-empty-actions">
+            <button type="button" onClick={() => onCreateFolder(null)}>
+              <FolderPlus size={14} strokeWidth={2.1} />新建根文件夹
             </button>
-          ) : (
-            <button type="button" onClick={() => runMenuAction(onImportHere)}>
+            <button type="button" onClick={onImportHere}>
               <Upload size={14} strokeWidth={2.1} />导入 JSON
             </button>
-          )}
-          <button type="button" disabled={Boolean(exportProgress?.active)} onClick={() => runMenuAction(onExportAll)}>
-            <Download size={14} strokeWidth={2.1} />{exportProgress?.active ? `导出中 ${Math.round(exportProgress.percent)}%` : '导出全部'}
-          </button>
-        </div>
-      )}
-      {menu.kind === 'folder' && (
-        <div className="ik-kt-menu-group">
-          <span className="ik-kt-menu-label">管理</span>
-          <button type="button" onClick={() => runMenuAction(() => onRenameFolder(menu.folder))}>
-            <Pencil size={14} strokeWidth={2.1} />重命名
-          </button>
-          <span className="ik-kt-menu-label is-danger">危险操作</span>
-          <button type="button" className="danger" onClick={() => runMenuAction(() => onClearFolder(menu.folder))}>
-            <FolderX size={14} strokeWidth={2.1} />清空内容（保留文件夹）
-          </button>
-          <button type="button" className="danger" onClick={() => runMenuAction(() => onDeleteFolder(menu.folder))}>
-            <Trash2 size={14} strokeWidth={2.1} />删除文件夹及全部内容
-          </button>
-        </div>
-      )}
-      {menu.kind === 'entry' && (
-        <div className="ik-kt-menu-group">
-          <span className="ik-kt-menu-label">管理</span>
-          <button type="button" onClick={() => runMenuAction(() => onEditEntry(menu.entry))}>
-            <BookOpen size={14} strokeWidth={2.1} />编辑知识点
-          </button>
-          <span className="ik-kt-menu-label is-danger">危险操作</span>
-          <button type="button" className="danger" onClick={() => runMenuAction(() => onDeleteEntry(menu.entry))}>
-            <Trash2 size={14} strokeWidth={2.1} />删除知识点
-          </button>
+          </div>
         </div>
       )}
     </div>
-  ) : null;
+  );
 
   return (
     <div className="ik-kt-shell">
@@ -659,54 +668,15 @@ export default function KnowledgeTree(props: Props): ReactNode {
         </div>
       )}
 
-      <div
-        ref={measureTree}
-        className="ik-kt-tree"
-        onContextMenu={(event) => {
-          if (batchMode) return;
-          openMenu(event, { kind: 'root' });
-        }}
-      >
-        {treeData.length > 0 ? (
-          <Tree
-            ref={treeRef}
-            data={treeData}
-            width="100%"
-            height={treeHeight}
-            rowHeight={36}
-            indent={14}
-            overscanCount={8}
-            openByDefault
-            idAccessor="id"
-            childrenAccessor={(item) => (item.type === 'folder' ? item.children : null)}
-            disableDrop={({ parentNode, dragNodes }) =>
-              dragNodes.length !== 1 || (!parentNode.isRoot && parentNode.data.type !== 'folder')
-            }
-            onActivate={activateNode}
-            onSelect={(nodes) => setSelectedIds(nodes.map((node) => node.id))}
-            onMove={handleMove}
-            className="ik-kt-arborist"
-          >
-            {TreeNode}
-          </Tree>
-        ) : emptyState ? (
-          emptyState
-        ) : (
-          <div className="ik-kt-empty">
-            <span>当前知识库还没有文件夹或知识点。</span>
-            <div className="ik-kt-empty-actions">
-              <button type="button" onClick={() => onCreateFolder(null)}>
-                <FolderPlus size={14} strokeWidth={2.1} />新建根文件夹
-              </button>
-              <button type="button" onClick={onImportHere}>
-                <Upload size={14} strokeWidth={2.1} />导入 JSON
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      {batchMode ? treeContent : (
+        <ContextMenu.Root modal={false}>
+          <ContextMenu.Trigger asChild>
+            {treeContent}
+          </ContextMenu.Trigger>
+          {renderContextMenu({ kind: 'root' })}
+        </ContextMenu.Root>
+      )}
 
-      {menuNode && typeof document !== 'undefined' ? createPortal(menuNode, menuPortalTarget() ?? document.body) : null}
       <CommandDialog
         open={deleteConfirmOpen}
         tone="danger"
@@ -721,3 +691,20 @@ export default function KnowledgeTree(props: Props): ReactNode {
     </div>
   );
 }
+
+function sameExportProgress(a: Props['exportProgress'], b: Props['exportProgress']): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.active === b.active && a.percent === b.percent && a.label === b.label;
+}
+
+function sameTreeProps(prev: Props, next: Props): boolean {
+  return prev.kbId === next.kbId
+    && prev.folders === next.folders
+    && prev.entries === next.entries
+    && prev.selectedFolderId === next.selectedFolderId
+    && prev.selectedEntryId === next.selectedEntryId
+    && sameExportProgress(prev.exportProgress, next.exportProgress);
+}
+
+export default memo(KnowledgeTree, sameTreeProps);

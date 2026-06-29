@@ -7,8 +7,18 @@ import {
   moveFolder,
   deleteFolder,
   reorderFolders,
-  listEntrySummaries,
 } from '../db.js';
+import { discardAiJobResultItems, type DiscardAiJobResultItemsResult } from '../services/ai-jobs.js';
+
+function mergeDeleteResult(
+  left: DiscardAiJobResultItemsResult,
+  right: DiscardAiJobResultItemsResult,
+): DiscardAiJobResultItemsResult {
+  return {
+    folderIds: [...new Set([...left.folderIds, ...right.folderIds])],
+    entryIds: [...new Set([...left.entryIds, ...right.entryIds])],
+  };
+}
 
 export function registerFolderRoutes(api: Router): void {
   // ───────────── 文件夹 ─────────────
@@ -46,9 +56,17 @@ export function registerFolderRoutes(api: Router): void {
   }));
 
   api.delete('/folders/:id', asyncHandler(async (req, res) => {
-    const ok = await deleteFolder(req.params.id);
-    if (!ok) return res.status(404).json({ error: 'not found' });
-    res.json({ ok: true, folders: await listFolders(), entries: await listEntrySummaries() });
+    const id = req.params.id;
+    const result = await deleteFolder(id);
+    const cleanup = await discardAiJobResultItems({
+      folderIds: result?.folderIds ?? [id],
+      entryIds: result?.entryIds ?? [],
+    });
+    const merged = mergeDeleteResult(result ?? { folderIds: [], entryIds: [] }, cleanup);
+    if (!result && !merged.folderIds.length && !merged.entryIds.length) {
+      return res.status(404).json({ error: 'not found' });
+    }
+    res.json({ ok: true, ...merged });
   }));
 
   api.post('/folders/reorder', asyncHandler(async (req, res) => {

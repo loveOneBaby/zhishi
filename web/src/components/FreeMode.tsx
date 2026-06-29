@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ChevronDown, FileText, FolderPlus, History, ImagePlus, LibraryBig, Pencil, Search, Sparkles, Tags, Trash2, X } from 'lucide-react';
+import { ChevronDown, FileText, FolderPlus, FolderTree, History, ImagePlus, LibraryBig, Pencil, Search, Sparkles, Tags, Trash2, X } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase, KbCategory } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import { matchesQuery, toSearchText } from '../pinyin-search';
@@ -62,6 +62,7 @@ interface Props {
   onStartKnowledgeBaseJob: (domain: string) => Promise<void>;
   onStartFolderInitJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
   onStartFolderEntriesJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
+  onStartFolderFullJob: (input: { kbId: string; parentId?: string | null; domain?: string }) => Promise<void>;
   onStartAnalyzeJob: (kbId: string) => Promise<void>;
   onStartAnalyzeEntryJob: (entryId: string) => Promise<void>;
   onStartAgentEditJob: (input: { kbId: string; instruction: string; folderId?: string | null; entryId?: string }) => Promise<void>;
@@ -86,14 +87,15 @@ interface Props {
   onRetryAiJob: (id: string) => Promise<void>;
   onApplyAiJobDraft: (id: string) => Promise<void>;
   onRevertAiJobApply: (id: string) => Promise<void>;
+  onClearAiJob: (id: string) => Promise<void>;
   onClearAiJobHistory: () => Promise<void>;
 }
 
 export default function FreeMode(props: Props): ReactNode {
   const { entries, kbs, kbCategories, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
     onCreate, onUpdate, onDelete, onFetchEntry, onImported, onGeneratedEntry, onStartKnowledgeBaseJob, onStartFolderInitJob,
-    onStartFolderEntriesJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onStartAgentEditJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onDeleteKbTag, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
-    aiJobs, aiTaskPanelOpen, onAiTaskPanelOpenChange, onOpenAiJobResult, onCancelAiJob, onRetryAiJob, onApplyAiJobDraft, onRevertAiJobApply, onClearAiJobHistory } = props;
+    onStartFolderEntriesJob, onStartFolderFullJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onStartAgentEditJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onDeleteKbTag, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
+    aiJobs, aiTaskPanelOpen, onAiTaskPanelOpenChange, onOpenAiJobResult, onCancelAiJob, onRetryAiJob, onApplyAiJobDraft, onRevertAiJobApply, onClearAiJob, onClearAiJobHistory } = props;
 
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(() => localStorage.getItem('ik_free_entry') || null);
   const [fullEntry, setFullEntry] = useState<Entry | null>(null);
@@ -183,11 +185,13 @@ export default function FreeMode(props: Props): ReactNode {
       entries: visibleEntries,
     };
   }, [activeTag, kbEntries, kbFolders, workspaceNeedle]);
+  const selectedFullEntry = fullEntry && fullEntry.id === selectedEntryId ? fullEntry : null;
   const selectedEntry = useMemo(
-    () => (fullEntry && fullEntry.id === selectedEntryId ? fullEntry : null) ?? kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
-    [kbEntries, selectedEntryId, fullEntry],
+    () => selectedFullEntry ?? kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
+    [kbEntries, selectedEntryId, selectedFullEntry],
   );
   const currentFolderId = selectedEntry?.folderId ?? freeFolder;
+  const aiTargetFolderId = currentFolderId ?? null;
   const currentFolderChain = useMemo(() => folderChain(folders, currentFolderId), [currentFolderId, folders]);
   const operationPath = [
     currentKb?.name ?? '知识库',
@@ -301,7 +305,7 @@ export default function FreeMode(props: Props): ReactNode {
       toast('请先进入一个知识库，再初始化目录', 'info');
       return;
     }
-    const targetParentId = parentId !== undefined ? parentId : (selectedEntry?.folderId ?? freeFolder ?? null);
+    const targetParentId = parentId !== undefined ? parentId : aiTargetFolderId;
     const targetLabel = targetParentId ? folderPathName(folders, targetParentId) : `${currentKb.name} / 根层级`;
     setCommand({
       kind: 'init-folders',
@@ -316,7 +320,7 @@ export default function FreeMode(props: Props): ReactNode {
       toast('请先进入一个知识库，再按目录生成知识点', 'info');
       return;
     }
-    const targetParentId = parentId !== undefined ? parentId : (selectedEntry?.folderId ?? freeFolder ?? null);
+    const targetParentId = parentId !== undefined ? parentId : aiTargetFolderId;
     void onStartFolderEntriesJob({
       kbId: currentKb.id,
       parentId: targetParentId,
@@ -394,7 +398,7 @@ export default function FreeMode(props: Props): ReactNode {
       toast('请先进入一个知识库，再生成知识点', 'info');
       return;
     }
-    const folderId = selectedEntry?.folderId ?? freeFolder ?? null;
+    const folderId = aiTargetFolderId;
     aiLive.resetAiLive();
     setCommand({ kind: 'generate-entry', kbId: freeKb, folderId });
   }
@@ -465,6 +469,14 @@ export default function FreeMode(props: Props): ReactNode {
     if (!currentKb) { toast('请先进入一个知识库，再初始化目录', 'info'); return; }
     onAiTaskPanelOpenChange(true);
     void onStartFolderInitJob({ kbId: currentKb.id, parentId, domain: domain.trim() || currentKb.name });
+  }
+
+  function startFoldersAndEntriesDirect(parentId: string | null, domain: string): void {
+    if (!currentKb) { toast('请先进入一个知识库，再一键生成目录和知识点', 'info'); return; }
+    onAiTaskPanelOpenChange(true);
+    void onStartFolderFullJob({ kbId: currentKb.id, parentId, domain: domain.trim() || currentKb.name }).catch((err) => {
+      toast('一键生成目录和知识点失败：' + (err instanceof Error ? err.message : String(err)), 'error');
+    });
   }
 
   // 直接生成图解(不弹窗):对当前知识点追加 AI 图解并写回
@@ -552,7 +564,7 @@ export default function FreeMode(props: Props): ReactNode {
     void onStartAgentEditJob({
       kbId: currentKb.id,
       instruction: text,
-      folderId: selectedEntry?.folderId ?? freeFolder ?? null,
+      folderId: aiTargetFolderId,
       entryId: selectedEntry?.id,
     }).catch((err) => {
       toast('AI 调整失败：' + (err instanceof Error ? err.message : String(err)), 'error');
@@ -696,6 +708,13 @@ export default function FreeMode(props: Props): ReactNode {
       return;
     }
     guardPanel(() => {
+      if (!selectedFullEntry) {
+        setLoadingEntryId(selectedEntry.id);
+        void onFetchEntry(selectedEntry.id)
+          .then((entry) => setFullEntry(entry))
+          .catch(() => {})
+          .finally(() => setLoadingEntryId((current) => (current === selectedEntry.id ? null : current)));
+      }
       setPanelMode('edit');
       dirtyRef.current = false;
     });
@@ -797,6 +816,12 @@ export default function FreeMode(props: Props): ReactNode {
 
   function editEntryAction(entry: Entry): void {
     guardPanel(() => {
+      if (fullEntry?.id !== entry.id) setFullEntry(null);
+      setLoadingEntryId(entry.id);
+      void onFetchEntry(entry.id)
+        .then((current) => setFullEntry(current))
+        .catch(() => {})
+        .finally(() => setLoadingEntryId((current) => (current === entry.id ? null : current)));
       setSelectedEntryId(entry.id);
       setFreeFolder(entry.folderId ?? null);
       setPanelMode('edit');
@@ -817,6 +842,7 @@ export default function FreeMode(props: Props): ReactNode {
       doc: entry.doc,
     });
     if (selectedEntryId === entry.id) {
+      setFullEntry(moved);
       setSelectedEntryId(moved.id);
       setFreeFolder(moved.folderId ?? null);
     }
@@ -928,7 +954,7 @@ export default function FreeMode(props: Props): ReactNode {
       prompt: {
         placeholder: '输入要生成的题目，回车生成',
         submitLabel: '生成',
-        onSubmit: (value) => { void runGenerateEntryDirect(value, selectedEntry?.folderId ?? freeFolder ?? null); },
+        onSubmit: (value) => { void runGenerateEntryDirect(value, aiTargetFolderId); },
       },
       meta: '实时生成',
     },
@@ -942,16 +968,30 @@ export default function FreeMode(props: Props): ReactNode {
         placeholder: '聚焦主题（可留空，默认知识库名）',
         submitLabel: '初始化',
         optional: true,
-        onSubmit: (value) => startInitFoldersDirect(selectedEntry?.folderId ?? freeFolder ?? null, value),
+        onSubmit: (value) => startInitFoldersDirect(aiTargetFolderId, value),
       },
       meta: '后台任务',
+    },
+    {
+      id: 'folders-and-entries',
+      title: '一键目录和知识点',
+      description: selectedEntry ? '围绕当前文件夹生成目录并补知识点' : '在当前位置生成目录并补知识点',
+      icon: <FolderTree size={16} strokeWidth={2.15} />,
+      onClick: () => {},
+      prompt: {
+        placeholder: '聚焦主题（可留空，默认知识库名）',
+        submitLabel: '一键生成',
+        optional: true,
+        onSubmit: (value) => startFoldersAndEntriesDirect(aiTargetFolderId, value),
+      },
+      meta: '目录 / 内容',
     },
     {
       id: 'folder-entries',
       title: '按目录补全知识点',
       description: '无需输入题目，自动为当前目录树生成内容',
       icon: <Sparkles size={16} strokeWidth={2.15} />,
-      onClick: () => runAiAction(() => startGenerateFolderEntries(selectedEntry?.folderId ?? freeFolder ?? null)),
+      onClick: () => runAiAction(() => startGenerateFolderEntries(aiTargetFolderId)),
       confirm: true,
       meta: '后台任务',
     },
@@ -1018,6 +1058,7 @@ export default function FreeMode(props: Props): ReactNode {
       onRetry={onRetryAiJob}
       onApplyAgentEdit={onApplyAiJobDraft}
       onRevertAgentEdit={onRevertAiJobApply}
+      onClearJob={onClearAiJob}
       onClearHistory={onClearAiJobHistory}
       actions={aiActions}
       contextLabel={aiContextLabel}
@@ -1072,7 +1113,7 @@ export default function FreeMode(props: Props): ReactNode {
     );
   }
 
-  const editorKey = `${panelMode}:${selectedEntry?.id ?? 'new'}:${freeKb}:${freeFolder ?? 'root'}`;
+  const editorKey = `${panelMode}:${selectedEntry?.id ?? 'new'}:${selectedFullEntry?.updatedAt ?? ''}:${freeKb}:${freeFolder ?? 'root'}`;
   const activeTagStat = activeTag ? kbTagStats.find((item) => item.tag === activeTag) ?? null : null;
 
   return (
@@ -1245,6 +1286,26 @@ export default function FreeMode(props: Props): ReactNode {
                   onCreate(input).then((entry) => {
                     setPanelMode('detail');
                     dirtyRef.current = false;
+                    setFullEntry(entry);
+                    setSelectedEntryId(entry.id);
+                    setFreeFolder(entry.folderId ?? null);
+                    return entry;
+                  })
+                }
+              />
+            ) : panelMode === 'edit' && selectedFullEntry ? (
+              <EntryEditor
+                key={editorKey}
+                initial={selectedFullEntry}
+                kbs={kbs}
+                folders={folders}
+                onDirtyChange={onDirtyChange}
+                onCancel={backToDetail}
+                onSave={(input) =>
+                  onUpdate(selectedFullEntry.id, input).then((entry) => {
+                    setPanelMode('detail');
+                    dirtyRef.current = false;
+                    setFullEntry(entry);
                     setSelectedEntryId(entry.id);
                     setFreeFolder(entry.folderId ?? null);
                     return entry;
@@ -1252,23 +1313,9 @@ export default function FreeMode(props: Props): ReactNode {
                 }
               />
             ) : panelMode === 'edit' && selectedEntry ? (
-              <EntryEditor
-                key={editorKey}
-                initial={selectedEntry}
-                kbs={kbs}
-                folders={folders}
-                onDirtyChange={onDirtyChange}
-                onCancel={backToDetail}
-                onSave={(input) =>
-                  onUpdate(selectedEntry.id, input).then((entry) => {
-                    setPanelMode('detail');
-                    dirtyRef.current = false;
-                    setSelectedEntryId(entry.id);
-                    setFreeFolder(entry.folderId ?? null);
-                    return entry;
-                  })
-                }
-              />
+              <div className="ik-detail-shell">
+                <div className="ik-detail-empty">正在加载知识点内容...</div>
+              </div>
             ) : runningLive && runningLive.entryId === selectedEntryId ? (
               <div className="ik-detail-shell">
                 <LiveRewritePanel title={runningLive.title} raw={runningLive.raw} stage={runningLive.stage} mode={runningLive.mode} onCancel={() => cancelLiveTask(runningLive.id)} />

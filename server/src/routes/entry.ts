@@ -24,7 +24,7 @@ import {
 } from '../db.js';
 import { searchEntries } from '../search.js';
 import { folderPathLabel, sendSse } from '../services/utils.js';
-import { jobSnapshot, startAnalyzeEntryJob } from '../services/ai-jobs.js';
+import { compactJobSnapshot, discardAiJobResultItems, startAnalyzeEntryJob } from '../services/ai-jobs.js';
 import { asyncHandler } from '../app.js';
 
 export function registerEntryRoutes(api: Router): void {
@@ -342,7 +342,7 @@ export function registerEntryRoutes(api: Router): void {
     const entry = await getEntry(req.params.id);
     if (!entry) return res.status(404).json({ error: '知识点不存在' });
     const job = await startAnalyzeEntryJob({ entryId: entry.id, entryTitle: entry.title, kbId: entry.kbId });
-    res.status(202).json({ job: await jobSnapshot(job) });
+    res.status(202).json({ job: compactJobSnapshot(job) });
   }));
 
   // 单条
@@ -393,8 +393,10 @@ export function registerEntryRoutes(api: Router): void {
 
   // 删除
   api.delete('/entries/:id', asyncHandler(async (req, res) => {
-    const ok = await deleteEntry(req.params.id);
-    if (!ok) return res.status(404).json({ error: 'not found' });
+    const id = req.params.id;
+    const ok = await deleteEntry(id);
+    const cleanup = await discardAiJobResultItems({ entryIds: [id] });
+    if (!ok && !cleanup.entryIds.length) return res.status(404).json({ error: 'not found' });
     res.json({ ok: true });
   }));
 }

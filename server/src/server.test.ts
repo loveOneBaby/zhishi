@@ -13,6 +13,7 @@ import { assertAuthConfiguredForProduction } from './auth.js';
 import { coerceGeneratedDraft, coerceGeneratedFolderTreeDraft, coerceGeneratedKbDraft, draftToMarkdown, extractJsonObject, kbQuestionToEntryInput, kbQuestionToMarkdown } from './ai-generate.js';
 import { ensureTags } from './ai/render.js';
 import { coerceAgentEditPlan } from './ai-agent-edit.js';
+import { normalizeFolderDraftPathForTarget } from './services/kb-draft-writer.js';
 import type { Entry } from './types.js';
 
 const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -310,6 +311,22 @@ test('ai-generate: 目录初始化 JSON 只转文件夹路径', () => {
     ['核心原理', '副本机制'],
     ['核心原理', '消费组'],
   ]);
+});
+
+test('kb-draft-writer: 目录初始化路径按目标目录归一为相对路径', () => {
+  const targetPath = ['基础与原理', '数据类型与范式'];
+  assert.deepEqual(
+    normalizeFolderDraftPathForTarget(['Mysql', '基础与原理', '数据类型与范式', '索引类型'], { kbName: 'Mysql', targetPath }),
+    ['索引类型'],
+  );
+  assert.deepEqual(
+    normalizeFolderDraftPathForTarget(['数据类型与范式', '反范式设计'], { kbName: 'Mysql', targetPath }),
+    ['反范式设计'],
+  );
+  assert.deepEqual(
+    normalizeFolderDraftPathForTarget(['执行计划', '索引选择'], { kbName: 'Mysql', targetPath }),
+    ['执行计划', '索引选择'],
+  );
 });
 
 test('ai-agent-edit: 校验动作引用并保留 create-folder ref', () => {

@@ -54,6 +54,7 @@ interface Props {
   onRetry: (id: string) => Promise<void>;
   onApplyAgentEdit?: (id: string) => Promise<void>;
   onRevertAgentEdit?: (id: string) => Promise<void>;
+  onClearJob: (id: string) => Promise<void>;
   onClearHistory: () => Promise<void>;
   actions?: AiQuickAction[];
   contextLabel?: string;
@@ -81,6 +82,7 @@ function statusLabel(status: AiKnowledgeBaseJob['status']): string {
 function jobKindLabel(job: AiKnowledgeBaseJob): string {
   if (job.kind === 'folder-init') return '目录初始化';
   if (job.kind === 'folder-entries') return '目录生成知识点';
+  if (job.kind === 'folder-full') return '一键目录和知识点';
   if (job.kind === 'analyze') return job.entryId ? 'AI 分析知识点' : 'AI 分析知识库';
   if (job.kind === 'agent-edit') return 'AI 调整知识库';
   return '新建知识库';
@@ -90,6 +92,7 @@ function runningText(job: AiKnowledgeBaseJob): string {
   if (job.status === 'queued') return '排队中';
   if (job.status === 'running') {
     if (job.kind === 'folder-init') return '初始化中';
+    if (job.kind === 'folder-full') return '生成中';
     if (job.kind === 'analyze') return '分析中';
     if (job.kind === 'agent-edit') return '调整中';
     return '生成中';
@@ -118,6 +121,7 @@ function agentPhaseText(job: AiKnowledgeBaseJob): string {
 function outputPlanLabel(job: AiKnowledgeBaseJob): string {
   if (job.kind === 'folder-init') return '目录规划';
   if (job.kind === 'folder-entries') return '生成过程';
+  if (job.kind === 'folder-full') return '目录与知识点';
   if (job.kind === 'agent-edit') return '调整计划';
   return '建库思路';
 }
@@ -125,6 +129,7 @@ function outputPlanLabel(job: AiKnowledgeBaseJob): string {
 function outputJsonLabel(job: AiKnowledgeBaseJob): string {
   if (job.kind === 'folder-init') return '目录 JSON';
   if (job.kind === 'folder-entries') return '知识点输出';
+  if (job.kind === 'folder-full') return '生成输出';
   if (job.kind === 'agent-edit') return '计划 JSON';
   return '知识库 JSON';
 }
@@ -151,6 +156,10 @@ function statusIcon(status: AiKnowledgeBaseJob['status'] | LiveTask['status']): 
   if (status === 'cancelled') return <Ban size={16} strokeWidth={2.2} />;
   if (status === 'queued') return <Clock3 size={16} strokeWidth={2.2} />;
   return <Loader2 size={16} strokeWidth={2.2} className="ik-ai-task-spin" />;
+}
+
+function canClearJob(job: AiKnowledgeBaseJob): boolean {
+  return job.status !== 'queued' && job.status !== 'running';
 }
 
 function splitModelOutput(raw: string): { plan: string; json: string } {
@@ -372,6 +381,7 @@ export default function AiTaskCenter({
   onRetry,
   onApplyAgentEdit,
   onRevertAgentEdit,
+  onClearJob,
   onClearHistory,
   actions = [],
   contextLabel,
@@ -457,7 +467,7 @@ export default function AiTaskCenter({
           {runningCount ? <Loader2 size={16} strokeWidth={2.2} className="ik-ai-task-spin" /> : <Sparkles size={16} strokeWidth={2.15} />}
         </span>
         <span>
-          <b>{runningCount ? `${runningCount} 个运行中` : 'AI 控制台'}</b>
+          <b>{runningCount ? `${runningCount} 个排队/运行中` : 'AI 控制台'}</b>
           <small>{failedCount ? `${failedCount} 个失败` : recordCount ? `${recordCount} 个记录` : `${actions.length} 个快捷动作`}</small>
         </span>
       </button>
@@ -516,7 +526,7 @@ export default function AiTaskCenter({
             <section className="ik-ai-command-zone">
               <div className="ik-ai-command-head">
                 <span>快捷动作</span>
-                <b>{runningCount ? `${runningCount} 个后台任务运行中` : '按当前位置执行'}</b>
+                <b>{runningCount ? `${runningCount} 个后台任务排队/运行中` : '按当前位置执行'}</b>
               </div>
               <div className="ik-ai-command-grid">
                 {actions.map((action, index) => {
@@ -627,11 +637,18 @@ export default function AiTaskCenter({
                 }
                 const job = row.job;
                 return (
-                  <button
+                  <div
                     key={row.id}
-                    type="button"
                     className={`ik-ai-task-row ${selectedJob?.id === job.id ? 'is-active' : ''} is-${job.status}`}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setSelectedId(job.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedId(job.id);
+                      }
+                    }}
                   >
                     <span className="ik-ai-task-row-icon">{statusIcon(job.status)}</span>
                     <span className="ik-ai-task-row-main">
@@ -641,7 +658,21 @@ export default function AiTaskCenter({
                     {job.parsed && (
                       <span className="ik-ai-task-row-count">{rowCount(job)}</span>
                     )}
-                  </button>
+                    {canClearJob(job) && (
+                      <button
+                        type="button"
+                        className="ik-ai-task-row-clear"
+                        title="清理记录"
+                        aria-label={`清理任务 ${job.domain}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void onClearJob(job.id);
+                        }}
+                      >
+                        <Trash2 size={13} strokeWidth={2.25} />
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>

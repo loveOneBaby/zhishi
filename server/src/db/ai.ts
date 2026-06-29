@@ -1,7 +1,7 @@
 import { db, tryAlter } from './client.js';
 
 export type StoredAiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-export type StoredAiJobKind = 'kb-generate' | 'folder-init' | 'folder-entries' | 'analyze' | 'agent-edit';
+export type StoredAiJobKind = 'kb-generate' | 'folder-init' | 'folder-entries' | 'folder-full' | 'analyze' | 'agent-edit';
 
 export interface StoredAiJob {
   id: string;
@@ -93,6 +93,7 @@ function rowToJob(row: Record<string, unknown>): StoredAiJob {
   const rawKind = String(row.kind);
   const kind: StoredAiJobKind = rawKind === 'folder-init'
     || rawKind === 'folder-entries'
+    || rawKind === 'folder-full'
     || rawKind === 'analyze'
     || rawKind === 'agent-edit'
     ? rawKind
@@ -231,6 +232,11 @@ export async function pruneStoredAiJobs(limit = 30): Promise<void> {
   if (!rows.length) return;
   const stmt = db.prepare('DELETE FROM ai_jobs WHERE id = ?');
   for (const row of rows) await stmt.run(row.id);
+}
+
+export async function deleteStoredAiJob(id: string): Promise<boolean> {
+  const info = await db.prepare("DELETE FROM ai_jobs WHERE id = ? AND status NOT IN ('queued','running')").run(id);
+  return Number(info.changes ?? 0) > 0;
 }
 
 export async function clearStoredAiJobHistory(): Promise<number> {
