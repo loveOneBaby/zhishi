@@ -76,7 +76,7 @@
     },
     "dmg": {
       "artifactName": "${name}-${version}.${ext}",
-      "title": "知识检索 ${version}",
+      "title": "双击安装 · 知识检索 ${version}",
       "background": "assets/dmg-background.png",
       "iconSize": 96,
       "iconTextSize": 13,
@@ -87,8 +87,15 @@
       "contents": [
         {
           "x": 310,
-          "y": 128,
+          "y": 118,
           "type": "file"
+        },
+        {
+          "x": 310,
+          "y": 280,
+          "type": "file",
+          "path": "assets/dmg-install-note.txt",
+          "name": "双击上方知识检索.app 自动安装"
         }
       ]
     }
