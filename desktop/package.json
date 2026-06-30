@@ -73,7 +73,28 @@
       ]
     },
     "dmg": {
-      "artifactName": "${name}-${version}.${ext}"
+      "artifactName": "${name}-${version}.${ext}",
+      "title": "知识检索 ${version}",
+      "iconSize": 96,
+      "iconTextSize": 13,
+      "backgroundColor": "#eef5ff",
+      "window": {
+        "width": 620,
+        "height": 360
+      },
+      "contents": [
+        {
+          "x": 180,
+          "y": 160,
+          "type": "file"
+        },
+        {
+          "x": 440,
+          "y": 160,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     }
   },
   "dependencies": {
