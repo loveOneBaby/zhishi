@@ -8,6 +8,7 @@ dist/
 dist-extension/
 build/
 release/
+desktop/assets/icon.iconset/
 
 # 环境变量与密钥
 .env

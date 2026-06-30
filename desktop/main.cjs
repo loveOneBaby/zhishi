@@ -10,6 +10,7 @@ const serverDir = path.join(rootDir, 'server');
 const serverDistDir = path.join(serverDir, 'dist');
 const webDistDir = path.join(rootDir, 'web', 'dist');
 const portStart = Number(process.env.IK_DESKTOP_PORT || 51730);
+const releasePageUrl = 'https://github.com/loveOneBaby/zhishi/releases/latest';
 
 let localServer = null;
 let mainWindow = null;
@@ -261,6 +262,7 @@ function formatReleaseNotes(notes) {
 
 function showUpdaterError(err) {
   const message = err instanceof Error ? err.message : String(err);
+  const releaseAccessFailed = /404|not found|releases\.atom|latest-mac\.yml/i.test(message);
   if (!manualUpdateCheck && !updateDownloadInProgress) {
     console.warn(`[desktop] 自动更新检查未完成: ${message}`);
     return;
@@ -268,10 +270,18 @@ function showUpdaterError(err) {
   console.error('[desktop] 更新失败:', err);
   void showMessageBox({
     type: 'error',
-    title: '更新失败',
-    message: '检查或下载更新失败',
-    detail: message,
-    buttons: ['知道了'],
+    title: releaseAccessFailed ? '无法访问更新文件' : '更新失败',
+    message: releaseAccessFailed ? '自动更新文件当前不可访问' : '检查或下载更新失败',
+    detail: releaseAccessFailed
+      ? `如果 GitHub 仓库是私有的，桌面应用无法读取 Release 更新文件，因此不会自动弹出新版本提示。\n\n${message}`
+      : message,
+    buttons: releaseAccessFailed ? ['打开下载页', '知道了'] : ['知道了'],
+    defaultId: 0,
+    cancelId: releaseAccessFailed ? 1 : 0,
+  }).then((result) => {
+    if (releaseAccessFailed && result.response === 0) {
+      void shell.openExternal(releasePageUrl);
+    }
   });
   manualUpdateCheck = false;
   updateDownloadInProgress = false;
