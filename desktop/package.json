@@ -6,7 +6,7 @@
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
-    "dist:dmg": "electron-builder --mac dmg",
+    "dist:dmg": "electron-builder --mac dmg --publish never",
     "dist:publish": "electron-builder --mac --publish always"
   },
   "devDependencies": {
