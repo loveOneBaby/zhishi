@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, globalShortcut, screen, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, screen, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const net = require('node:net');
@@ -19,9 +19,54 @@ let isQuitting = false;
 let autoUpdaterReady = false;
 let manualUpdateCheck = false;
 let updateDownloadInProgress = false;
+let availableUpdateInfo = null;
+let downloadedUpdateInfo = null;
+let updateState = {
+  status: 'idle',
+  currentVersion: app.getVersion(),
+  version: null,
+  percent: null,
+  transferred: null,
+  total: null,
+  bytesPerSecond: null,
+  message: '',
+  releaseNotes: '',
+  releasePageUrl,
+  isPackaged: app.isPackaged,
+  canCheck: app.isPackaged,
+  canDownload: false,
+  canInstall: false,
+};
 
 function moduleUrl(filePath) {
   return pathToFileURL(filePath).href;
+}
+
+function normalizedUpdateState(state) {
+  const next = {
+    ...state,
+    currentVersion: app.getVersion(),
+    releasePageUrl,
+    isPackaged: app.isPackaged,
+  };
+  next.canCheck = app.isPackaged && !['checking', 'downloading', 'installing'].includes(next.status);
+  next.canDownload = app.isPackaged && next.status === 'available' && !updateDownloadInProgress;
+  next.canInstall = app.isPackaged && next.status === 'downloaded';
+  return next;
+}
+
+function broadcastUpdateState() {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('ik:update-state', updateState);
+    }
+  }
+}
+
+function setUpdateState(patch) {
+  updateState = normalizedUpdateState({ ...updateState, ...patch });
+  broadcastUpdateState();
+  return updateState;
 }
 
 function installToApplicationsIfNeeded() {
@@ -202,6 +247,7 @@ async function createQuickSearchWindow(mode = 'search') {
     hasShadow: false,
     backgroundColor: '#00000000',
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -312,6 +358,14 @@ function formatReleaseNotes(notes) {
 function showUpdaterError(err) {
   const message = err instanceof Error ? err.message : String(err);
   const releaseAccessFailed = /404|not found|releases\.atom|latest-mac\.yml/i.test(message);
+  setUpdateState({
+    status: 'error',
+    message: releaseAccessFailed ? '无法访问更新文件' : message,
+    percent: null,
+    transferred: null,
+    total: null,
+    bytesPerSecond: null,
+  });
   if (!manualUpdateCheck && !updateDownloadInProgress) {
     console.warn(`[desktop] 自动更新检查未完成: ${message}`);
     return;
@@ -334,6 +388,7 @@ function showUpdaterError(err) {
   });
   manualUpdateCheck = false;
   updateDownloadInProgress = false;
+  setUpdateState({});
 }
 
 function setupAutoUpdater() {
@@ -341,56 +396,72 @@ function setupAutoUpdater() {
   autoUpdaterReady = true;
 
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.logger = console;
 
-  autoUpdater.on('update-available', async (info) => {
+  autoUpdater.on('update-available', (info) => {
+    availableUpdateInfo = info;
+    downloadedUpdateInfo = null;
     manualUpdateCheck = false;
     const notes = formatReleaseNotes(info.releaseNotes).trim();
-    const result = await showMessageBox({
-      type: 'info',
-      title: '发现新版本',
+    setUpdateState({
+      status: 'available',
+      version: info.version || null,
+      percent: null,
+      transferred: null,
+      total: null,
+      bytesPerSecond: null,
       message: `发现新版本 ${info.version || ''}`.trim(),
-      detail: notes ? `是否现在下载并更新？\n\n${notes}` : '是否现在下载并更新？',
-      buttons: ['更新', '稍后'],
-      defaultId: 0,
-      cancelId: 1,
+      releaseNotes: notes,
     });
-    if (result.response !== 0) return;
-    updateDownloadInProgress = true;
-    autoUpdater.downloadUpdate().catch(() => {});
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
 
   autoUpdater.on('update-not-available', () => {
-    if (!manualUpdateCheck) return;
-    manualUpdateCheck = false;
-    void showMessageBox({
-      type: 'info',
-      title: '已是最新版本',
+    availableUpdateInfo = null;
+    downloadedUpdateInfo = null;
+    setUpdateState({
+      status: 'not-available',
+      version: null,
+      percent: null,
+      transferred: null,
+      total: null,
+      bytesPerSecond: null,
       message: `当前已是最新版本 ${app.getVersion()}`,
-      buttons: ['知道了'],
+      releaseNotes: '',
     });
+    manualUpdateCheck = false;
   });
 
   autoUpdater.on('download-progress', (progress) => {
-    const percent = Number(progress.percent || 0).toFixed(1);
-    console.log(`[desktop] 更新下载中: ${percent}%`);
+    const percent = Number(progress.percent || 0);
+    console.log(`[desktop] 更新下载中: ${percent.toFixed(1)}%`);
+    setUpdateState({
+      status: 'downloading',
+      percent,
+      transferred: Number.isFinite(progress.transferred) ? progress.transferred : null,
+      total: Number.isFinite(progress.total) ? progress.total : null,
+      bytesPerSecond: Number.isFinite(progress.bytesPerSecond) ? progress.bytesPerSecond : null,
+      message: `正在下载 ${percent.toFixed(1)}%`,
+    });
   });
 
-  autoUpdater.on('update-downloaded', async (info) => {
+  autoUpdater.on('update-downloaded', (info) => {
+    downloadedUpdateInfo = info;
     updateDownloadInProgress = false;
-    const result = await showMessageBox({
-      type: 'info',
-      title: '更新已下载',
+    setUpdateState({
+      status: 'downloaded',
+      version: info.version || availableUpdateInfo?.version || null,
+      percent: 100,
+      transferred: null,
+      total: null,
+      bytesPerSecond: null,
       message: `新版本 ${info.version || ''} 已下载完成`.trim(),
-      detail: '点击“立即安装”后应用会退出并完成更新。',
-      buttons: ['立即安装', '稍后'],
-      defaultId: 0,
-      cancelId: 1,
     });
-    if (result.response !== 0) return;
-    isQuitting = true;
-    autoUpdater.quitAndInstall(false, true);
   });
 
   autoUpdater.on('error', showUpdaterError);
@@ -398,30 +469,93 @@ function setupAutoUpdater() {
 
 function checkForUpdates(manual = false) {
   if (!app.isPackaged) {
-    if (manual) {
-      void showMessageBox({
-        type: 'info',
-        title: '开发模式',
-        message: '开发模式不会检查线上更新，请使用打包后的应用验证更新。',
-        buttons: ['知道了'],
-      });
-    }
-    return;
+    return setUpdateState({
+      status: 'dev',
+      message: '开发模式不会检查线上更新，请使用打包后的应用验证更新。',
+      percent: null,
+    });
   }
   if (updateDownloadInProgress) {
-    if (manual) {
-      void showMessageBox({
-        type: 'info',
-        title: '正在下载更新',
-        message: '更新正在下载中，请稍后。',
-        buttons: ['知道了'],
-      });
-    }
-    return;
+    return setUpdateState({
+      status: 'downloading',
+      message: updateState.message || '更新正在下载中，请稍后。',
+    });
   }
   setupAutoUpdater();
   manualUpdateCheck = manual;
-  autoUpdater.checkForUpdates().catch(() => {});
+  setUpdateState({
+    status: 'checking',
+    message: '正在检查更新...',
+    percent: null,
+    transferred: null,
+    total: null,
+    bytesPerSecond: null,
+  });
+  return autoUpdater.checkForUpdates().catch((err) => {
+    showUpdaterError(err);
+    return null;
+  });
+}
+
+function downloadUpdateFromUi() {
+  if (!app.isPackaged) {
+    return Promise.resolve(checkForUpdates(true));
+  }
+  setupAutoUpdater();
+  if (updateDownloadInProgress) return Promise.resolve(updateState);
+  if (!availableUpdateInfo && updateState.status !== 'available') {
+    return Promise.resolve(checkForUpdates(true));
+  }
+
+  updateDownloadInProgress = true;
+  setUpdateState({
+    status: 'downloading',
+    percent: 0,
+    transferred: null,
+    total: null,
+    bytesPerSecond: null,
+    message: '准备下载更新...',
+  });
+
+  return autoUpdater.downloadUpdate().catch((err) => {
+    showUpdaterError(err);
+    return null;
+  });
+}
+
+async function installDownloadedUpdateFromUi() {
+  if (updateState.status !== 'downloaded' && !downloadedUpdateInfo) return updateState;
+  const result = await showMessageBox({
+    type: 'question',
+    title: '安装更新',
+    message: `安装新版本 ${updateState.version || ''} 需要退出应用`.trim(),
+    detail: '确认后应用会退出，在后台完成安装。安装完成后会自动重新打开。',
+    buttons: ['退出并后台安装', '取消'],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (result.response !== 0) return updateState;
+
+  setUpdateState({
+    status: 'installing',
+    message: '正在退出并后台安装更新...',
+  });
+  isQuitting = true;
+  autoUpdater.quitAndInstall();
+  return updateState;
+}
+
+function setupUpdateIpc() {
+  ipcMain.handle('ik:update-get-state', () => updateState);
+  ipcMain.handle('ik:update-check', async () => {
+    await checkForUpdates(true);
+    return updateState;
+  });
+  ipcMain.handle('ik:update-download', async () => {
+    await downloadUpdateFromUi();
+    return updateState;
+  });
+  ipcMain.handle('ik:update-install', async () => installDownloadedUpdateFromUi());
 }
 
 function createApplicationMenu() {
@@ -492,6 +626,7 @@ async function createWindow() {
     backgroundColor: '#fbfbfa',
     show: false,
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -521,6 +656,7 @@ app.setName('知识检索');
 app.whenReady().then(async () => {
   if (!installToApplicationsIfNeeded()) return;
 
+  setupUpdateIpc();
   createApplicationMenu();
   try {
     await createWindow();

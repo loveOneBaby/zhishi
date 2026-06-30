@@ -33,6 +33,7 @@
     ],
     "files": [
       "main.cjs",
+      "preload.cjs",
       "package.json",
       "assets/**/*"
     ],

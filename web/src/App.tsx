@@ -59,6 +59,7 @@ import EntryEditor from './components/EntryEditor';
 import AiTaskCenter from './components/AiTaskCenter';
 import LoginPanel from './components/LoginPanel';
 import ShortcutMenu from './components/ShortcutMenu';
+import DesktopUpdateButton from './components/DesktopUpdateButton';
 import Toaster from './components/Toaster';
 import { toast } from './toast';
 
@@ -1071,6 +1072,7 @@ export default function App() {
       <div style={{ width: '100%', height: '100%', maxWidth: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <TopBar mode={mode} setMode={handleTopModeChange} theme={theme} setTheme={setTheme} searchSlot={searchField} searchTools={searchTools} trailing={
           <>
+            <DesktopUpdateButton />
             <ShortcutMenu doubleCommandEnabled={doubleCommandEnabled} onDoubleCommandEnabled={setDoubleCommandShortcut} />
             {auth.authRequired && auth.authenticated && mode === 'free' && (
               <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-sm ik-topbar-logout" onClick={handleLogout}>
