@@ -1,4 +1,5 @@
 import { apiPostKey } from './client';
+import { resolveAssetUrl } from './client';
 
 // 上传图片(转 dataURL → /api/assets 落库去重),返回站内可用 url
 export async function uploadAsset(file: File): Promise<string> {
@@ -9,5 +10,5 @@ export async function uploadAsset(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
   const asset = await apiPostKey<{ url: string }>('/assets', { dataUrl, alt: file.name }, 'asset');
-  return asset.url;
+  return resolveAssetUrl(asset.url);
 }

@@ -1,5 +1,5 @@
 import type { Entry, Folder, IndexNode, KnowledgeBase, KbCategory } from '../types';
-import { BASE, apiGetJson, apiPostJson, apiPostKey, j } from './client';
+import { apiFetch, apiGetJson, apiPostJson, apiPostKey, j } from './client';
 
 export interface ExportPayload {
   version: string;
@@ -24,7 +24,7 @@ export interface ExportProgressEvent {
 
 export async function exportAllWithProgress(onProgress?: (event: ExportProgressEvent) => void): Promise<ExportPayload> {
   onProgress?.({ phase: 'request', loaded: 0, percent: 8, label: '准备导出' });
-  const res = await fetch(`${BASE}/export`);
+  const res = await apiFetch('/export');
   if (!res.ok) return j<ExportPayload>(res);
 
   const total = Number(res.headers.get('content-length') ?? 0) || undefined;

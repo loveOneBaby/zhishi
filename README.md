@@ -74,6 +74,33 @@ npm run build        # 构建前端 + 编译后端
 npm start            # 启动后端，同时托管前端，访问 http://localhost:5173
 ```
 
+## 打包成浏览器扩展
+
+项目已支持生成 Chrome / Edge Manifest V3 扩展。扩展会打包现有 React 前端，后端仍使用本机或线上部署的 API 服务。
+
+```bash
+npm run build:extension
+```
+
+生成目录为 `dist-extension/`。在 Chrome / Edge 中打开扩展管理页，启用「开发者模式」，选择「加载已解压的扩展程序」，选中 `dist-extension/` 即可。
+
+加载后可以用两种方式使用：
+
+- 在任意网页按 `Alt+K`，页面上方会弹出悬浮搜索框，输入关键词后可直接查看知识点详情。
+- 在搜索框输入英文句号 `.` 或中文句号 `。` 可打开知识库选择器，限定搜索范围。
+- 按 `Alt+J` 可直接呼出 / 收起关键点标签面板。
+- 点击扩展图标，可选择「在当前页面搜索」「打开侧边栏」或「在标签页打开」。
+
+如果 `Alt+K` 或 `Alt+J` 和已有快捷键冲突，可在 `chrome://extensions/shortcuts` 中修改「呼出知识检索悬浮框」或「呼出知识检索关键点」的快捷键。
+
+扩展默认连接 `http://localhost:5173/api`，所以本机使用时先启动后端：
+
+```bash
+npm start
+```
+
+如果后端部署在线上，点扩展弹窗里的「配置后端地址」，把 API 地址改成线上服务地址即可，例如 `https://your-service.onrender.com/api`。如果地址只填到站点根路径，扩展会自动补 `/api`。
+
 ## 数据存储
 
 统一用 **libSQL**（`@libsql/client`），一套代码按环境变量切场景：

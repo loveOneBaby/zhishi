@@ -41,6 +41,7 @@ import {
   type EntryInput as ApiEntryInput,
 } from './api';
 import { logout, type AuthStatus } from './api';
+import { getApiBase } from './api/client';
 import TopBar, { type AppMode } from './components/TopBar';
 import SearchBox from './components/SearchBox';
 import SearchMode from './components/SearchMode';
@@ -200,8 +201,13 @@ function isKeyPointShortcut(event: KeyboardEvent): boolean {
   return event.code === 'Slash' || event.code === 'NumpadDivide' || event.key === '/' || event.key === '?';
 }
 
+function isScopePickerQuery(value: string): boolean {
+  return value.startsWith('.') || value.startsWith('。');
+}
+
 export default function App() {
   const initialRoute = parseRoute();
+  const apiBaseLabel = getApiBase();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [kbCategories, setKbCategories] = useState<KbCategory[]>([]);
@@ -478,8 +484,8 @@ export default function App() {
     () => (searchKb ? entries.filter((e) => e.kbId === searchKb) : entries),
     [entries, searchKb]
   );
-  // "/" 开头是正在选知识库,不作为检索词
-  const filterQuery = deferredQuery.startsWith('/') ? '' : deferredQuery;
+  // "." / "。" 开头是正在选知识库,不作为检索词
+  const filterQuery = isScopePickerQuery(deferredQuery) ? '' : deferredQuery;
   const results = useMemo(
     () => (mode === 'search' ? filterEntries(scopedEntries, filterQuery) : []),
     [scopedEntries, filterQuery, mode]
@@ -525,7 +531,7 @@ export default function App() {
 
   const summonKeyPoints = useCallback(() => {
     setMode('search');
-    setQuery((current) => (current.startsWith('/') ? '' : current));
+    setQuery((current) => (isScopePickerQuery(current) ? '' : current));
     setSel(0);
     setSugSel(-1);
     setOpenId(null);
@@ -1042,7 +1048,7 @@ export default function App() {
 
           {loaded && entries.length === 0 && (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--mut)', fontSize: 13 }}>
-              未能从服务端加载数据，请确认后端已启动（/api/entries）。
+              未能从服务端加载数据，请确认后端已启动（{apiBaseLabel}/entries）。
             </div>
           )}
         </div>

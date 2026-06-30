@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="extension.css" />
+    <title>知识检索</title>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel stack">
+        <div>
+          <h1>知识检索</h1>
+          <p>从扩展打开你的面试知识库。</p>
+        </div>
+        <div class="meta" id="apiBase"></div>
+        <div class="actions">
+          <button class="primary" id="openQuickSearch" type="button">在当前页面搜索</button>
+          <button class="primary" id="openSidePanel" type="button">打开侧边栏</button>
+          <button id="openTab" type="button">在标签页打开</button>
+          <button id="openOptions" type="button">配置后端地址</button>
+          <button id="testApi" type="button">测试连接</button>
+        </div>
+        <p class="status" id="status"></p>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,4 +1,37 @@
-export const BASE = '/api';
+export const API_BASE_STORAGE_KEY = 'ik_api_base';
+export const API_TOKEN_STORAGE_KEY = 'ik_api_token';
+export const DEFAULT_EXTENSION_API_BASE = 'http://localhost:5173/api';
+
+export function isExtensionRuntime(): boolean {
+  return typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:';
+}
+
+export function normalizeApiBase(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  if (trimmed.startsWith('/')) return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.pathname.replace(/\/+$/, '').endsWith('/api') ? url.toString().replace(/\/+$/, '') : `${url.toString().replace(/\/+$/, '')}/api`;
+  } catch {
+    return '';
+  }
+}
+
+export function getApiBase(): string {
+  if (isExtensionRuntime()) {
+    try {
+      const saved = window.localStorage.getItem(API_BASE_STORAGE_KEY);
+      const normalized = saved ? normalizeApiBase(saved) : '';
+      if (normalized) return normalized;
+    } catch { /* ignore */ }
+    return DEFAULT_EXTENSION_API_BASE;
+  }
+  return '/api';
+}
+
+export const BASE = getApiBase();
 
 const CLIENT_SLOW_API_MS = 100;
 const CLIENT_LARGE_API_BYTES = 100 * 1024;
@@ -21,9 +54,38 @@ function logApiMetric(method: string, path: string, res: Response, durationMs: n
   console.warn(`[api-client:${tags}] ${method} ${path} -> ${res.status} ${durationMs.toFixed(1)}ms ${size}`);
 }
 
+function withApiAuth(init: RequestInit = {}): RequestInit {
+  const headers = new Headers(init.headers);
+  if (isExtensionRuntime() && !headers.has('Authorization')) {
+    try {
+      const token = window.localStorage.getItem(API_TOKEN_STORAGE_KEY)?.trim();
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+    } catch { /* ignore */ }
+  }
+  return { ...init, headers };
+}
+
+export function apiUrl(path: string): string {
+  return `${BASE}${path}`;
+}
+
+export function resolveAssetUrl(src: string): string {
+  const value = src.trim();
+  if (!value) return '';
+  if (!isExtensionRuntime()) return value;
+  if (value.startsWith('/api/')) {
+    return `${BASE.replace(/\/api$/, '')}${value}`;
+  }
+  return value;
+}
+
+export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(apiUrl(path), withApiAuth(init));
+}
+
 async function timedFetch(method: string, path: string, init?: RequestInit): Promise<Response> {
   const started = performance.now();
-  const res = await fetch(`${BASE}${path}`, init);
+  const res = await apiFetch(path, init);
   logApiMetric(method, path, res, performance.now() - started);
   return res;
 }
@@ -120,7 +182,7 @@ export async function runSseStream<T>(
   dispatch: (event: string, data: Record<string, unknown>, ctx: SseDispatchCtx<T>) => void,
   signal?: AbortSignal,
 ): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await apiFetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

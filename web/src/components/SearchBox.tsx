@@ -20,10 +20,13 @@ interface Props {
   viewType: 'list' | 'canvas';
   onViewType: (v: 'list' | 'canvas') => void;
   doubleCommandEnabled?: boolean;
+  enableScopeShortcutPicker?: boolean;
+  showScopeButton?: boolean;
+  keyPointShortcutLabel?: string;
 }
 
 function normalizeSearchInput(value: string): string {
-  return value.replace(/、/g, '/');
+  return value.replace(/。/g, '.');
 }
 
 type KbPickerNode =
@@ -143,8 +146,27 @@ function buildKbPickerTree(categories: KbCategory[], kbs: KnowledgeBase[], token
   return filterPickerNodes(prepared, normalizeToken(token));
 }
 
-// 顶栏搜索框:输入 "/" 唤起知识库选择,选中后检索锁定到该库;空输入按退格解除锁定。
-export default function SearchBox({ query, onQuery, onClear, kbs, categories, searchKb, onScopeKb, inputRef, kpEntries, kpOpen, setKpOpen, onPickTag, viewType, onViewType, doubleCommandEnabled = true }: Props) {
+// 顶栏搜索框:默认输入 "." / "。" 唤起知识库选择,选中后检索锁定到该库;空输入按退格解除锁定。
+export default function SearchBox({
+  query,
+  onQuery,
+  onClear,
+  kbs,
+  categories,
+  searchKb,
+  onScopeKb,
+  inputRef,
+  kpEntries,
+  kpOpen,
+  setKpOpen,
+  onPickTag,
+  viewType,
+  onViewType,
+  doubleCommandEnabled = true,
+  enableScopeShortcutPicker = true,
+  showScopeButton = false,
+  keyPointShortcutLabel = '⌘/ Ctrl+/',
+}: Props) {
   const kpTags = useMemo(() => {
     const counts = new Map<string, number>();
     for (const e of kpEntries) for (const raw of e.tags) { const t = raw.trim(); if (t) counts.set(t, (counts.get(t) ?? 0) + 1); }
@@ -159,17 +181,17 @@ export default function SearchBox({ query, onQuery, onClear, kbs, categories, se
     return () => { document.removeEventListener('click', close); document.removeEventListener('keydown', onKey); };
   }, [kpOpen, setKpOpen]);
   const scopeName = searchKb ? (kbs.find((k) => k.id === searchKb)?.name ?? null) : null;
-  const slashActive = query.startsWith('/');
-  const token = slashActive ? query.slice(1).trimStart() : '';
+  const scopeShortcutActive = enableScopeShortcutPicker && (query.startsWith('.') || query.startsWith('。'));
+  const token = scopeShortcutActive ? query.slice(1).trimStart() : '';
   // 点击范围胶囊也能打开知识库选择器(切换知识库)
   const [pickerOpen, setPickerOpen] = useState(false);
-  const open = (slashActive || pickerOpen) && kbs.length > 0;
+  const open = (scopeShortcutActive || pickerOpen) && kbs.length > 0;
   const pickerTree = useMemo(() => buildKbPickerTree(categories, kbs, token), [categories, kbs, token]);
   const visibleKbs = useMemo(() => flattenPickerKbs(pickerTree), [pickerTree]);
   const pickerRows = useMemo(() => countPickerRows(pickerTree), [pickerTree]);
   const pickerTreeHeight = Math.min(320, Math.max(92, pickerRows * 34));
   const [sel, setSel] = useState(0);
-  useEffect(() => { setSel(0); }, [token, slashActive, pickerOpen]);
+  useEffect(() => { setSel(0); }, [token, scopeShortcutActive, pickerOpen]);
   useEffect(() => {
     setSel((current) => Math.min(current, Math.max(0, visibleKbs.length - 1)));
   }, [visibleKbs.length]);
@@ -210,10 +232,14 @@ export default function SearchBox({ query, onQuery, onClear, kbs, categories, se
     }
   };
 
-  const placeholder = scopeName ? `在「${scopeName}」中搜索…` : '搜索知识点（输入 / 选择知识库）';
+  const placeholder = scopeName
+    ? `在「${scopeName}」中搜索…`
+    : enableScopeShortcutPicker
+      ? '搜索知识点（输入 . 或 。选择知识库）'
+      : '搜索知识点';
   const toggleKeyPoints = (): void => {
     setPickerOpen(false);
-    if (slashActive) onQuery('');
+    if (scopeShortcutActive) onQuery('');
     setKpOpen((v) => !v);
   };
   const selectedKbId = visibleKbs[sel]?.id ?? null;
@@ -319,11 +345,24 @@ export default function SearchBox({ query, onQuery, onClear, kbs, categories, se
         {query && (
           <button type="button" className="ik-searchbox-btn" onClick={onClear} aria-label="清空">清空</button>
         )}
+        {!scopeName && showScopeButton && kbs.length > 0 && (
+          <button
+            type="button"
+            className="ik-searchbox-btn"
+            title="选择知识库"
+            aria-label="选择知识库"
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            onClick={() => { setPickerOpen((v) => !v); inputRef.current?.focus(); }}
+          >
+            <Library size={14} strokeWidth={2.1} />
+          </button>
+        )}
         <span className="ik-kp-anchor">
           <button
             type="button"
             className={`ik-searchbox-btn ik-kp-trigger ${kpOpen ? 'is-active' : ''}`}
-            title="关键点(标签) · ⌘/ 或 Ctrl+/"
+            title={`关键点(标签) · ${keyPointShortcutLabel}`}
             aria-label="关键点"
             aria-haspopup="dialog"
             aria-expanded={kpOpen}
@@ -336,7 +375,7 @@ export default function SearchBox({ query, onQuery, onClear, kbs, categories, se
               <div className="ik-kp-head">
                 <div className="ik-kp-title">
                   <span>关键点</span>
-                  <kbd>⌘/ Ctrl+/</kbd>
+                  <kbd>{keyPointShortcutLabel}</kbd>
                 </div>
                 <b>{kpTags.length} 个</b>
               </div>

@@ -11,6 +11,7 @@
     "dev:server": "npm --prefix server run dev",
     "dev:web": "npm --prefix web run dev",
     "build": "npm --prefix web run build && npm --prefix server run build",
+    "build:extension": "node scripts/build-extension.mjs",
     "start": "npm --prefix server run start"
   }
 }

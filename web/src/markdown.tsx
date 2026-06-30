@@ -1,11 +1,12 @@
 import React from 'react';
 import type { Entry } from './types';
 import { highlightText } from './highlight';
+import { resolveAssetUrl } from './api/client';
 
 function safeImageSrc(src: string): string {
   const s = src.trim();
   if (/^\/(Users|var|private|tmp|home)\//i.test(s)) return '';
-  if (/^(https?:\/\/|data:image\/|\/)/i.test(s)) return s;
+  if (/^(https?:\/\/|data:image\/|\/)/i.test(s)) return resolveAssetUrl(s);
   return '';
 }
 

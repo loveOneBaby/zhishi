@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, type MouseEvent } from 'react';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { useCreateBlockNote } from '@blocknote/react';
@@ -6,6 +6,7 @@ import { BlockNoteView } from '@blocknote/mantine';
 import type { PartialBlock } from '@blocknote/core';
 import type { Block } from '../types';
 import { uploadAsset } from '../api';
+import { resolveAssetUrl } from '../api/client';
 import { linkifyBlocks } from '../linkify';
 
 interface Props {
@@ -29,10 +30,30 @@ function safeOpenHref(href: string): string {
   }
 }
 
+function resolveBlockAssetUrls(blocks?: Block[]): Block[] | undefined {
+  if (!blocks?.length) return blocks;
+  let changed = false;
+  const next = blocks.map((block) => {
+    const children = resolveBlockAssetUrls(block.children);
+    const url = typeof block.props?.url === 'string' ? resolveAssetUrl(block.props.url) : undefined;
+    const propsChanged = Boolean(url && url !== block.props?.url);
+    const childrenChanged = children !== block.children;
+    if (!propsChanged && !childrenChanged) return block;
+    changed = true;
+    return {
+      ...block,
+      ...(propsChanged ? { props: { ...block.props, url } } : {}),
+      ...(childrenChanged ? { children } : {}),
+    };
+  });
+  return changed ? next : blocks;
+}
+
 // 基于 BlockNote 的块编辑器 / 只读视图(editable=false)。图片上传走 /api/assets。
 export default function BlockEditor({ initialBlocks, initialMarkdown, editable = true, dark = false, onChange, onChangeMarkdown }: Props) {
+  const resolvedInitialBlocks = useMemo(() => resolveBlockAssetUrls(initialBlocks), [initialBlocks]);
   // 只读预览:把纯文本里的裸 URL 转成可点击链接(编辑态保持原样,避免干扰输入)
-  const seedBlocks = editable ? initialBlocks : linkifyBlocks(initialBlocks);
+  const seedBlocks = editable ? resolvedInitialBlocks : linkifyBlocks(resolvedInitialBlocks);
   const editor = useCreateBlockNote({
     initialContent: seedBlocks && seedBlocks.length ? (seedBlocks as unknown as PartialBlock[]) : undefined,
     uploadFile: async (file: File) => uploadAsset(file),
@@ -43,12 +64,12 @@ export default function BlockEditor({ initialBlocks, initialMarkdown, editable =
   useEffect(() => {
     if (seeded.current) return;
     seeded.current = true;
-    if ((!initialBlocks || initialBlocks.length === 0) && initialMarkdown && initialMarkdown.trim()) {
+    if ((!resolvedInitialBlocks || resolvedInitialBlocks.length === 0) && initialMarkdown && initialMarkdown.trim()) {
       Promise.resolve(editor.tryParseMarkdownToBlocks(initialMarkdown))
-        .then((blocks) => { editor.replaceBlocks(editor.document, blocks as unknown as PartialBlock[]); })
+        .then((blocks) => { editor.replaceBlocks(editor.document, resolveBlockAssetUrls(blocks as unknown as Block[]) as unknown as PartialBlock[]); })
         .catch(() => { /* 解析失败保持空 */ });
     }
-  }, [editor, initialBlocks, initialMarkdown]);
+  }, [editor, resolvedInitialBlocks, initialMarkdown]);
 
   // markdown 导出有异步竞态,用序号保证只采用最新一次
   const mdSeq = useRef(0);
