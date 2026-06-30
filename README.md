@@ -101,7 +101,7 @@ npm run dist:dmg
 
 生成文件在 `release/` 目录。安装后的桌面应用会把本地数据库写到 macOS 应用数据目录，不会写入 `.app` 包内部。
 
-当前 DMG 面向 Apple 芯片 Mac 构建（arm64）。打开 DMG 后，将「知识检索.app」拖到 Applications 即可安装。
+当前 DMG 面向 Apple 芯片 Mac 构建（arm64）。打开 DMG 后双击「知识检索.app」，应用会自动复制到 Applications 并重新打开。
 
 ### GitHub 自动发布与更新
 

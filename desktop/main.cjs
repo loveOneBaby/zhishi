@@ -24,6 +24,55 @@ function moduleUrl(filePath) {
   return pathToFileURL(filePath).href;
 }
 
+function installToApplicationsIfNeeded() {
+  if (process.platform !== 'darwin' || !app.isPackaged || app.isInApplicationsFolder()) {
+    return true;
+  }
+
+  try {
+    const moved = app.moveToApplicationsFolder({
+      conflictHandler: (conflictType) => {
+        const running = conflictType === 'existsAndRunning';
+        const response = dialog.showMessageBoxSync({
+          type: 'question',
+          title: '安装知识检索',
+          message: running ? 'Applications 中已有正在运行的知识检索' : 'Applications 中已存在知识检索',
+          detail: running
+            ? '是否切换到已安装的应用？当前从 DMG 打开的应用会退出。'
+            : '是否替换旧版本并安装到 Applications？',
+          buttons: running ? ['切换', '取消'] : ['替换并安装', '取消'],
+          defaultId: 0,
+          cancelId: 1,
+        });
+        return response === 0;
+      },
+    });
+
+    if (moved) {
+      return false;
+    }
+
+    const response = dialog.showMessageBoxSync({
+      type: 'warning',
+      title: '未完成安装',
+      message: '知识检索还没有安装到 Applications',
+      detail: '从 DMG 直接运行不利于后续自动更新。建议重新打开 DMG 并双击知识检索完成安装。',
+      buttons: ['继续运行', '退出'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 1) {
+      app.quit();
+      return false;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    dialog.showErrorBox('安装失败', message);
+  }
+
+  return true;
+}
+
 function canUsePort(port) {
   return new Promise((resolve) => {
     const probe = net.createServer();
@@ -470,6 +519,8 @@ async function createWindow() {
 app.setName('知识检索');
 
 app.whenReady().then(async () => {
+  if (!installToApplicationsIfNeeded()) return;
+
   createApplicationMenu();
   try {
     await createWindow();
