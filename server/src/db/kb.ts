@@ -86,12 +86,13 @@ export async function createKb(name: string, categoryId?: string | null): Promis
     id,
     name: name.trim() || '未命名知识库',
     categoryId: await normalizeCategoryId(categoryId),
+    favorite: false,
     sort: Number(maxRow.m) + 1,
     createdAt: now,
     updatedAt: now,
   };
-  await db.prepare('INSERT INTO knowledge_bases (id, name, categoryId, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, kb.name, kb.categoryId, kb.sort, now, now);
+  await db.prepare('INSERT INTO knowledge_bases (id, name, categoryId, favorite, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(id, kb.name, kb.categoryId, 0, kb.sort, now, now);
   clearKbsCache();
   return kb;
 }
@@ -109,6 +110,14 @@ export async function updateKbCategory(id: string, categoryId?: string | null): 
   const normalizedCategoryId = await normalizeCategoryId(categoryId);
   const row = await db.prepare('UPDATE knowledge_bases SET categoryId = ?, updatedAt = ? WHERE id = ? RETURNING *')
     .get(normalizedCategoryId, now, id) as unknown as KbRow | undefined;
+  clearKbsCache();
+  return row ? rowToKb(row) : null;
+}
+
+export async function updateKbFavorite(id: string, favorite: boolean): Promise<KnowledgeBase | null> {
+  const now = Date.now();
+  const row = await db.prepare('UPDATE knowledge_bases SET favorite = ?, updatedAt = ? WHERE id = ? RETURNING *')
+    .get(favorite ? 1 : 0, now, id) as unknown as KbRow | undefined;
   clearKbsCache();
   return row ? rowToKb(row) : null;
 }

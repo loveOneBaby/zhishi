@@ -16,10 +16,10 @@ import {
   renameKb,
   deleteKb,
   updateKbCategory,
+  updateKbFavorite,
   reorderKbs,
   deleteTagFromKb,
   getFolder,
-  listEntrySummaries,
   clearFoldersCache,
   clearEntriesCache,
 } from '../db.js';
@@ -231,13 +231,20 @@ export function registerKbRoutes(api: Router): void {
     res.json({ kb });
   }));
 
+  api.put('/kbs/:id/favorite', asyncHandler(async (req, res) => {
+    const favorite = Boolean(req.body?.favorite);
+    const kb = await updateKbFavorite(req.params.id, favorite);
+    if (!kb) return res.status(404).json({ error: 'not found' });
+    res.json({ kb });
+  }));
+
   api.post('/kbs/:id/tags/delete', asyncHandler(async (req, res) => {
     const kb = await getKb(req.params.id);
     if (!kb) return res.status(404).json({ error: '知识库不存在' });
     const tag = String(req.body?.tag ?? '').trim();
     if (!tag) return res.status(400).json({ error: 'tag 不能为空' });
-    const removed = await deleteTagFromKb(kb.id, tag);
-    res.json({ ok: true, removed, entries: await listEntrySummaries() });
+    const result = await deleteTagFromKb(kb.id, tag);
+    res.json({ ok: true, ...result });
   }));
 
   api.delete('/kbs/:id', asyncHandler(async (req, res) => {

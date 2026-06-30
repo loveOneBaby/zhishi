@@ -3,6 +3,7 @@ import { createKb, ensureKb } from './kb.js';
 import { ensureFolder } from './folder.js';
 import { SEED_LIBRARIES } from '../seed-data/index.js';
 import { parseBodyToIndex } from '../index-tree.js';
+import type { KnowledgeBase } from '../types.js';
 
 // 一次性数据迁移：把旧的「按 cat 平铺」结构升级为「知识库 → 文件夹 → 知识点」
 export async function migrateKbFolder(): Promise<void> {
@@ -51,7 +52,6 @@ export async function seedBuiltins(): Promise<void> {
     (await db.prepare('SELECT version FROM seed_migrations').all() as { version: string }[]).map((row) => row.version)
   );
   const count = await db.prepare('SELECT COUNT(*) AS n FROM entries').get() as { n: number };
-  const defaultKb = await ensureKb(DEFAULT_KB_NAME);
   const insert = db.prepare(
     `INSERT INTO entries (id, cat, kbId, folderId, title, py, tags, summary, body, idx, sort, createdAt, updatedAt)
      VALUES (:id, :cat, :kbId, :folderId, :title, :py, :tags, :summary, :body, :idx, :sort, :createdAt, :updatedAt)`
@@ -62,28 +62,34 @@ export async function seedBuiltins(): Promise<void> {
   );
   const deleteBuiltin = db.prepare('DELETE FROM entries WHERE id = ?');
   const markApplied = db.prepare('INSERT INTO seed_migrations (version, appliedAt) VALUES (?, ?)');
+  let defaultKb: KnowledgeBase | null = null;
+  const getDefaultKb = async (): Promise<KnowledgeBase> => {
+    defaultKb ??= await ensureKb(DEFAULT_KB_NAME);
+    return defaultKb;
+  };
   let added = 0, updated = 0, removed = 0;
 
   await db.tx(async () => {
     for (const library of SEED_LIBRARIES) {
       if (applied.has(library.version)) continue;
       const skipLegacyBase = library.version === 'base-v1' && count.n > 0;
-      if (!skipLegacyBase) {
+      if (!skipLegacyBase && library.entries.length > 0) {
+        const kb = await getDefaultKb();
         const now = Date.now();
         for (const e of library.entries) {
           const idx = JSON.stringify(parseBodyToIndex(e.body));
           const catName = (e.cat && e.cat.trim()) || '未分类';
-          const folder = await ensureFolder(defaultKb.id, catName, null);
-          const kbId = defaultKb.id;
+          const folder = await ensureFolder(kb.id, catName, null);
+          const kbId = kb.id;
           const folderId = folder.id;
           const values = {
-            id: e.id, cat: defaultKb.name, kbId, folderId, title: e.title, py: e.py,
+            id: e.id, cat: kb.name, kbId, folderId, title: e.title, py: e.py,
             tags: JSON.stringify(e.tags), summary: e.summary, body: e.body, idx,
             sort: now, createdAt: now, updatedAt: now,
           };
           if (library.overwrite) {
             const info = await updateBuiltin.run({
-              id: e.id, cat: defaultKb.name, kbId, folderId, py: e.py,
+              id: e.id, cat: kb.name, kbId, folderId, py: e.py,
               tags: JSON.stringify(e.tags), summary: e.summary, body: e.body, idx, updatedAt: now,
             });
             if (Number(info.changes) > 0) updated += Number(info.changes);
@@ -92,6 +98,8 @@ export async function seedBuiltins(): Promise<void> {
             added += Number((await insert.run(values)).changes);
           }
         }
+      }
+      if (!skipLegacyBase) {
         for (const id of library.removeIds ?? []) removed += Number((await deleteBuiltin.run(id)).changes);
       }
       await markApplied.run(library.version, Date.now());

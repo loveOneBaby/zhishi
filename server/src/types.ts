@@ -8,6 +8,7 @@ export interface KnowledgeBase {
   id: string;
   name: string;
   categoryId: string | null;
+  favorite: boolean;
   sort: number;
   createdAt: number;
   updatedAt: number;
@@ -72,6 +73,7 @@ export interface KbRow {
   id: string;
   name: string;
   categoryId?: string | null;
+  favorite?: number | boolean | null;
   sort: number;
   createdAt: number;
   updatedAt: number;

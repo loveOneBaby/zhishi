@@ -34,6 +34,7 @@
 │     ├─ components/    各界面组件
 │     ├─ search.ts      客户端检索（与服务端一致）
 │     └─ markdown.tsx   轻量 markdown 渲染
+├─ desktop/       # 桌面端：Electron 启动本地服务并加载前端
 └─ package.json   # 根目录便捷脚本
 ```
 
@@ -73,6 +74,59 @@ npm run dev:web      # 前端 http://localhost:3000（/api 自动代理到后端
 npm run build        # 构建前端 + 编译后端
 npm start            # 启动后端，同时托管前端，访问 http://localhost:5173
 ```
+
+## 桌面端
+
+项目已支持 Electron 桌面端。桌面端会启动一个仅监听本机的本地服务，再加载打包后的前端页面。开发模式默认继续使用 `server/data/knowledge.db`；安装后的桌面应用默认写入 macOS 应用数据目录，也可以通过 `DB_PATH` 或 Turso 环境变量接入同一份知识库数据。
+
+首次使用先安装依赖：
+
+```bash
+npm run install:all
+```
+
+启动桌面端：
+
+```bash
+npm run desktop
+```
+
+该命令会先执行 `npm run build`，再打开「知识检索」桌面窗口。运行期间可在任意应用中按 `Alt+K` 呼出 / 收起快捷搜索浮窗，按 `Alt+J` 呼出关键点标签面板。桌面端默认从 `127.0.0.1:51730` 起寻找可用端口；如需指定端口，可设置 `IK_DESKTOP_PORT=端口号`。
+
+打包成 macOS DMG：
+
+```bash
+npm run dist:dmg
+```
+
+生成文件在 `release/` 目录。安装后的桌面应用会把本地数据库写到 macOS 应用数据目录，不会写入 `.app` 包内部。
+
+### GitHub 自动发布与更新
+
+仓库已配置 GitHub Actions：
+
+- 推送到 `main` 分支会自动构建 macOS arm64 DMG，并作为 Actions artifact 保留 14 天，适合日常提交后下载测试。
+- 推送 `v*` 标签会自动构建并发布到 GitHub Release，桌面端自动更新只认这种正式发布版本。
+
+日常提交触发构建：
+
+```bash
+git push origin main
+```
+
+正式发布触发自动更新：
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+正式发布时流水线会上传：
+
+- `interview-knowledge-desktop-版本号.dmg`：给用户下载安装。
+- `interview-knowledge-desktop-版本号-arm64-mac.zip` 与 `latest-mac.yml`：给桌面端自动更新使用。
+
+桌面端启动后会自动检查 GitHub Release 最新版本；也可以在菜单中点击「检查更新...」。检测到新版本时会弹出提示，点击「更新」会下载更新，下载完成后点击「立即安装」即可重启并完成更新。
 
 ## 打包成浏览器扩展
 

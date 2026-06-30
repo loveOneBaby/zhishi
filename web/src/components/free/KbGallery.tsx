@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { Check, ChevronRight, Download, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Search, Tags, Trash2, Upload, X } from 'lucide-react';
+import { Check, ChevronRight, Download, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Search, Star, Tags, Trash2, Upload, X } from 'lucide-react';
 import type { Entry, Folder as KbFolder, KnowledgeBase, KbCategory } from '../../types';
 import ImportPreviewModal from '../ImportPreviewModal';
 import CommandDialog from '../CommandDialog';
@@ -8,10 +8,11 @@ import type { ImportPayload, ImportPreview } from '../../api';
 import { RowActions } from './RowActions';
 import { toast } from '../../toast';
 
-const ALL_CATEGORIES = '__all__';
-const UNCATEGORIZED = '__uncategorized__';
+export const ALL_CATEGORIES = '__all__';
+export const FAVORITES = '__favorites__';
+export const UNCATEGORIZED = '__uncategorized__';
 
-type ActiveCategory = typeof ALL_CATEGORIES | typeof UNCATEGORIZED | string;
+export type ActiveCategory = typeof ALL_CATEGORIES | typeof FAVORITES | typeof UNCATEGORIZED | string;
 
 type CategoryCommand =
   | { kind: 'create'; parentId: string | null; parentName?: string }
@@ -29,12 +30,15 @@ interface KbGalleryProps {
   categories: KbCategory[];
   entries: Entry[];
   folders: KbFolder[];
+  activeCategory: ActiveCategory;
+  onActiveCategoryChange: (category: ActiveCategory) => void;
   entriesOfKb: (kbId: string) => Entry[];
   newKb: (categoryId?: string | null, categoryName?: string) => void;
   createCategory: (input: { name: string; parentId?: string | null }) => Promise<KbCategory>;
   renameCategory: (id: string, name: string) => Promise<void>;
   deleteCategory: (id: string) => Promise<void>;
   moveKbToCategory: (id: string, categoryId?: string | null) => Promise<void>;
+  toggleKbFavorite: (id: string, favorite: boolean) => Promise<void>;
   onExportAll: () => Promise<void>;
   exportProgress?: { active: boolean; percent: number; label: string } | null;
   onImportKnowledgeBases: () => void;
@@ -62,13 +66,12 @@ function normalizeGallerySearch(value: string): string {
 
 export function KbGallery(props: KbGalleryProps): ReactNode {
   const {
-    kbs, categories, entries, folders, newKb,
-    createCategory, renameCategory, deleteCategory, moveKbToCategory,
+    kbs, categories, entries, folders, activeCategory, onActiveCategoryChange, newKb,
+    createCategory, renameCategory, deleteCategory, moveKbToCategory, toggleKbFavorite,
     onExportAll, exportProgress, onImportKnowledgeBases, openKb, renameKbAction, deleteKbAction, importPreview, importing, onCloseImportPreview,
     handleConfirmImport, commandDialog,
   } = props;
 
-  const [activeCategory, setActiveCategory] = useState<ActiveCategory>(ALL_CATEGORIES);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [categoryCommand, setCategoryCommand] = useState<CategoryCommand | null>(null);
   const [categoryQuery, setCategoryQuery] = useState('');
@@ -100,10 +103,10 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
   }, [categories]);
 
   useEffect(() => {
-    if (activeCategory !== ALL_CATEGORIES && activeCategory !== UNCATEGORIZED && !categoryById.has(activeCategory)) {
-      setActiveCategory(ALL_CATEGORIES);
+    if (activeCategory !== ALL_CATEGORIES && activeCategory !== FAVORITES && activeCategory !== UNCATEGORIZED && !categoryById.has(activeCategory)) {
+      onActiveCategoryChange(ALL_CATEGORIES);
     }
-  }, [activeCategory, categoryById]);
+  }, [activeCategory, categoryById, onActiveCategoryChange]);
 
   const categoryRows = useMemo<CategoryRow[]>(() => {
     const rows: CategoryRow[] = [];
@@ -154,19 +157,22 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
 
   const scopedKbs = useMemo(() => {
     if (activeCategory === ALL_CATEGORIES) return kbs;
+    if (activeCategory === FAVORITES) return kbs.filter((kb) => Boolean(kb.favorite));
     if (activeCategory === UNCATEGORIZED) return kbs.filter((kb) => !kb.categoryId);
     const ids = subtreeIds.get(activeCategory) ?? new Set([activeCategory]);
     return kbs.filter((kb) => kb.categoryId && ids.has(kb.categoryId));
   }, [activeCategory, kbs, subtreeIds]);
 
   const visibleKbs = useMemo(() => {
-    if (!kbNeedle) return scopedKbs;
-    return scopedKbs.filter((kb) => {
+    const list = !kbNeedle ? scopedKbs : scopedKbs.filter((kb) => {
       const category = kb.categoryId ? categoryById.get(kb.categoryId) : undefined;
       return kb.name.toLowerCase().includes(kbNeedle)
         || categoryName(category).toLowerCase().includes(kbNeedle);
     });
+    return [...list].sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || (a.sort - b.sort) || (a.createdAt ?? 0) - (b.createdAt ?? 0));
   }, [categoryById, kbNeedle, scopedKbs]);
+
+  const favoriteCount = useMemo(() => kbs.filter((kb) => Boolean(kb.favorite)).length, [kbs]);
 
   const categoryExactCounts = useMemo(() => {
     const counts = new Map<string | null, number>();
@@ -208,9 +214,11 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
 
   const activeCategoryName = activeCategory === ALL_CATEGORIES
     ? '全部知识库'
-    : activeCategory === UNCATEGORIZED
-      ? '未分类'
-      : categoryName(categoryById.get(activeCategory));
+    : activeCategory === FAVORITES
+      ? '收藏'
+      : activeCategory === UNCATEGORIZED
+        ? '未分类'
+        : categoryName(categoryById.get(activeCategory));
   const categoryOptions = useMemo(() => [
     { value: '', label: '未分类', depth: 0 },
     ...allCategoryRows.map((row) => ({
@@ -245,11 +253,19 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
     return allCategoryRows.filter((row) => included.has(row.category.id));
   }, [allCategoryRows, categories, categoryById, categoryNeedle, categoryRows, childrenByParent]);
   const showAllCategoryRow = !categoryNeedle || '全部知识库'.includes(categoryNeedle);
+  const showFavoritesRow = !categoryNeedle || '收藏'.includes(categoryNeedle);
   const showUncategorizedRow = !categoryNeedle || '未分类'.includes(categoryNeedle);
 
   const createKbInActiveCategory = (): void => {
-    if (activeCategory === ALL_CATEGORIES || activeCategory === UNCATEGORIZED) newKb(null);
+    if (activeCategory === ALL_CATEGORIES || activeCategory === FAVORITES || activeCategory === UNCATEGORIZED) newKb(null);
     else newKb(activeCategory, activeCategoryName);
+  };
+
+  const toggleFavoriteAction = (kb: KnowledgeBase): void => {
+    const next = !kb.favorite;
+    void toggleKbFavorite(kb.id, next)
+      .then(() => toast(next ? '已收藏知识库' : '已取消收藏', 'success'))
+      .catch((err) => toast('更新收藏失败：' + (err instanceof Error ? err.message : String(err)), 'error'));
   };
 
   const toggleExpanded = (id: string): void => {
@@ -271,7 +287,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
         if (categoryCommand.parentId) {
           setExpanded((current) => new Set(current).add(categoryCommand.parentId!));
         }
-        setActiveCategory(category.id);
+        onActiveCategoryChange(category.id);
         toast('已新建分类', 'success');
       } else if (categoryCommand.kind === 'rename') {
         const name = value.trim();
@@ -280,7 +296,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
         toast('已重命名分类', 'success');
       } else {
         await deleteCategory(categoryCommand.category.id);
-        if (activeCategory === categoryCommand.category.id) setActiveCategory(categoryCommand.category.parentId ?? ALL_CATEGORIES);
+        if (activeCategory === categoryCommand.category.id) onActiveCategoryChange(categoryCommand.category.parentId ?? ALL_CATEGORIES);
         toast('已删除分类，内容已移动到上一级', 'success');
       }
       setCategoryCommand(null);
@@ -324,6 +340,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
             <span><b>{kbs.length}</b> 知识库</span>
             <span><b>{folders.length}</b> 文件夹</span>
             <span><b>{categories.length}</b> 分类</span>
+            <span><b>{favoriteCount}</b> 收藏</span>
           </div>
         </div>
         <div className="ik-kb-gallery-actions" role="toolbar" aria-label="知识库操作">
@@ -382,11 +399,22 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
               <button
                 type="button"
                 className={`ik-kb-category-row is-root ${activeCategory === ALL_CATEGORIES ? 'is-active' : ''}`}
-                onClick={() => setActiveCategory(ALL_CATEGORIES)}
+                onClick={() => onActiveCategoryChange(ALL_CATEGORIES)}
               >
                 <span className="ik-kb-category-icon"><LibraryBig size={15} strokeWidth={2.05} /></span>
                 <span className="ik-kb-category-name">全部知识库</span>
                 <span className="ik-kb-category-count">{kbs.length}</span>
+              </button>
+            )}
+            {showFavoritesRow && (
+              <button
+                type="button"
+                className={`ik-kb-category-row is-root ${activeCategory === FAVORITES ? 'is-active' : ''}`}
+                onClick={() => onActiveCategoryChange(FAVORITES)}
+              >
+                <span className="ik-kb-category-icon"><Star size={15} strokeWidth={2.05} /></span>
+                <span className="ik-kb-category-name">收藏</span>
+                <span className="ik-kb-category-count">{favoriteCount}</span>
               </button>
             )}
             {searchedCategoryRows.map((row) => {
@@ -411,7 +439,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                   <button
                     type="button"
                     className="ik-kb-category-main"
-                    onClick={() => setActiveCategory(category.id)}
+                    onClick={() => onActiveCategoryChange(category.id)}
                     title={category.name}
                   >
                     <span className="ik-kb-category-icon"><Folder size={15} strokeWidth={2.05} /></span>
@@ -450,14 +478,14 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
               <button
                 type="button"
                 className={`ik-kb-category-row ${activeCategory === UNCATEGORIZED ? 'is-active' : ''}`}
-                onClick={() => setActiveCategory(UNCATEGORIZED)}
+                onClick={() => onActiveCategoryChange(UNCATEGORIZED)}
               >
                 <span className="ik-kb-category-icon"><Folder size={15} strokeWidth={2.05} /></span>
                 <span className="ik-kb-category-name">未分类</span>
                 <span className="ik-kb-category-count">{categoryExactCounts.get(null) ?? 0}</span>
               </button>
             )}
-            {categoryNeedle && !showAllCategoryRow && searchedCategoryRows.length === 0 && !showUncategorizedRow && (
+            {categoryNeedle && !showAllCategoryRow && !showFavoritesRow && searchedCategoryRows.length === 0 && !showUncategorizedRow && (
               <div className="ik-kb-category-empty">没有匹配的分类。</div>
             )}
           </div>
@@ -493,7 +521,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                 const currentCategoryValue = kb.categoryId ?? '';
                 return (
                   <div
-                    className="ik-kb-card"
+                    className={`ik-kb-card ${kb.favorite ? 'is-favorite' : ''}`}
                     key={kb.id}
                     role="button"
                     tabIndex={0}
@@ -507,6 +535,19 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                     }}
                   >
                     <RowActions onRename={() => renameKbAction(kb)} onDelete={() => deleteKbAction(kb)}>
+                      <button
+                        type="button"
+                        title={kb.favorite ? '取消收藏' : '收藏'}
+                        aria-label={kb.favorite ? `取消收藏 ${kb.name}` : `收藏 ${kb.name}`}
+                        aria-pressed={Boolean(kb.favorite)}
+                        className={`ik-row-action-btn ik-kb-favorite-action ${kb.favorite ? 'is-favorite' : ''}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleFavoriteAction(kb);
+                        }}
+                      >
+                        <Star size={14} strokeWidth={2.05} fill={kb.favorite ? 'currentColor' : 'none'} />
+                      </button>
                       <details className="ik-kb-move-menu" onClick={(event) => event.stopPropagation()}>
                         <summary title="移动分类" aria-label="移动分类"><Tags size={14} strokeWidth={2.15} /></summary>
                         <div className="ik-kb-move-popover">

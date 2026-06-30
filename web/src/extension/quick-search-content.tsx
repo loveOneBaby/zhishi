@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client';
 import SearchBox from '../components/SearchBox';
 import { filterEntries, suggestQueries, type SearchSuggestion } from '../search';
 import { highlightText } from '../highlight';
-import { folderPathName } from '../tree';
 import { THEMES, themeVars } from '../themes';
 import type { Entry, Folder, KbCategory, KnowledgeBase } from '../types';
 import searchCss from '../styles/search.css?raw';
@@ -44,6 +43,7 @@ declare global {
 
 const theme = THEMES.mono;
 const maxResults = 80;
+const favoriteKbLimit = 8;
 
 function sendApi<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -209,6 +209,55 @@ function DetailPane({ entry, query, loading, apiBase }: { entry: Entry | null; q
   );
 }
 
+function FavoriteKbBar({
+  kbs,
+  searchKb,
+  onSelect,
+  onClear,
+}: {
+  kbs: KnowledgeBase[];
+  searchKb: string | null;
+  onSelect: (id: string) => void;
+  onClear: () => void;
+}) {
+  const favoriteKbs = useMemo(
+    () => [...kbs]
+      .filter((kb) => Boolean(kb.favorite))
+      .sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name, 'zh-Hans-CN'))
+      .slice(0, favoriteKbLimit),
+    [kbs],
+  );
+
+  if (favoriteKbs.length === 0) return null;
+
+  return (
+    <div className="ik-qs-favorites" aria-label="收藏知识库">
+      <span className="ik-qs-fav-label">收藏</span>
+      <div className="ik-qs-fav-chips">
+        <button
+          type="button"
+          className={`ik-qs-fav-chip ${searchKb ? '' : 'is-active'}`}
+          onClick={onClear}
+          title="搜索全部知识库"
+        >
+          全部
+        </button>
+        {favoriteKbs.map((kb) => (
+          <button
+            type="button"
+            key={kb.id}
+            className={`ik-qs-fav-chip ${searchKb === kb.id ? 'is-active' : ''}`}
+            onClick={() => onSelect(kb.id)}
+            title={kb.name}
+          >
+            {kb.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function QuickSearchApp() {
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -228,6 +277,7 @@ function QuickSearchApp() {
   const [selectedLoading, setSelectedLoading] = useState(false);
   const detailSeq = useRef(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const selectedRowRef = useRef<HTMLButtonElement | null>(null);
 
   const scopedEntries = useMemo(
     () => (searchKb ? entries.filter((entry) => entry.kbId === searchKb) : entries),
@@ -301,6 +351,13 @@ function QuickSearchApp() {
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }
 
+  function handleScopeKb(id: string | null): void {
+    setSearchKb(id);
+    setKpOpen(false);
+    setQuery((current) => (current.startsWith('.') || current.startsWith('。') ? '' : current));
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
   useEffect(() => {
     const listener = (message: unknown): void => {
       if ((message as { type?: string })?.type === 'ikQuickSearchToggle') toggle();
@@ -332,6 +389,11 @@ function QuickSearchApp() {
     if (results[0]) void openEntry(results[0].id, 0);
     else setSelectedEntry(null);
   }, [query, searchKb, loaded]);
+
+  useEffect(() => {
+    if (!open) return;
+    selectedRowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [open, selected, results.length]);
 
   function handleKeyDown(event: React.KeyboardEvent): void {
     if (event.key === 'Escape') {
@@ -388,7 +450,7 @@ function QuickSearchApp() {
             kbs={kbs}
             categories={kbCategories}
             searchKb={searchKb}
-            onScopeKb={setSearchKb}
+            onScopeKb={handleScopeKb}
             inputRef={inputRef}
             kpEntries={scopedEntries}
             kpOpen={kpOpen}
@@ -402,6 +464,13 @@ function QuickSearchApp() {
           />
           <button type="button" className="ik-qs-close" onClick={close} aria-label="关闭">关闭</button>
         </div>
+
+        <FavoriteKbBar
+          kbs={kbs}
+          searchKb={searchKb}
+          onSelect={handleScopeKb}
+          onClear={() => handleScopeKb(null)}
+        />
 
         {error ? <div className="ik-qs-error">{error}</div> : null}
         {loading ? <div className="ik-qs-loading">正在连接知识库...</div> : null}
@@ -425,23 +494,16 @@ function QuickSearchApp() {
                 <div className="ik-qs-empty">{query.trim() ? `没有匹配「${query}」的知识点` : '输入关键词开始搜索'}</div>
               ) : results.map((entry, index) => {
                 const active = index === selected;
-                const path = folderPathName(folders, entry.folderId);
                 return (
                   <button
                     type="button"
                     key={entry.id}
+                    ref={active ? selectedRowRef : undefined}
                     className={`ik-result-row ${active ? 'is-active' : ''}`}
                     onMouseEnter={() => setSelected(index)}
                     onClick={() => void openEntry(entry.id, index)}
                   >
-                    <span className="ik-result-main">
-                      <span className="ik-result-title">{highlightText(entry.title, query)}</span>
-                      <span className="ik-result-summary">{highlightText(entry.summary, query)}</span>
-                    </span>
-                    <span className="ik-result-meta">
-                      <span className="ik-result-kb">{kbNameOf.get(entry.kbId) ?? entry.cat}</span>
-                      {path ? <span className="ik-result-path" title={path}>{path}</span> : null}
-                    </span>
+                    <span className="ik-result-title">{highlightText(entry.title, query)}</span>
                   </button>
                 );
               })}
@@ -491,8 +553,8 @@ function mount(): void {
       width: min(780px, calc(100vw - 30px));
       height: min(560px, calc(100vh - 30px));
       margin: 10px auto 0;
-      display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      display: flex;
+      flex-direction: column;
       gap: 8px;
       padding: 10px;
       border: 1px solid rgba(24,24,27,.16);
@@ -556,10 +618,66 @@ function mount(): void {
     .ik-searchbox-kbd,
     .ik-searchbox-divider,
     .ik-searchbox-seg { display: none; }
+    .ik-qs-favorites {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 26px;
+      overflow: hidden;
+    }
+    .ik-qs-fav-label {
+      flex: 0 0 auto;
+      color: var(--mut);
+      font-size: 10.5px;
+      font-weight: 760;
+      line-height: 1;
+    }
+    .ik-qs-fav-chips {
+      min-width: 0;
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .ik-qs-fav-chips::-webkit-scrollbar { display: none; }
+    .ik-qs-fav-chip {
+      flex: 0 0 auto;
+      max-width: 150px;
+      height: 25px;
+      padding: 0 9px;
+      overflow: hidden;
+      border: 1px solid rgba(24,24,27,.13);
+      border-radius: 999px;
+      background: rgba(255,255,255,.66);
+      color: var(--mut);
+      cursor: pointer;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 680;
+      line-height: 23px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ik-qs-fav-chip:hover {
+      color: var(--fg);
+      background: rgba(255,255,255,.9);
+    }
+    .ik-qs-fav-chip.is-active {
+      border-color: transparent;
+      background: var(--accent);
+      color: #fff;
+    }
+    .ik-qs-fav-chip.is-active:hover {
+      color: #fff;
+      background: var(--accent);
+    }
     .ik-qs-body {
+      flex: 1 1 auto;
       min-height: 0;
       display: grid;
-      grid-template-columns: minmax(260px, .78fr) minmax(0, 1.22fr);
+      grid-template-columns: minmax(320px, .9fr) minmax(0, 1.1fr);
       gap: 9px;
     }
     .ik-results-panel,
@@ -589,39 +707,29 @@ function mount(): void {
     }
     .ik-result-row {
       width: 100%;
+      display: grid;
+      align-items: center;
       border: 0;
       border-bottom: 1px solid color-mix(in srgb, var(--bd) 60%, transparent);
       text-align: left;
       font: inherit;
-      min-height: 54px;
-      height: 54px;
-      padding: 8px 12px 8px 10px;
-      grid-template-columns: minmax(0, 1fr) minmax(110px, 36%);
-      gap: 9px;
-    }
-    .ik-result-main,
-    .ik-result-title,
-    .ik-result-summary,
-    .ik-result-meta,
-    .ik-result-kb,
-    .ik-result-path { display: block; }
-    .ik-result-path {
-      max-width: 100%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: var(--mut);
-      font-size: 10.5px;
+      min-height: 46px;
+      height: auto;
+      padding: 8px 12px;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0;
     }
     .ik-result-title {
-      font-size: 12.5px;
-    }
-    .ik-result-summary {
-      font-size: 11px;
-    }
-    .ik-result-kb {
-      font-size: 10.5px;
-      padding: 2px 6px;
+      display: -webkit-box;
+      overflow: hidden;
+      color: var(--fg);
+      font-size: 13px;
+      line-height: 1.35;
+      font-weight: 760;
+      text-overflow: ellipsis;
+      white-space: normal;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
     }
     .ik-qs-detail {
       display: flex;
@@ -786,9 +894,6 @@ function mount(): void {
       .ik-result-row {
         grid-template-columns: 1fr;
         gap: 5px;
-      }
-      .ik-result-meta {
-        justify-items: start;
       }
     }
   `;

@@ -1,0 +1,84 @@
+name: Build macOS DMG
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本号，例如 1.0.1 或 v1.0.1'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS arm64
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            web/package-lock.json
+            desktop/package-lock.json
+
+      - name: Install server dependencies
+        run: npm --prefix server ci
+
+      - name: Install web dependencies
+        run: npm --prefix web ci
+
+      - name: Install desktop dependencies
+        run: npm --prefix desktop ci
+
+      - name: Sync package version for release
+        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${VERSION#v}"
+          echo "Release version: ${VERSION}"
+          npm version "${VERSION}" --no-git-tag-version --allow-same-version
+          npm --prefix desktop version "${VERSION}" --no-git-tag-version --allow-same-version
+
+      - name: Build web and server
+        run: npm run build:desktop
+
+      - name: Build DMG artifact
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        run: npm --prefix desktop run dist:dmg
+
+      - name: Upload DMG artifact
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: interview-knowledge-desktop-${{ github.sha }}
+          path: |
+            release/*.dmg
+            release/*.dmg.blockmap
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build DMG and publish release
+        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+        run: npm --prefix desktop run dist:publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

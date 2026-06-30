@@ -21,6 +21,7 @@ export interface KnowledgeBase {
   id: string;
   name: string;
   categoryId?: string | null;
+  favorite?: boolean;
   sort: number;
   createdAt?: number;
   updatedAt?: number;

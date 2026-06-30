@@ -170,14 +170,15 @@ export async function initSchema(): Promise<void> {
       updatedAt INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_kb_categories_parent ON kb_categories(parentId);
-    CREATE TABLE IF NOT EXISTS knowledge_bases (
-      id        TEXT PRIMARY KEY,
-      name      TEXT NOT NULL,
-      categoryId TEXT,
-      sort      INTEGER NOT NULL DEFAULT 0,
-      createdAt INTEGER NOT NULL,
-      updatedAt INTEGER NOT NULL
-    );
+	    CREATE TABLE IF NOT EXISTS knowledge_bases (
+	      id        TEXT PRIMARY KEY,
+	      name      TEXT NOT NULL,
+	      categoryId TEXT,
+	      favorite  INTEGER NOT NULL DEFAULT 0,
+	      sort      INTEGER NOT NULL DEFAULT 0,
+	      createdAt INTEGER NOT NULL,
+	      updatedAt INTEGER NOT NULL
+	    );
     CREATE TABLE IF NOT EXISTS folders (
       id        TEXT PRIMARY KEY,
       kbId      TEXT NOT NULL,
@@ -229,6 +230,7 @@ export async function initSchema(): Promise<void> {
 
   // 迁移旧库：补 categoryId / sort / idx / kbId / folderId 列
   await tryAlter('ALTER TABLE knowledge_bases ADD COLUMN categoryId TEXT');
+  await tryAlter('ALTER TABLE knowledge_bases ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0');
   await db.exec('UPDATE knowledge_bases SET categoryId = NULL WHERE categoryId IS NOT NULL AND categoryId NOT IN (SELECT id FROM kb_categories)');
 
   await tryAlter('ALTER TABLE entries ADD COLUMN sort INTEGER NOT NULL DEFAULT 0', async () => {
@@ -270,7 +272,15 @@ function docOf(r: EntryRow): Block[] {
 }
 
 export function rowToKb(r: KbRow): KnowledgeBase {
-  return { id: r.id, name: r.name, categoryId: r.categoryId ?? null, sort: r.sort, createdAt: r.createdAt, updatedAt: r.updatedAt };
+  return {
+    id: r.id,
+    name: r.name,
+    categoryId: r.categoryId ?? null,
+    favorite: Boolean(r.favorite),
+    sort: r.sort,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
 }
 
 export function rowToKbCategory(r: KbCategoryRow): KbCategory {

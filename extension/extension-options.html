@@ -6,19 +6,25 @@
     <link rel="stylesheet" href="extension.css" />
     <title>知识检索扩展设置</title>
   </head>
-  <body>
+  <body class="options-page">
     <main class="options-shell">
-      <section class="panel stack">
-        <div>
-          <h1>扩展设置</h1>
-          <p>配置扩展连接的知识检索后端。默认使用本机服务。</p>
+      <section class="settings-card">
+        <div class="settings-hero">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+          </div>
+          <div>
+            <h1>扩展设置</h1>
+            <p>配置悬浮搜索和侧边栏连接的知识库后端。</p>
+          </div>
         </div>
-        <form class="stack" id="settingsForm">
-          <label>
-            API 地址
+        <form class="settings-form" id="settingsForm">
+          <label class="field">
+            <span>API 地址</span>
             <input id="apiBaseInput" name="apiBase" placeholder="http://localhost:5173/api" autocomplete="off" />
           </label>
-          <div class="actions">
+          <p class="field-help">可填写站点根地址或完整 `/api` 地址；保存后刷新已打开的扩展页面。</p>
+          <div class="settings-actions">
             <button class="primary" type="submit">保存</button>
             <button id="resetDefault" type="button">恢复默认</button>
             <button id="testApi" type="button">测试连接</button>

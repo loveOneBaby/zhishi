@@ -7,10 +7,14 @@
     "node": ">=20"
   },
   "scripts": {
-    "install:all": "npm --prefix server install && npm --prefix web install",
+    "install:all": "npm --prefix server install && npm --prefix web install && npm --prefix desktop install",
     "dev:server": "npm --prefix server run dev",
     "dev:web": "npm --prefix web run dev",
     "build": "npm --prefix web run build && npm --prefix server run build",
+    "build:desktop": "npm run build",
+    "desktop": "npm run build:desktop && npm --prefix desktop start",
+    "dist:dmg": "npm run build:desktop && npm --prefix desktop run dist:dmg",
+    "dist:dmg:publish": "npm run build:desktop && npm --prefix desktop run dist:publish",
     "build:extension": "node scripts/build-extension.mjs",
     "start": "npm --prefix server run start"
   }

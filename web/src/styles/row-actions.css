@@ -65,6 +65,14 @@
 .ik-kb-card .ik-row-action-btn:hover {
   background: color-mix(in srgb, var(--fg) 7%, transparent);
 }
+.ik-kb-favorite-action.is-favorite {
+  color: color-mix(in srgb, #c8870e 88%, var(--fg));
+  background: color-mix(in srgb, #d99a18 13%, transparent);
+}
+.ik-kb-favorite-action:hover {
+  color: color-mix(in srgb, #b8790c 92%, var(--fg));
+  background: color-mix(in srgb, #d99a18 16%, transparent);
+}
 .ik-row-action-danger {
   color: color-mix(in srgb, var(--danger) 82%, var(--mut));
 }

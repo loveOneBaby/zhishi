@@ -75,6 +75,24 @@ export interface EntrySummary {
   updatedAt: number;
 }
 
+type EntrySummaryRow = Pick<EntryRow, 'id' | 'cat' | 'kbId' | 'folderId' | 'title' | 'py' | 'tags' | 'summary' | 'sort' | 'createdAt' | 'updatedAt'>;
+
+function rowToEntrySummary(r: EntrySummaryRow, kbName: string): EntrySummary {
+  return {
+    id: r.id,
+    cat: kbName || r.cat || '未分类',
+    kbId: r.kbId ?? '',
+    folderId: r.folderId ?? null,
+    title: r.title,
+    py: r.py,
+    tags: parseStoredTags(r.tags),
+    summary: r.summary,
+    sort: r.sort ?? r.createdAt,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
 let summaryCache: { data: EntrySummary[]; ts: number } | null = null;
 let summaryRefresh: Promise<EntrySummary[]> | null = null;
 
@@ -82,24 +100,8 @@ async function refreshSummaryCache(): Promise<EntrySummary[]> {
   const now = Date.now();
   const version = cacheVersion;
   const kbs = new Map((await listKbs()).map((k) => [k.id, k.name]));
-  const rows = await db.prepare('SELECT id, cat, kbId, folderId, title, py, tags, summary, sort, createdAt, updatedAt FROM entries ORDER BY sort ASC, createdAt ASC').all() as unknown as EntryRow[];
-  const summaries: EntrySummary[] = rows.map((r) => {
-    let tags: string[] = [];
-    try { tags = JSON.parse(r.tags); } catch { tags = []; }
-    return {
-      id: r.id,
-      cat: kbs.get(r.kbId ?? '') ?? '未分类',
-      kbId: r.kbId ?? '',
-      folderId: r.folderId ?? null,
-      title: r.title,
-      py: r.py,
-      tags,
-      summary: r.summary,
-      sort: r.sort ?? r.createdAt,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-    };
-  });
+  const rows = await db.prepare('SELECT id, cat, kbId, folderId, title, py, tags, summary, sort, createdAt, updatedAt FROM entries ORDER BY sort ASC, createdAt ASC').all() as unknown as EntrySummaryRow[];
+  const summaries = rows.map((r) => rowToEntrySummary(r, kbs.get(r.kbId ?? '') ?? '未分类'));
   if (version === cacheVersion) summaryCache = { data: summaries, ts: now };
   return summaries;
 }
@@ -139,6 +141,10 @@ function parseStoredTags(value: string): string[] {
   } catch {
     return [];
   }
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
 }
 
 // 写操作后清除缓存
@@ -302,28 +308,41 @@ export async function deleteEntry(id: string): Promise<boolean> {
   return Number(info.changes) > 0;
 }
 
-export async function deleteTagFromKb(kbId: string, tag: string): Promise<number> {
+export async function deleteTagFromKb(kbId: string, tag: string): Promise<{ removed: number; entries: EntrySummary[] }> {
   const target = tag.trim();
-  if (!target) return 0;
+  if (!target) return { removed: 0, entries: [] };
 
-  const rows = await db.prepare('SELECT id, tags FROM entries WHERE kbId = ?').all(kbId) as Array<Pick<EntryRow, 'id' | 'tags'>>;
+  const kbName = await kbNameOf(kbId);
+  const tagNeedle = `%${escapeLikePattern(JSON.stringify(target))}%`;
+  const rows = await db.prepare(
+    `SELECT id, cat, kbId, folderId, title, py, tags, summary, sort, createdAt, updatedAt
+     FROM entries
+     WHERE kbId = ? AND tags LIKE ? ESCAPE '\\'`
+  ).all(kbId, tagNeedle) as unknown as EntrySummaryRow[];
   const updates = rows
     .map((row) => {
       const tags = parseStoredTags(row.tags);
       const nextTags = tags.filter((item) => item !== target);
-      return { id: row.id, tags: nextTags, changed: nextTags.length !== tags.length };
+      return { row, tags: nextTags, changed: nextTags.length !== tags.length };
     })
     .filter((row) => row.changed);
 
-  if (!updates.length) return 0;
+  if (!updates.length) return { removed: 0, entries: [] };
 
   const now = Date.now();
   const stmt = db.prepare('UPDATE entries SET tags = :tags, updatedAt = :updatedAt WHERE id = :id');
   await db.tx(async () => {
-    for (const row of updates) {
-      await stmt.run({ id: row.id, tags: JSON.stringify(row.tags), updatedAt: now });
+    for (const update of updates) {
+      await stmt.run({ id: update.row.id, tags: JSON.stringify(update.tags), updatedAt: now });
     }
   });
   clearEntriesCache();
-  return updates.length;
+  return {
+    removed: updates.length,
+    entries: updates.map((update) => rowToEntrySummary({
+      ...update.row,
+      tags: JSON.stringify(update.tags),
+      updatedAt: now,
+    }, kbName)),
+  };
 }

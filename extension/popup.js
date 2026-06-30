@@ -34,7 +34,25 @@ function setStatus(message, kind = '') {
 async function refreshApiBase() {
   const items = await storageGet([API_BASE_STORAGE_KEY]);
   const base = normalizeApiBase(items[API_BASE_STORAGE_KEY]) || currentApiBase();
-  document.getElementById('apiBase').textContent = `API: ${base}`;
+  document.getElementById('apiBase').textContent = base;
+}
+
+function setShortcutText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value || '未设置';
+}
+
+async function refreshShortcuts() {
+  try {
+    if (!chrome.commands?.getAll) return;
+    const commands = await chrome.commands.getAll();
+    const byName = new Map(commands.map((command) => [command.name, command.shortcut]));
+    setShortcutText('shortcutQuickSearch', byName.get('open-quick-search') || 'Alt+K');
+    setShortcutText('shortcutKeyPoints', byName.get('open-key-points') || 'Alt+J');
+  } catch {
+    setShortcutText('shortcutQuickSearch', 'Alt+K');
+    setShortcutText('shortcutKeyPoints', 'Alt+J');
+  }
 }
 
 async function openQuickSearch() {
@@ -67,6 +85,11 @@ function openOptions() {
   window.close();
 }
 
+function openShortcutSettings() {
+  chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  window.close();
+}
+
 async function testApi() {
   const base = currentApiBase();
   setStatus('正在连接...');
@@ -80,8 +103,10 @@ async function testApi() {
 }
 
 void refreshApiBase();
+void refreshShortcuts();
 document.getElementById('openQuickSearch').addEventListener('click', openQuickSearch);
 document.getElementById('openSidePanel').addEventListener('click', openSidePanel);
 document.getElementById('openTab').addEventListener('click', openTab);
 document.getElementById('openOptions').addEventListener('click', openOptions);
+document.getElementById('openShortcutSettings').addEventListener('click', openShortcutSettings);
 document.getElementById('testApi').addEventListener('click', testApi);

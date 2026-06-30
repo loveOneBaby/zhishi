@@ -44,6 +44,9 @@ export async function renameKb(id: string, name: string): Promise<KnowledgeBase>
 export async function moveKbToCategory(id: string, categoryId?: string | null): Promise<KnowledgeBase> {
   return apiPutKey<KnowledgeBase>(`/kbs/${encodeURIComponent(id)}/category`, { categoryId }, 'kb');
 }
+export async function updateKbFavorite(id: string, favorite: boolean): Promise<KnowledgeBase> {
+  return apiPutKey<KnowledgeBase>(`/kbs/${encodeURIComponent(id)}/favorite`, { favorite }, 'kb');
+}
 export interface DeleteKbResult {
   ok: true;
   kbId: string;

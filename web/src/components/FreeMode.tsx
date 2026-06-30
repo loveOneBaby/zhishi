@@ -14,7 +14,7 @@ import CommandDialog from './CommandDialog';
 import type { SelectOption } from './SelectField';
 import { exportAllWithProgress, generateEntryDraftWithAIStream, generateEntryIllustrationWithAIStream, rewriteEntryDraftWithAIStream, commitRewriteEntryDraft, type ExportProgressEvent, type KbSuggestion } from '../api';
 import { toast } from '../toast';
-import { KbGallery } from './free/KbGallery';
+import { KbGallery, type ActiveCategory as KbGalleryCategory } from './free/KbGallery';
 import AiTaskCenter, { type AiContextCrumb, type AiQuickAction, type LiveTask } from './AiTaskCenter';
 import { ROOT_IMPORT_TARGET, orderEntries, treePanelStyle } from './free/utils';
 import { useAiLiveOutput } from './free/useAiLiveOutput';
@@ -49,8 +49,10 @@ interface Props {
   folders: Folder[];
   freeKb: string | null;
   freeFolder: string | null;
+  libraryCategory: KbGalleryCategory;
   setFreeKb: (id: string | null) => void;
   setFreeFolder: (id: string | null) => void;
+  setLibraryCategory: (category: KbGalleryCategory) => void;
   onNew: () => void;
   onCreate: (input: EntryInput) => Promise<Entry>;
   onUpdate: (id: string, input: EntryInput) => Promise<Entry>;
@@ -71,6 +73,7 @@ interface Props {
   onRenameKbCategory: (id: string, name: string) => Promise<void>;
   onDeleteKbCategory: (id: string) => Promise<void>;
   onMoveKbToCategory: (id: string, categoryId?: string | null) => Promise<void>;
+  onToggleKbFavorite: (id: string, favorite: boolean) => Promise<void>;
   onDeleteKbTag: (id: string, tag: string) => Promise<void>;
   onCreateFolder: (input: { kbId: string; parentId?: string | null; name: string }) => Promise<Folder>;
   onRenameKb: (id: string, name: string) => Promise<void>;
@@ -92,9 +95,9 @@ interface Props {
 }
 
 export default function FreeMode(props: Props): ReactNode {
-  const { entries, kbs, kbCategories, folders, freeKb, freeFolder, setFreeKb, setFreeFolder, onNew,
+  const { entries, kbs, kbCategories, folders, freeKb, freeFolder, libraryCategory, setFreeKb, setFreeFolder, setLibraryCategory, onNew,
     onCreate, onUpdate, onDelete, onFetchEntry, onImported, onGeneratedEntry, onStartKnowledgeBaseJob, onStartFolderInitJob,
-    onStartFolderEntriesJob, onStartFolderFullJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onStartAgentEditJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onDeleteKbTag, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
+    onStartFolderEntriesJob, onStartFolderFullJob, onStartAnalyzeJob, onStartAnalyzeEntryJob, onStartAgentEditJob, onCreateKb, onCreateKbCategory, onRenameKbCategory, onDeleteKbCategory, onMoveKbToCategory, onToggleKbFavorite, onDeleteKbTag, onCreateFolder, onRenameKb, onDeleteKb, onRenameFolder, onDeleteFolder, onMoveFolder, onReorderFolders, onReorderEntries,
     aiJobs, aiTaskPanelOpen, onAiTaskPanelOpenChange, onOpenAiJobResult, onCancelAiJob, onRetryAiJob, onApplyAiJobDraft, onRevertAiJobApply, onClearAiJob, onClearAiJobHistory } = props;
 
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(() => localStorage.getItem('ik_free_entry') || null);
@@ -1083,12 +1086,15 @@ export default function FreeMode(props: Props): ReactNode {
           categories={kbCategories}
           entries={entries}
           folders={folders}
+          activeCategory={libraryCategory}
+          onActiveCategoryChange={setLibraryCategory}
           entriesOfKb={entriesOfKb}
           newKb={newKb}
           createCategory={onCreateKbCategory}
           renameCategory={onRenameKbCategory}
           deleteCategory={onDeleteKbCategory}
           moveKbToCategory={onMoveKbToCategory}
+          toggleKbFavorite={onToggleKbFavorite}
           onExportAll={handleExport}
           exportProgress={exportProgress}
           onImportKnowledgeBases={importLogic.importKnowledgeBases}

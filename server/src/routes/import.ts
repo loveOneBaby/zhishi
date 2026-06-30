@@ -91,11 +91,12 @@ async function requestToImportPayload(body: unknown): Promise<ImportPayload> {
           .map((k) => (k && typeof k === 'object' ? (k as Record<string, unknown>) : null))
           .filter((k): k is Record<string, unknown> => !!k && typeof k.name === 'string')
           .map((k) => ({
-            id: typeof k.id === 'string' ? k.id : undefined,
-            name: String(k.name),
-            categoryId: cleanText(k.categoryId) ?? (Object.prototype.hasOwnProperty.call(k, 'categoryId') ? null : undefined),
-            sort: typeof k.sort === 'number' ? k.sort : 0,
-          }))
+	            id: typeof k.id === 'string' ? k.id : undefined,
+	            name: String(k.name),
+	            categoryId: cleanText(k.categoryId) ?? (Object.prototype.hasOwnProperty.call(k, 'categoryId') ? null : undefined),
+	            favorite: typeof k.favorite === 'boolean' ? k.favorite : undefined,
+	            sort: typeof k.sort === 'number' ? k.sort : 0,
+	          }))
       : undefined;
     const folders: ImportFolder[] | undefined = Array.isArray(b.folders)
       ? b.folders

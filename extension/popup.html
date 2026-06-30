@@ -9,17 +9,54 @@
   <body>
     <main class="shell">
       <section class="panel stack">
-        <div>
-          <h1>知识检索</h1>
-          <p>从扩展打开你的面试知识库。</p>
+        <div class="hero">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+          </div>
+          <div class="hero-copy">
+            <h1>知识检索</h1>
+            <p>悬浮查题，快速回看面试知识点。</p>
+          </div>
         </div>
-        <div class="meta" id="apiBase"></div>
+        <div class="meta">
+          <span>API</span>
+          <b id="apiBase">http://localhost:5173/api</b>
+        </div>
+        <div class="shortcut-card" aria-label="快捷键说明">
+          <div class="shortcut-title">
+            <span>快捷键</span>
+            <button id="openShortcutSettings" type="button">修改</button>
+          </div>
+          <div class="shortcut-row">
+            <kbd id="shortcutQuickSearch">Alt+K</kbd>
+            <span>搜索浮窗</span>
+          </div>
+          <div class="shortcut-row">
+            <kbd id="shortcutKeyPoints">Alt+J</kbd>
+            <span>关键点标签</span>
+          </div>
+          <div class="shortcut-row">
+            <kbd>.</kbd><kbd>。</kbd>
+            <span>选择知识库</span>
+          </div>
+          <div class="shortcut-row">
+            <kbd>↑</kbd><kbd>↓</kbd><kbd>Enter</kbd><kbd>Esc</kbd>
+            <span>切换 / 查看 / 关闭</span>
+          </div>
+        </div>
         <div class="actions">
-          <button class="primary" id="openQuickSearch" type="button">在当前页面搜索</button>
-          <button class="primary" id="openSidePanel" type="button">打开侧边栏</button>
-          <button id="openTab" type="button">在标签页打开</button>
-          <button id="openOptions" type="button">配置后端地址</button>
-          <button id="testApi" type="button">测试连接</button>
+          <button class="primary" id="openQuickSearch" type="button">
+            <span>在当前页面搜索</span>
+            <small>Alt+K</small>
+          </button>
+          <div class="secondary-actions">
+            <button id="openSidePanel" type="button">侧边栏</button>
+            <button id="openTab" type="button">标签页</button>
+          </div>
+          <div class="utility-actions">
+            <button id="openOptions" type="button">配置后端</button>
+            <button id="testApi" type="button">测试连接</button>
+          </div>
         </div>
         <p class="status" id="status"></p>
       </section>

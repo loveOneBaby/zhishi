@@ -1,0 +1,78 @@
+{
+  "name": "interview-knowledge-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "面试知识快速检索 - 桌面端 Electron 壳",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist:dmg": "electron-builder --mac dmg",
+    "dist:publish": "electron-builder --mac --publish always"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.interviewknowledge.search",
+    "productName": "知识检索",
+    "asar": false,
+    "directories": {
+      "output": "../release"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "loveOneBaby",
+        "repo": "zhishi",
+        "releaseType": "release"
+      }
+    ],
+    "files": [
+      "main.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../server/package.json",
+        "to": "server/package.json"
+      },
+      {
+        "from": "../server/dist",
+        "to": "server/dist"
+      },
+      {
+        "from": "../server/node_modules",
+        "to": "server/node_modules"
+      },
+      {
+        "from": "../web/dist",
+        "to": "web/dist"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "artifactName": "${name}-${version}-${arch}-mac.${ext}",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "artifactName": "${name}-${version}.${ext}"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

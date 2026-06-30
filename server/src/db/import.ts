@@ -1,5 +1,5 @@
 import { db, deriveDoc, kbNameOf } from './client.js';
-import { listKbs, resolveKbId, defaultKbId, ensureKb, updateKbCategory } from './kb.js';
+import { listKbs, resolveKbId, defaultKbId, ensureKb, updateKbCategory, updateKbFavorite } from './kb.js';
 import { listKbCategories } from './kb-category.js';
 import { listFolders, getFolder, ensureFolder } from './folder.js';
 import { listEntries, deriveSummary, clearEntriesCache } from './entry.js';
@@ -26,7 +26,7 @@ export interface ImportEntry {
 }
 
 export interface ImportKbCategory { id?: string; parentId?: string | null; name: string; sort?: number; }
-export interface ImportKb { id?: string; name: string; categoryId?: string | null; sort?: number; }
+export interface ImportKb { id?: string; name: string; categoryId?: string | null; favorite?: boolean; sort?: number; }
 export interface ImportFolder { id?: string; kbId?: string; parentId?: string | null; name: string; sort?: number; }
 export interface ImportPayload {
   kbCategories?: ImportKbCategory[];
@@ -185,7 +185,7 @@ export async function importEntries(payload: ImportPayload, replace: boolean): P
     `UPDATE entries SET cat=:cat, kbId=:kbId, folderId=:folderId, title=:title, py=:py, tags=:tags, summary=:summary, idx=:idx, updatedAt=:updatedAt WHERE id=:id`
   );
   const insertKb = db.prepare(
-    'INSERT OR IGNORE INTO knowledge_bases (id, name, categoryId, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT OR IGNORE INTO knowledge_bases (id, name, categoryId, favorite, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
   );
   const insertCategory = db.prepare(
     'INSERT OR IGNORE INTO kb_categories (id, parentId, name, sort, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)'
@@ -228,12 +228,14 @@ export async function importEntries(payload: ImportPayload, replace: boolean): P
     for (const k of payload.kbs ?? []) {
       const now = Date.now();
       const categoryId = k.categoryId ? (categoryIdMap.get(k.categoryId) ?? k.categoryId) : null;
+      const favorite = k.favorite ? 1 : 0;
       if (k.id) {
-        await insertKb.run(k.id, k.name, categoryId, k.sort ?? 0, now, now);
+        await insertKb.run(k.id, k.name, categoryId, favorite, k.sort ?? 0, now, now);
         kbIdMap.set(k.id, k.id);
       } else {
         const kb = await ensureKb(k.name);
         if (categoryId) await updateKbCategory(kb.id, categoryId);
+        if (k.favorite !== undefined) await updateKbFavorite(kb.id, Boolean(k.favorite));
         kbIdMap.set(k.name, kb.id);
       }
     }

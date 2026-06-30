@@ -19,6 +19,7 @@ import {
   renameKb,
   deleteKb,
   deleteKbTag,
+  updateKbFavorite,
   createFolder,
   renameFolder,
   deleteFolder,
@@ -46,6 +47,12 @@ import TopBar, { type AppMode } from './components/TopBar';
 import SearchBox from './components/SearchBox';
 import SearchMode from './components/SearchMode';
 import FreeMode from './components/FreeMode';
+import {
+  ALL_CATEGORIES as KB_GALLERY_ALL,
+  FAVORITES as KB_GALLERY_FAVORITES,
+  UNCATEGORIZED as KB_GALLERY_UNCATEGORIZED,
+  type ActiveCategory as KbGalleryCategory,
+} from './components/free/KbGallery';
 import DetailModal from './components/DetailModal';
 import AskModal from './components/AskModal';
 import EntryEditor from './components/EntryEditor';
@@ -56,30 +63,116 @@ import Toaster from './components/Toaster';
 import { toast } from './toast';
 
 // 轻量哈希路由:把「模块 + 视图 + 当前知识库/文件夹 + 知识点 ID」写进 URL,刷新/前进后退/分享都能恢复
-// free 模式:#/library(知识库画廊) | #/kb/{kbId} | #/kb/{kbId}/folder/{folderId}
+// free 模式:#/library(知识库画廊) | #/library/favorites | #/library/uncategorized | #/library/category/{categoryId}
+//          #/kb/{kbId} | #/kb/{kbId}/folder/{folderId},进入知识库后用 ?category=... 保留来源分类
 // search 模式:#/search/list | #/search/canvas | #/search/list/{entryId} | #/search/canvas/{entryId}
-type Route = { mode: AppMode; viewType: 'list' | 'canvas'; kbId: string | null; folderId: string | null; entryId: string | null };
+type Route = {
+  mode: AppMode;
+  viewType: 'list' | 'canvas';
+  kbId: string | null;
+  folderId: string | null;
+  entryId: string | null;
+  libraryCategory: KbGalleryCategory;
+};
+
+function decodeHashPart(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function libraryCategoryFromValue(value: string | null | undefined): KbGalleryCategory {
+  if (!value || value === 'all') return KB_GALLERY_ALL;
+  if (value === 'favorites') return KB_GALLERY_FAVORITES;
+  if (value === 'uncategorized') return KB_GALLERY_UNCATEGORIZED;
+  return value;
+}
+
+function libraryCategoryFromPath(parts: string[]): KbGalleryCategory {
+  const segment = parts[1] ?? '';
+  if (segment === 'favorites') return KB_GALLERY_FAVORITES;
+  if (segment === 'uncategorized') return KB_GALLERY_UNCATEGORIZED;
+  if (segment === 'category' && parts[2]) return parts[2];
+  return KB_GALLERY_ALL;
+}
+
+function libraryCategoryToValue(category: KbGalleryCategory): string | null {
+  if (category === KB_GALLERY_ALL) return null;
+  if (category === KB_GALLERY_FAVORITES) return 'favorites';
+  if (category === KB_GALLERY_UNCATEGORIZED) return 'uncategorized';
+  return category;
+}
+
+function libraryCategoryToHash(category: KbGalleryCategory): string {
+  if (category === KB_GALLERY_ALL) return '#/library';
+  if (category === KB_GALLERY_FAVORITES) return '#/library/favorites';
+  if (category === KB_GALLERY_UNCATEGORIZED) return '#/library/uncategorized';
+  return `#/library/category/${encodeURIComponent(category)}`;
+}
+
+function withLibraryCategoryQuery(hash: string, category: KbGalleryCategory): string {
+  const value = libraryCategoryToValue(category);
+  return value ? `${hash}?category=${encodeURIComponent(value)}` : hash;
+}
+
+function isBuiltinLibraryCategory(category: KbGalleryCategory): boolean {
+  return category === KB_GALLERY_ALL || category === KB_GALLERY_FAVORITES || category === KB_GALLERY_UNCATEGORIZED;
+}
+
 function parseRoute(): Route {
   const raw = window.location.hash.replace(/^#\/?/, '');
-  const parts = raw.split('/').filter(Boolean);
+  const [pathRaw, queryRaw = ''] = raw.split('?');
+  const parts = pathRaw.split('/').filter(Boolean).map(decodeHashPart);
+  const params = new URLSearchParams(queryRaw);
+  const categoryFromQuery = params.has('category') ? libraryCategoryFromValue(params.get('category')) : null;
   const seg = parts[0] ?? '';
-  if (seg === 'library' || seg === 'free' || seg === 'kb') {
+  if (seg === 'library') {
+    return {
+      mode: 'free',
+      viewType: 'list',
+      kbId: null,
+      folderId: null,
+      entryId: null,
+      libraryCategory: categoryFromQuery ?? libraryCategoryFromPath(parts),
+    };
+  }
+  if (seg === 'free') {
+    const second = parts[1] ?? '';
+    if (second && second !== 'favorites' && second !== 'uncategorized' && second !== 'category') {
+      const folderId = parts[2] === 'folder' && parts[3] ? parts[3] : null;
+      return { mode: 'free', viewType: 'list', kbId: second, folderId, entryId: null, libraryCategory: categoryFromQuery ?? KB_GALLERY_ALL };
+    }
+    return {
+      mode: 'free',
+      viewType: 'list',
+      kbId: null,
+      folderId: null,
+      entryId: null,
+      libraryCategory: categoryFromQuery ?? libraryCategoryFromPath(parts),
+    };
+  }
+  if (seg === 'kb') {
     const kbId = parts[1] ?? null;
     const folderId = parts[2] === 'folder' && parts[3] ? parts[3] : null;
-    return { mode: 'free', viewType: 'list', kbId, folderId, entryId: null };
+    return { mode: 'free', viewType: 'list', kbId, folderId, entryId: null, libraryCategory: categoryFromQuery ?? KB_GALLERY_ALL };
   }
   // search 模式：#/search/list | #/search/canvas | #/search/list/{entryId} | #/search/canvas/{entryId}
   const viewType = parts[1] === 'canvas' ? 'canvas' : 'list';
   const entryId = (parts[2] && parts[2] !== 'list' && parts[2] !== 'canvas') ? parts[2] : null;
-  return { mode: 'search', viewType, kbId: null, folderId: null, entryId };
+  return { mode: 'search', viewType, kbId: null, folderId: null, entryId, libraryCategory: categoryFromQuery ?? KB_GALLERY_ALL };
 }
 function routeToHash(route: Route): string {
   if (route.mode === 'search') {
     const base = `#/search/${route.viewType}`;
     return route.entryId ? `${base}/${route.entryId}` : base;
   }
-  if (route.kbId) return route.folderId ? `#/kb/${route.kbId}/folder/${route.folderId}` : `#/kb/${route.kbId}`;
-  return '#/library';
+  if (route.kbId) {
+    const base = route.folderId ? `#/kb/${route.kbId}/folder/${route.folderId}` : `#/kb/${route.kbId}`;
+    return withLibraryCategoryQuery(base, route.libraryCategory);
+  }
+  return libraryCategoryToHash(route.libraryCategory);
 }
 
 function itemVersionKey(item: { id: string; updatedAt?: number; sort?: number }): string {
@@ -232,6 +325,7 @@ export default function App() {
   // 优先从 URL 路由恢复（刷新/分享可还原），URL 无值时回退 localStorage（记忆上次位置）
   const [freeKb, setFreeKb] = useState<string | null>(() => initialRoute.kbId ?? localStorage.getItem('ik_free_kb') ?? null);
   const [freeFolder, setFreeFolder] = useState<string | null>(() => initialRoute.folderId ?? localStorage.getItem('ik_free_folder') ?? null);
+  const [libraryCategory, setLibraryCategory] = useState<KbGalleryCategory>(() => initialRoute.libraryCategory);
 
   const [openId, setOpenId] = useState<string | null>(() => initialRoute.entryId ?? null);
   const [fullEntry, setFullEntry] = useState<Entry | null>(null);
@@ -247,6 +341,7 @@ export default function App() {
   const deletedFolderIdsRef = useRef<Set<string>>(new Set());
   const deletedEntryIdsRef = useRef<Set<string>>(new Set());
   const kbCategoryMoveVersionRef = useRef<Map<string, number>>(new Map());
+  const kbFavoriteVersionRef = useRef<Map<string, number>>(new Map());
   const lastCommandTapRef = useRef(0);
   // 浏览器前进/后退触发的一次性标记:本轮 URL 同步用 replaceState(避免把回退后的地址又压成新历史)
   // 初始为 true,让首次挂载的 URL 规整也走 replace(不污染历史)
@@ -254,14 +349,14 @@ export default function App() {
 
   // 路由同步:状态变化 → 写 URL(用户操作走 pushState,可前进后退;回退触发的那次走 replaceState)
   useEffect(() => {
-    const target = routeToHash({ mode, viewType, kbId: freeKb, folderId: freeFolder, entryId: mode === 'search' ? openId : null });
+    const target = routeToHash({ mode, viewType, kbId: freeKb, folderId: freeFolder, entryId: mode === 'search' ? openId : null, libraryCategory });
     const skip = skipPushRef.current;
     skipPushRef.current = false;
     if (window.location.hash !== target) {
       if (skip) window.history.replaceState(null, '', target);
       else window.history.pushState(null, '', target);
     }
-  }, [mode, viewType, freeKb, freeFolder, openId]);
+  }, [mode, viewType, freeKb, freeFolder, openId, libraryCategory]);
   useEffect(() => {
     const onPop = (): void => {
       const next = parseRoute();
@@ -270,6 +365,7 @@ export default function App() {
       setViewType(next.viewType);
       setFreeKb(next.kbId);
       setFreeFolder(next.folderId);
+      setLibraryCategory(next.libraryCategory);
       if (next.mode === 'search') setOpenId(next.entryId);
     };
     window.addEventListener('hashchange', onPop);
@@ -445,6 +541,13 @@ export default function App() {
       setFreeFolder(null);
     }
   }, [folders, freeFolder, freeKb, kbs, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (!isBuiltinLibraryCategory(libraryCategory) && !kbCategories.some((category) => category.id === libraryCategory)) {
+      setLibraryCategory(KB_GALLERY_ALL);
+    }
+  }, [kbCategories, libraryCategory, loaded]);
 
   useEffect(() => {
     if (freeKb) localStorage.setItem('ik_free_kb', freeKb);
@@ -796,7 +899,8 @@ export default function App() {
 
   const handleDeleteKbTag = useCallback(async (kbId: string, tag: string): Promise<void> => {
     const result = await deleteKbTag(kbId, tag);
-    setEntries(result.entries);
+    const updatedById = new Map(result.entries.map((entry) => [entry.id, entry]));
+    setEntries((prev) => prev.map((entry) => updatedById.get(entry.id) ?? entry));
   }, []);
 
   const handleCreateKbCategory = useCallback(async (input: { name: string; parentId?: string | null }): Promise<KbCategory> => {
@@ -833,6 +937,28 @@ export default function App() {
       }
     } catch (err) {
       if (previous && kbCategoryMoveVersionRef.current.get(id) === version) {
+        setKbs((prev) => prev.map((item) => (item.id === id ? previous : item)));
+      }
+      throw err;
+    }
+  }, [kbs]);
+
+  const handleToggleKbFavorite = useCallback(async (id: string, favorite: boolean): Promise<void> => {
+    const previous = kbs.find((item) => item.id === id) ?? null;
+    const version = (kbFavoriteVersionRef.current.get(id) ?? 0) + 1;
+    kbFavoriteVersionRef.current.set(id, version);
+    if (previous) {
+      setKbs((prev) => prev.map((item) => (
+        item.id === id ? { ...item, favorite, updatedAt: Date.now() } : item
+      )));
+    }
+    try {
+      const kb = await updateKbFavorite(id, favorite);
+      if (kbFavoriteVersionRef.current.get(id) === version) {
+        setKbs((prev) => prev.map((item) => (item.id === id ? kb : item)));
+      }
+    } catch (err) {
+      if (previous && kbFavoriteVersionRef.current.get(id) === version) {
         setKbs((prev) => prev.map((item) => (item.id === id ? previous : item)));
       }
       throw err;
@@ -1001,8 +1127,10 @@ export default function App() {
                   folders={folders}
                   freeKb={freeKb}
                   freeFolder={freeFolder}
+                  libraryCategory={libraryCategory}
                   setFreeKb={setFreeKb}
                   setFreeFolder={setFreeFolder}
+                  setLibraryCategory={setLibraryCategory}
                   onNew={() => setFormOpen(true)}
                   onCreate={handleCreate}
                   onUpdate={handleUpdate}
@@ -1023,6 +1151,7 @@ export default function App() {
                   onRenameKbCategory={handleRenameKbCategory}
                   onDeleteKbCategory={handleDeleteKbCategory}
                   onMoveKbToCategory={handleMoveKbToCategory}
+                  onToggleKbFavorite={handleToggleKbFavorite}
                   onCreateFolder={handleCreateFolder}
                   onRenameKb={handleRenameKb}
                   onDeleteKb={handleDeleteKb}
