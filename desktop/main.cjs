@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, screen, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
@@ -21,6 +22,7 @@ let manualUpdateCheck = false;
 let updateDownloadInProgress = false;
 let availableUpdateInfo = null;
 let downloadedUpdateInfo = null;
+let downloadedUpdateFile = null;
 let updateState = {
   status: 'idle',
   currentVersion: app.getVersion(),
@@ -355,6 +357,126 @@ function formatReleaseNotes(notes) {
   return String(notes);
 }
 
+function runChecked(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    encoding: 'utf8',
+    ...options,
+  });
+  if (result.status !== 0) {
+    const output = [result.stderr, result.stdout].filter(Boolean).join('\n').trim();
+    throw new Error(`${path.basename(command)} 执行失败: ${output || `exit ${result.status}`}`);
+  }
+  return result.stdout || '';
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function currentAppBundlePath() {
+  let current = app.getPath('exe');
+  while (current && current !== path.dirname(current)) {
+    if (current.endsWith('.app')) return current;
+    current = path.dirname(current);
+  }
+  return path.join('/Applications', `${app.name}.app`);
+}
+
+function findAppBundle(dir) {
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const entries = fs.readdirSync(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory() && entry.name.endsWith('.app')) return fullPath;
+      if (entry.isDirectory() && !entry.name.startsWith('.') && stack.length < 50) stack.push(fullPath);
+    }
+  }
+  return null;
+}
+
+function readBundleIdentifier(appBundlePath) {
+  return runChecked('/usr/libexec/PlistBuddy', [
+    '-c',
+    'Print :CFBundleIdentifier',
+    path.join(appBundlePath, 'Contents', 'Info.plist'),
+  ]).trim();
+}
+
+function prepareManualMacUpdate(zipPath) {
+  if (!zipPath || !fs.existsSync(zipPath)) {
+    throw new Error('没有找到已下载的更新文件，请重新下载更新。');
+  }
+
+  const stageRoot = fs.mkdtempSync(path.join(app.getPath('userData'), 'pending-update-'));
+  const unpackDir = path.join(stageRoot, 'unpacked');
+  fs.mkdirSync(unpackDir, { recursive: true });
+
+  runChecked('/usr/bin/ditto', ['-x', '-k', zipPath, unpackDir]);
+  const newAppPath = findAppBundle(unpackDir);
+  if (!newAppPath) {
+    throw new Error('更新包里没有找到 app。');
+  }
+
+  const bundleId = readBundleIdentifier(newAppPath);
+  if (bundleId !== 'com.interviewknowledge.search') {
+    throw new Error(`更新包应用标识不匹配: ${bundleId}`);
+  }
+
+  runChecked('/usr/bin/codesign', ['--verify', '--deep', '--strict', newAppPath]);
+
+  const targetAppPath = currentAppBundlePath();
+  const scriptPath = path.join(stageRoot, 'install-update.sh');
+  const logPath = path.join(app.getPath('userData'), 'last-update-install.log');
+  const backupPath = `${targetAppPath}.previous`;
+  const executablePath = path.join(targetAppPath, 'Contents', 'MacOS', app.name);
+  const script = `#!/bin/zsh
+set -euo pipefail
+exec >> ${shellQuote(logPath)} 2>&1
+echo "[$(/bin/date)] install update start"
+target=${shellQuote(targetAppPath)}
+new_app=${shellQuote(newAppPath)}
+backup=${shellQuote(backupPath)}
+stage=${shellQuote(stageRoot)}
+executable=${shellQuote(executablePath)}
+
+for i in {1..90}; do
+  if ! /usr/bin/pgrep -f "$executable" >/dev/null 2>&1; then
+    break
+  fi
+  /bin/sleep 1
+done
+
+if /usr/bin/pgrep -f "$executable" >/dev/null 2>&1; then
+  echo "app still running, abort"
+  exit 1
+fi
+
+/bin/rm -rf "$backup"
+if [ -d "$target" ]; then
+  /bin/mv "$target" "$backup"
+fi
+
+if /usr/bin/ditto "$new_app" "$target"; then
+  /usr/bin/xattr -dr com.apple.quarantine "$target" >/dev/null 2>&1 || true
+  /usr/bin/open "$target"
+  /bin/rm -rf "$backup" "$stage"
+  echo "[$(/bin/date)] install update done"
+else
+  echo "copy failed, restoring previous app"
+  /bin/rm -rf "$target"
+  if [ -d "$backup" ]; then
+    /bin/mv "$backup" "$target"
+    /usr/bin/open "$target"
+  fi
+  exit 1
+fi
+`;
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+  return { scriptPath, targetAppPath };
+}
+
 function showUpdaterError(err) {
   const message = err instanceof Error ? err.message : String(err);
   const releaseAccessFailed = /404|not found|releases\.atom|latest-mac\.yml/i.test(message);
@@ -388,6 +510,7 @@ function showUpdaterError(err) {
   });
   manualUpdateCheck = false;
   updateDownloadInProgress = false;
+  downloadedUpdateFile = null;
   setUpdateState({});
 }
 
@@ -403,6 +526,7 @@ function setupAutoUpdater() {
   autoUpdater.on('update-available', (info) => {
     availableUpdateInfo = info;
     downloadedUpdateInfo = null;
+    downloadedUpdateFile = null;
     manualUpdateCheck = false;
     const notes = formatReleaseNotes(info.releaseNotes).trim();
     setUpdateState({
@@ -424,6 +548,7 @@ function setupAutoUpdater() {
   autoUpdater.on('update-not-available', () => {
     availableUpdateInfo = null;
     downloadedUpdateInfo = null;
+    downloadedUpdateFile = null;
     setUpdateState({
       status: 'not-available',
       version: null,
@@ -452,6 +577,7 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-downloaded', (info) => {
     downloadedUpdateInfo = info;
+    downloadedUpdateFile = info.downloadedFile || null;
     updateDownloadInProgress = false;
     setUpdateState({
       status: 'downloaded',
@@ -540,8 +666,39 @@ async function installDownloadedUpdateFromUi() {
     status: 'installing',
     message: '正在退出并后台安装更新...',
   });
-  isQuitting = true;
-  autoUpdater.quitAndInstall();
+
+  try {
+    if (process.platform === 'darwin') {
+      const { scriptPath } = prepareManualMacUpdate(downloadedUpdateFile);
+      const child = spawn('/bin/zsh', [scriptPath], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+      isQuitting = true;
+      app.quit();
+    } else {
+      isQuitting = true;
+      autoUpdater.quitAndInstall();
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setUpdateState({
+      status: 'error',
+      message: `安装更新失败：${message}`,
+    });
+    void showMessageBox({
+      type: 'error',
+      title: '安装更新失败',
+      message: '无法自动安装更新',
+      detail: `${message}\n\n可以先手动下载最新 DMG 安装。`,
+      buttons: ['打开下载页', '知道了'],
+      defaultId: 0,
+      cancelId: 1,
+    }).then((installResult) => {
+      if (installResult.response === 0) void shell.openExternal(releasePageUrl);
+    });
+  }
   return updateState;
 }
 
