@@ -17,6 +17,7 @@
     "appId": "com.interviewknowledge.search",
     "productName": "知识检索",
     "asar": false,
+    "afterPack": "scripts/after-pack.cjs",
     "directories": {
       "output": "../release"
     },
