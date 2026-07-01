@@ -39,69 +39,45 @@ func renderBackground(width: CGFloat, height: CGFloat, scale: CGFloat, outputURL
 
   let backgroundRect = NSRect(origin: .zero, size: pixelSize)
   let gradient = NSGradient(colors: [
-    NSColor(calibratedRed: 0.96, green: 0.99, blue: 0.98, alpha: 1),
-    NSColor(calibratedRed: 0.89, green: 0.96, blue: 0.98, alpha: 1),
-    NSColor(calibratedRed: 0.88, green: 0.91, blue: 1.0, alpha: 1),
+    NSColor(calibratedRed: 0.99, green: 1.0, blue: 1.0, alpha: 1),
+    NSColor(calibratedRed: 0.93, green: 0.97, blue: 1.0, alpha: 1),
+    NSColor(calibratedRed: 0.83, green: 0.87, blue: 1.0, alpha: 1),
   ])!
   gradient.draw(in: backgroundRect, angle: 315)
 
-  let glowLeft = NSBezierPath(ovalIn: rect(-120, 190, 300, 230))
-  NSColor(calibratedRed: 0.22, green: 0.82, blue: 0.72, alpha: 0.17).setFill()
+  let glowLeft = NSBezierPath(ovalIn: rect(-120, 186, 260, 220))
+  NSColor.white.withAlphaComponent(0.36).setFill()
   glowLeft.fill()
 
-  let glowRight = NSBezierPath(ovalIn: rect(430, 42, 250, 230))
-  NSColor(calibratedRed: 0.42, green: 0.53, blue: 1.0, alpha: 0.16).setFill()
+  let glowRight = NSBezierPath(ovalIn: rect(414, 18, 280, 260))
+  NSColor(calibratedRed: 0.68, green: 0.75, blue: 1.0, alpha: 0.18).setFill()
   glowRight.fill()
-
-  let panel = NSBezierPath(roundedRect: rect(36, 38, 548, 280), xRadius: scaled(28), yRadius: scaled(28))
-  NSColor.white.withAlphaComponent(0.40).setFill()
-  panel.fill()
-  NSColor.white.withAlphaComponent(0.62).setStroke()
-  panel.lineWidth = scaled(1.1)
-  panel.stroke()
 
   let paragraph = NSMutableParagraphStyle()
   paragraph.alignment = .center
 
-  ("知识检索 · Apple 芯片 Mac 专用安装包" as NSString).draw(
-    in: rect(70, 292, 480, 22),
-    withAttributes: [
-      .font: NSFont.systemFont(ofSize: scaled(12), weight: .semibold),
-      .foregroundColor: NSColor(calibratedRed: 0.28, green: 0.43, blue: 0.56, alpha: 0.70),
-      .paragraphStyle: paragraph,
-    ]
-  )
+  let arrowCircle = NSBezierPath(ovalIn: rect(288, 102, 44, 44))
+  NSColor(calibratedRed: 0.42, green: 0.50, blue: 0.78, alpha: 0.76).setFill()
+  arrowCircle.fill()
 
-  ("双击安装知识检索" as NSString).draw(
-    in: rect(70, 258, 480, 30),
-    withAttributes: [
-      .font: NSFont.systemFont(ofSize: scaled(24), weight: .bold),
-      .foregroundColor: NSColor(calibratedRed: 0.05, green: 0.18, blue: 0.20, alpha: 0.92),
-      .paragraphStyle: paragraph,
-    ]
-  )
+  let arrow = NSBezierPath()
+  arrow.move(to: point(310, 113))
+  arrow.line(to: point(310, 134))
+  arrow.move(to: point(310, 134))
+  arrow.line(to: point(300, 124))
+  arrow.move(to: point(310, 134))
+  arrow.line(to: point(320, 124))
+  arrow.lineWidth = scaled(4)
+  arrow.lineCapStyle = .round
+  arrow.lineJoinStyle = .round
+  NSColor.white.withAlphaComponent(0.94).setStroke()
+  arrow.stroke()
 
-  ("首次启动会复制到 Applications，并重新打开" as NSString).draw(
-    in: rect(70, 234, 480, 20),
+  ("双击 安装知识检索" as NSString).draw(
+    in: rect(70, 50, 480, 38),
     withAttributes: [
-      .font: NSFont.systemFont(ofSize: scaled(12), weight: .medium),
-      .foregroundColor: NSColor(calibratedRed: 0.30, green: 0.38, blue: 0.48, alpha: 0.72),
-      .paragraphStyle: paragraph,
-    ]
-  )
-
-  let hintPill = NSBezierPath(roundedRect: rect(194, 18, 232, 30), xRadius: scaled(15), yRadius: scaled(15))
-  NSColor.white.withAlphaComponent(0.48).setFill()
-  hintPill.fill()
-  NSColor(calibratedRed: 0.29, green: 0.54, blue: 0.55, alpha: 0.18).setStroke()
-  hintPill.lineWidth = scaled(1)
-  hintPill.stroke()
-
-  ("双击图标即可自动安装" as NSString).draw(
-    in: rect(194, 24, 232, 18),
-    withAttributes: [
-      .font: NSFont.systemFont(ofSize: scaled(12), weight: .semibold),
-      .foregroundColor: NSColor(calibratedRed: 0.20, green: 0.34, blue: 0.42, alpha: 0.72),
+      .font: NSFont.systemFont(ofSize: scaled(25), weight: .medium),
+      .foregroundColor: NSColor(calibratedRed: 0.36, green: 0.43, blue: 0.66, alpha: 0.78),
       .paragraphStyle: paragraph,
     ]
   )

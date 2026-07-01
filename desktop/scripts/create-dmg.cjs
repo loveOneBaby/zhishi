@@ -86,7 +86,7 @@ on run argv
     set text size of viewOptions to 14
     set background picture of viewOptions to POSIX file backgroundPath as alias
 
-    set position of item applicationName of volumeFolder to {310, 174}
+    set position of item applicationName of volumeFolder to {310, 136}
     update volumeFolder without registering applications
     delay 1
     close volumeWindow
