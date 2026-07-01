@@ -12,6 +12,8 @@ const serverDistDir = path.join(serverDir, 'dist');
 const webDistDir = path.join(rootDir, 'web', 'dist');
 const portStart = Number(process.env.IK_DESKTOP_PORT || 51730);
 const releasePageUrl = 'https://github.com/loveOneBaby/zhishi/releases/latest';
+const appId = 'com.interviewknowledge.search';
+const appDisplayName = '知识检索';
 
 let localServer = null;
 let mainWindow = null;
@@ -69,6 +71,42 @@ function setUpdateState(patch) {
   updateState = normalizedUpdateState({ ...updateState, ...patch });
   broadcastUpdateState();
   return updateState;
+}
+
+function stableUserDataPath() {
+  if (process.platform === 'darwin') {
+    return path.join(app.getPath('appData'), appId);
+  }
+  return app.getPath('userData');
+}
+
+function legacyUserDataPaths() {
+  if (process.platform !== 'darwin') return [];
+  const appData = app.getPath('appData');
+  const mojibakeName = Buffer.from(appDisplayName, 'utf8').toString('latin1');
+  return [
+    path.join(appData, appDisplayName),
+    path.join(appData, mojibakeName),
+  ];
+}
+
+function migrateLegacyDatabase(dataDir) {
+  const targetDb = path.join(dataDir, 'knowledge.db');
+  if (fs.existsSync(targetDb)) return;
+
+  for (const legacyDir of legacyUserDataPaths()) {
+    const legacyDataDir = path.join(legacyDir, 'data');
+    const legacyDb = path.join(legacyDataDir, 'knowledge.db');
+    if (!fs.existsSync(legacyDb) || path.resolve(legacyDb) === path.resolve(targetDb)) continue;
+
+    fs.mkdirSync(dataDir, { recursive: true });
+    for (const filename of ['knowledge.db', 'knowledge.db-wal', 'knowledge.db-shm']) {
+      const source = path.join(legacyDataDir, filename);
+      if (fs.existsSync(source)) fs.copyFileSync(source, path.join(dataDir, filename));
+    }
+    console.log(`[desktop] 已迁移本地数据库: ${legacyDb} -> ${targetDb}`);
+    return;
+  }
 }
 
 function installToApplicationsIfNeeded() {
@@ -159,6 +197,7 @@ async function startLocalServer() {
   if (app.isPackaged && !process.env.DB_PATH && !process.env.TURSO_DATABASE_URL) {
     const dataDir = path.join(app.getPath('userData'), 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    migrateLegacyDatabase(dataDir);
     process.env.DB_PATH = path.join(dataDir, 'knowledge.db');
   }
 
@@ -808,7 +847,10 @@ async function createWindow() {
   await mainWindow.loadURL(url);
 }
 
-app.setName('知识检索');
+app.setName(appDisplayName);
+if (process.platform === 'darwin') {
+  app.setPath('userData', stableUserDataPath());
+}
 
 app.whenReady().then(async () => {
   if (!installToApplicationsIfNeeded()) return;
