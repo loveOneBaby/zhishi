@@ -16,10 +16,22 @@ import { initSchema } from './db/client.js';
 import { ensureEntryVersionTable } from './db/entry-version.js';
 import { ensureAiJobsTable } from './db/ai.js';
 import { migrateKbFolder } from './db/seed.js';
+import { clearEntriesCache } from './db/entry.js';
+import { clearKbsCache } from './db/kb.js';
+import { clearFoldersCache } from './db/folder.js';
+import { clearKbCategoriesCache } from './db/kb-category.js';
 
 export async function initDb(): Promise<void> {
   await initSchema();
   await ensureEntryVersionTable();
   await ensureAiJobsTable();
   await migrateKbFolder();
+}
+
+// 清空所有内存缓存（知识点 / 知识库 / 文件夹 / 分类）。热切换数据库后调用，避免读到上一份库的残留数据。
+export function invalidateAllCaches(): void {
+  clearEntriesCache();
+  clearKbsCache();
+  clearFoldersCache();
+  clearKbCategoriesCache();
 }

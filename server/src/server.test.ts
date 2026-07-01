@@ -14,6 +14,7 @@ import { coerceGeneratedDraft, coerceGeneratedFolderTreeDraft, coerceGeneratedKb
 import { ensureTags } from './ai/render.js';
 import { coerceAgentEditPlan } from './ai-agent-edit.js';
 import { normalizeFolderDraftPathForTarget } from './services/kb-draft-writer.js';
+import { resolveDbConfig, dbInfoFor, type DbConfig } from './db/client.js';
 import type { Entry } from './types.js';
 
 const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -659,4 +660,67 @@ test('knowledgeTreeToImportPayload: 导入知识点图片和内容图片', () =>
   assert.equal(entry.nodes?.[0].title, '图片');
   assert.ok(entry.nodes?.[0].content.includes('![Agent 总览](https://cdn.example.com/agent-flow.png)'));
   assert.ok(entry.nodes?.[1].content.includes('![执行流程](data:image/png;base64,abc123)'));
+});
+
+// ───────────── 数据库连接配置解析（resolveDbConfig / dbInfoFor）─────────────
+
+test('resolveDbConfig: 用户配置文件优先于环境变量', () => {
+  const cfg: DbConfig = { mode: 'remote', url: 'libsql://mine.turso.io', token: 'tok' };
+  const env = { TURSO_DATABASE_URL: 'libsql://env.turso.io', TURSO_AUTH_TOKEN: 'envtok' };
+  const r = resolveDbConfig(cfg, env);
+  assert.equal(r.source, 'user');
+  assert.equal(r.url, 'libsql://mine.turso.io');
+  assert.equal(r.token, 'tok');
+});
+
+test('resolveDbConfig: 无用户配置时回退到 TURSO_DATABASE_URL', () => {
+  const env = { TURSO_DATABASE_URL: 'libsql://env.turso.io', TURSO_AUTH_TOKEN: 'envtok' };
+  const r = resolveDbConfig(null, env);
+  assert.equal(r.source, 'env');
+  assert.equal(r.url, 'libsql://env.turso.io');
+  assert.equal(r.token, 'envtok');
+});
+
+test('resolveDbConfig: 仅 DB_PATH 时按 file: 解析', () => {
+  const r = resolveDbConfig(null, { DB_PATH: '/tmp/x.db' });
+  assert.equal(r.source, 'env');
+  assert.equal(r.url, 'file:/tmp/x.db');
+  assert.equal(r.token, undefined);
+});
+
+test('resolveDbConfig: 用户本地文件路径优先于环境变量', () => {
+  const cfg: DbConfig = { mode: 'local', dbPath: '/data/mine.db' };
+  const env = { TURSO_DATABASE_URL: 'libsql://env.turso.io' };
+  const r = resolveDbConfig(cfg, env);
+  assert.equal(r.source, 'user');
+  assert.equal(r.url, 'file:/data/mine.db');
+});
+
+test('resolveDbConfig: 都缺省时落到默认本地文件', () => {
+  const r = resolveDbConfig(null, {}, '/default/knowledge.db');
+  assert.equal(r.source, 'default');
+  assert.equal(r.url, 'file:/default/knowledge.db');
+});
+
+test('resolveDbConfig: 空字符串视为缺省', () => {
+  // 用户配置里 url/dbPath 为空 → 不应误当作命中，应继续回退
+  const r = resolveDbConfig({ url: '', dbPath: '' }, { DB_PATH: '/tmp/x.db' });
+  assert.equal(r.source, 'env');
+  assert.equal(r.url, 'file:/tmp/x.db');
+});
+
+test('dbInfoFor: 本地文件取文件名、不泄露路径细节', () => {
+  const info = dbInfoFor({ url: 'file:/var/lib/zhishi/knowledge.db', source: 'user' });
+  assert.equal(info.mode, 'local');
+  assert.equal(info.label, 'knowledge.db');
+  assert.equal(info.source, 'user');
+});
+
+test('dbInfoFor: 远程取 host、不回显 token', () => {
+  const info = dbInfoFor({ url: 'libsql://zhishi-abc.turso.io', token: 'secret', source: 'env' });
+  assert.equal(info.mode, 'remote');
+  assert.equal(info.label, 'zhishi-abc.turso.io');
+  assert.equal(info.source, 'env');
+  // 返回结构里不应携带 token
+  assert.equal('token' in info, false);
 });

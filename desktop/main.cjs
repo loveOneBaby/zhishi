@@ -200,6 +200,8 @@ async function startLocalServer() {
     migrateLegacyDatabase(dataDir);
     process.env.DB_PATH = path.join(dataDir, 'knowledge.db');
   }
+  // 用户在「设置」里保存的 DB 连接配置落到 userData（稳定可写、不进 .app 包），优先级高于 DB_PATH/TURSO_*。
+  process.env.IK_DB_CONFIG_PATH = path.join(app.getPath('userData'), 'db-config.json');
 
   process.chdir(serverDir);
 

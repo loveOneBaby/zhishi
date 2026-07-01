@@ -59,6 +59,7 @@ import EntryEditor from './components/EntryEditor';
 import AiTaskCenter from './components/AiTaskCenter';
 import LoginPanel from './components/LoginPanel';
 import ShortcutMenu from './components/ShortcutMenu';
+import SettingsMenu from './components/SettingsMenu';
 import DesktopUpdateButton from './components/DesktopUpdateButton';
 import Toaster from './components/Toaster';
 import { toast } from './toast';
@@ -1074,6 +1075,7 @@ export default function App() {
           <>
             <DesktopUpdateButton />
             <ShortcutMenu doubleCommandEnabled={doubleCommandEnabled} onDoubleCommandEnabled={setDoubleCommandShortcut} />
+            <SettingsMenu auth={auth} onDbSwitched={() => window.location.reload()} />
             {auth.authRequired && auth.authenticated && mode === 'free' && (
               <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-sm ik-topbar-logout" onClick={handleLogout}>
                 <span className="ik-btn-leading-icon"><LogOut size={15} strokeWidth={2.25} /></span>退出登录

@@ -1,0 +1,180 @@
+/* 设置 popover：齿轮 trigger + 两段式表单（服务器数据库 / 前端数据源）。
+   视觉与 .ik-shortcuts-* 保持同款（圆角 16、ik-pop 动画、theme vars）。 */
+.ik-settings {
+  position: relative;
+}
+.ik-settings-trigger {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 7%, var(--panel));
+  color: color-mix(in srgb, var(--mut) 74%, var(--fg));
+  cursor: pointer;
+  outline: none;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+.ik-settings-trigger:hover,
+.ik-settings-trigger.is-open {
+  background: color-mix(in srgb, var(--fg) 13%, var(--panel));
+  color: var(--fg);
+}
+.ik-settings-trigger:active {
+  transform: translateY(1px);
+}
+.ik-settings-trigger:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.ik-settings-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 380px;
+  max-height: min(72vh, 640px);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--bd);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 98%, var(--bg));
+  box-shadow: 0 18px 48px rgba(0,0,0,.16);
+  animation: ik-pop .13s ease;
+}
+.ik-settings-section {
+  padding: 8px 6px;
+}
+.ik-settings-section + .ik-settings-section {
+  border-top: 1px solid color-mix(in srgb, var(--bd) 70%, transparent);
+  margin-top: 2px;
+}
+.ik-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px 8px;
+  color: var(--mut);
+  font-size: 12px;
+  font-weight: 720;
+}
+.ik-settings-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg);
+}
+.ik-settings-head b {
+  font-size: 11px;
+  font-weight: 680;
+  color: var(--mut);
+}
+.ik-settings-head b.is-custom {
+  color: var(--accent);
+}
+.ik-settings-current {
+  margin: 0 8px 8px;
+  color: var(--mut);
+  font-size: 12px;
+  word-break: break-all;
+}
+.ik-settings-hint {
+  margin: 6px 8px;
+  color: var(--mut);
+  font-size: 12px;
+}
+.ik-settings-seg {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0 8px 8px;
+  padding: 3px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.ik-settings-field {
+  display: grid;
+  gap: 4px;
+  margin: 0 8px 8px;
+}
+.ik-settings-field > span {
+  color: var(--mut);
+  font-size: 11px;
+  font-weight: 640;
+}
+.ik-settings-field input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 80%, var(--panel));
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.ik-settings-field input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--bd));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.ik-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 8px;
+}
+.ik-settings-actions .ik-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ik-settings-note {
+  margin: 8px 8px 0;
+  color: var(--mut);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.ik-settings-note code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  font-size: 10.5px;
+}
+.ik-settings-status {
+  margin: 8px 8px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+}
+.ik-settings-status.is-error {
+  color: var(--danger);
+}
+.ik-settings-status.is-ok {
+  color: color-mix(in srgb, var(--accent) 80%, var(--fg));
+}
+
+/* 毛玻璃主题：与 shortcuts 一致地加质感。 */
+.ik-theme-glass .ik-settings-trigger {
+  border-color: rgba(255,255,255,.62);
+  background: rgba(255,255,255,.5);
+  color: color-mix(in srgb, var(--mut) 78%, var(--fg));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.55);
+}
+.ik-theme-glass .ik-settings-trigger:hover,
+.ik-theme-glass .ik-settings-trigger.is-open {
+  border-color: rgba(105,120,148,.2);
+  background: rgba(255,255,255,.72);
+  color: var(--fg);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.65), 0 8px 20px rgba(43,55,83,.08);
+}
+.ik-theme-glass .ik-settings-menu {
+  background: var(--glass-panel, rgba(255,255,255,.78));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}

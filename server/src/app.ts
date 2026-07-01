@@ -11,6 +11,7 @@ import { registerFolderRoutes } from './routes/folder.js';
 import { registerEntryRoutes } from './routes/entry.js';
 import { registerImportRoutes } from './routes/import.js';
 import { registerAssetRoutes } from './routes/asset.js';
+import { registerConfigRoutes } from './routes/config.js';
 import { requireAuth } from './auth.js';
 import { rateLimit } from './rateLimit.js';
 
@@ -23,26 +24,42 @@ export function asyncHandler(fn: (req: Request, res: Response, next: NextFunctio
 
 // 安全响应头:不引 helmet,按需设置关键头。
 // 应用大量内联样式,严格 CSP 需大改,暂不设(已用 nosniff / frame / referrer 兜底)。
+// IK_ALLOW_REMOTE_API=true 时放开 connect-src 并加 CORS:让前端可在「设置」里指向远程后端。
+// 默认关闭,保持同源锁紧;启用后写操作仍需 Bearer/cookie 鉴权,不引入越权风险。
+const allowRemoteApi = /^(1|true|yes|on)$/i.test(String(process.env.IK_ALLOW_REMOTE_API ?? '').trim());
+
 function securityHeaders(req: Request, res: Response, next: NextFunction): void {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   // CSP:禁止内联脚本与外部脚本(构建产物仅 /assets/*.js),内联样式因应用大量使用而放开。
-  // img 允许站内、https 外链、data/blob;connect 仅同源(全部接口走 /api);worker 允许 blob(BlockNote 贴图)。
+  // img 允许站内、https 外链、data/blob;connect 默认仅同源(全部接口走 /api),远程后端模式放开 http/https;worker 允许 blob(BlockNote 贴图)。
+  const connectSrc = allowRemoteApi ? "'self' https: http:" : "'self'";
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
     "img-src 'self' https: data: blob:",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "script-src 'self'",
-    "connect-src 'self'",
+    `connect-src ${connectSrc}`,
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
     "frame-ancestors 'none'",
     "form-action 'self'",
   ].join('; '));
+  const origin = req.headers.origin;
+  if (allowRemoteApi && typeof origin === 'string') {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    if (req.method === 'OPTIONS' && req.path.startsWith('/api')) {
+      res.sendStatus(204);
+      return;
+    }
+  }
   if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
@@ -117,6 +134,7 @@ export function createApp() {
   registerEntryRoutes(api);
   registerImportRoutes(api);
   registerAssetRoutes(api);
+  registerConfigRoutes(api);
 
   app.use('/api', api);
 

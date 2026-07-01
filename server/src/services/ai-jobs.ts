@@ -102,6 +102,22 @@ const jobPersistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const jobPersistChains = new Map<string, Promise<void>>();
 const discardedJobIds = new Set<string>();
 
+// 中断并清空所有在途 / 排队 / 持久化定时器。热切换数据库前调用，避免旧任务把数据写到新库；
+// 切换后由 initAiJobs() 重新从新库水合任务表。旧库里残留的 running 状态会在下次启动被 markInterruptedAiJobs 清理。
+export function teardownAiJobs(): void {
+  for (const controller of runningControllers.values()) {
+    try { controller.abort(); } catch { /* ignore */ }
+  }
+  for (const timer of jobPersistTimers.values()) clearTimeout(timer);
+  runningControllers.clear();
+  jobPersistTimers.clear();
+  jobPersistChains.clear();
+  queuedJobIds.clear();
+  discardedJobIds.clear();
+  aiJobs.clear();
+  queuePumpScheduled = false;
+}
+
 function trimJobOutput(value: string): string {
   return value.length > MAX_JOB_OUTPUT ? value.slice(-MAX_JOB_OUTPUT) : value;
 }
