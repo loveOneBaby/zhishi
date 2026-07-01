@@ -8,8 +8,8 @@
     "start": "electron .",
     "icons": "node scripts/generate-icons.cjs",
     "dmg:background": "swift scripts/generate-dmg-background.swift",
-    "dist:dmg": "electron-builder --mac dmg --publish never",
-    "dist:publish": "electron-builder --mac --publish always"
+    "dist:dmg": "npm run dmg:background && electron-builder --mac dir --publish never && node scripts/create-dmg.cjs",
+    "dist:publish": "electron-builder --mac zip --publish always && npm run dmg:background && node scripts/create-dmg.cjs"
   },
   "devDependencies": {
     "electron": "^31.7.7",

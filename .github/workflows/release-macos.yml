@@ -77,8 +77,22 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Build DMG and publish release
+      - name: Build zip, custom DMG and publish release metadata
         if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
         run: npm --prefix desktop run dist:publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload custom DMG to release
+        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            RELEASE_TAG="v${VERSION#v}"
+          else
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          fi
+          gh release upload "${RELEASE_TAG}" release/*.dmg release/*.dmg.blockmap --clobber --repo "${GITHUB_REPOSITORY}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
