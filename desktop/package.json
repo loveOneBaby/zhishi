@@ -77,17 +77,17 @@
     "dmg": {
       "artifactName": "${name}-${version}.${ext}",
       "title": "双击安装知识检索 ${version}",
-      "backgroundColor": "#f4fbf8",
-      "iconSize": 128,
+      "background": "assets/dmg-background.png",
+      "iconSize": 112,
       "iconTextSize": 14,
       "window": {
-        "width": 440,
-        "height": 300
+        "width": 620,
+        "height": 360
       },
       "contents": [
         {
-          "x": 220,
-          "y": 130,
+          "x": 310,
+          "y": 174,
           "type": "file"
         }
       ]
