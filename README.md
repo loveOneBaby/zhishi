@@ -77,7 +77,7 @@ npm start            # 启动后端，同时托管前端，访问 http://localho
 
 ## 桌面端
 
-项目已支持 Electron 桌面端。桌面端会启动一个仅监听本机的本地服务，再加载打包后的前端页面。开发模式默认继续使用 `server/data/knowledge.db`；安装后的桌面应用默认写入 macOS 应用数据目录，也可以通过 `DB_PATH` 或 Turso 环境变量接入同一份知识库数据。
+项目已支持 Electron 桌面端。桌面端会启动一个仅监听本机的本地服务，再加载打包后的前端页面。开发模式默认继续使用 `server/data/knowledge.db`；安装后的桌面应用默认写入 macOS 应用数据目录，也可以通过 `DB_PATH` 或 Turso 环境变量接入同一份知识库数据。还可在应用内「⚙ 设置 → 服务器数据库」直接切换到自己的 Turso 远程库或本地文件（写入 `userData/db-config.json`，热切换，详见「连接配置」一节）。
 
 首次使用先安装依赖：
 
@@ -171,6 +171,30 @@ npm start
 - 本地首次启动会在 `server/data/` 下创建库文件；远程首次启动会自动把 `server/src/seed-data/` 内置知识库播种到空库。
 
 详见 `server/.env.example` 与下文「部署到 Render + Turso」。
+
+## 连接配置（数据库 / 后端地址）
+
+页面右上角「⚙ 设置」提供两类连接配置，桌面端与 Web 端通用：
+
+- **服务器数据库**（管理员）：配置本服务实际使用的数据库。
+  - 模式可选「本地文件」（填 `knowledge.db` 的绝对或相对 `server/` 的路径）或「远程 libSQL」（填 `libsql://<db>.turso.io` + token）。
+  - 保存后服务**进程内热切换**：先 `SELECT 1` 探活目标库，成功才关旧连接、建新连接、重建 schema、按需播种内置知识库、重置 AI 任务、清空并预热缓存；失败则旧库不变并回 400 + 可读原因。
+  - 配置写入文件优先级最高（高于 `TURSO_DATABASE_URL` / `DB_PATH` 环境变量）；「恢复默认」清空文件即回退到环境变量。桌面端落到 `userData/db-config.json`，服务端落到 `server/data/db-config.json`（路径可用 `IK_DB_CONFIG_PATH` 覆盖）。
+  - 桌面端本地服务默认 `ALLOW_UNAUTHENTICATED_ADMIN=true`，可直接配置；Web 端需先登录管理员令牌。
+- **前端数据源**（所有用户）：配置前端从哪个后端取数据，仿浏览器扩展的「配置后端地址」。
+  - 留空 = 同源 `/api`；填 `https://your-service.onrender.com/api` 即直连该后端（保存后刷新生效）。
+  - 远程后端需要登录时一并填登录 token（前端改用 `Authorization: Bearer`，不再依赖同源 cookie）。
+  - 指向**跨域**后端时，目标服务需启用 CORS；本服务设 `IK_ALLOW_REMOTE_API=true` 会同时放开 `connect-src` 与 CORS（默认关闭，保持同源锁紧）。
+  - 设置后前端直连该后端，**本服务的数据库配置不再影响显示**。
+
+> 桌面端通常用「服务器数据库」切到自己的 Turso 远程库即可（本地服务代理，前端仍同源，无需 CORS）。仅当你想把前端 UI 指向另一台后端时才用「前端数据源」。
+
+### 配置相关 API
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/config` | 当前鉴权态 + 数据库连接信息（mode/label/source，不含 token） |
+| POST | `/api/config/db` | 热切换数据库，body `{mode?,url?,token?,dbPath?}` 或 `{clear:true}`；默认需管理员登录 |
 
 ## 部署到 Render + Turso（免费、数据持久）
 

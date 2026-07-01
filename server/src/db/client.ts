@@ -17,35 +17,82 @@ loadEnvFile();
 
 // ───────────────────────── 连接 ─────────────────────────
 // 统一用 @libsql/client：本地场景 file:./data/knowledge.db（离线、可直接读现有库文件），
-// 远程场景 libsql://<db>.turso.io + TURSO_AUTH_TOKEN。由环境变量按场景切换。
+// 远程场景 libsql://<db>.turso.io + TURSO_AUTH_TOKEN。
+// 连接来源优先级：用户在 UI 保存的配置文件 > 环境变量(TURSO_DATABASE_URL/DB_PATH) > 默认本地文件。
 // 注意：不 import 主入口 '@libsql/client'（它会预加载原生 libsql 二进制，在无该二进制的线上环境会崩）；
 // 远程走 '@libsql/client/http'（纯 HTTP，不加载原生），仅本地 file: 模式才动态加载原生 '@libsql/client/sqlite3'。
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DEFAULT_FILE = path.join(DATA_DIR, 'knowledge.db');
 
-function resolveDbUrl(): string {
-  if (process.env.TURSO_DATABASE_URL) return process.env.TURSO_DATABASE_URL;
-  if (process.env.DB_PATH) return 'file:' + process.env.DB_PATH; // 兼容旧 DB_PATH
-  return 'file:' + DEFAULT_FILE;
-}
-const DB_URL = resolveDbUrl();
-const DEFAULT_DB_MAX_CONCURRENCY = DB_URL.startsWith('file:') ? 1 : 4;
-const DB_MAX_CONCURRENCY = Math.max(
-  1,
-  Math.min(24, Number(process.env.DB_MAX_CONCURRENCY ?? DEFAULT_DB_MAX_CONCURRENCY) || DEFAULT_DB_MAX_CONCURRENCY),
-);
+// 用户在 UI 里保存的 DB 配置（优先级最高，高于环境变量）。路径优先 IK_DB_CONFIG_PATH（桌面端指向 userData），
+// 否则 server/data/db-config.json。null/不存在表示未覆盖，回退到环境变量。mode 仅作展示，不参与解析。
+export interface DbConfig { mode?: 'local' | 'remote'; url?: string; token?: string; dbPath?: string }
 
-// 本地 file: 模式需要目录存在（远程无文件）
-if (DB_URL.startsWith('file:') && !fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-let client: Client;
-if (DB_URL.startsWith('file:')) {
-  // 本地 file:：按需加载原生 libsql（仅本地开发触发；远程部署走 HTTP 不加载原生）
-  const { createClient: createSqlite3Client } = await import('@libsql/client/sqlite3');
-  client = createSqlite3Client({ url: DB_URL });
-} else {
-  client = createHttpClient({ url: DB_URL, authToken: process.env.TURSO_AUTH_TOKEN });
+export function dbConfigFilePath(): string {
+  return process.env.IK_DB_CONFIG_PATH || path.join(DATA_DIR, 'db-config.json');
 }
+
+export function readDbConfigFile(): DbConfig | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(dbConfigFilePath(), 'utf8')) as DbConfig;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch { return null; }
+}
+
+function writeDbConfigFile(cfg: DbConfig | null): void {
+  const file = dbConfigFilePath();
+  if (!cfg || !Object.keys(cfg).length) {
+    try { fs.unlinkSync(file); } catch { /* 不存在则忽略 */ }
+    return;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+}
+
+export interface ResolvedDb { url: string; token?: string; source: 'user' | 'env' | 'default' }
+
+// 纯函数：按优先级解析连接来源（用户配置 > 环境变量 > 默认）。抽出便于单测，无副作用。
+export function resolveDbConfig(cfg: DbConfig | null, env: NodeJS.ProcessEnv, defaultFile = DEFAULT_FILE): ResolvedDb {
+  if (cfg?.url) return { url: cfg.url, token: cfg.token, source: 'user' };
+  if (cfg?.dbPath) return { url: 'file:' + cfg.dbPath, source: 'user' };
+  if (env.TURSO_DATABASE_URL) return { url: env.TURSO_DATABASE_URL, token: env.TURSO_AUTH_TOKEN, source: 'env' };
+  if (env.DB_PATH) return { url: 'file:' + env.DB_PATH, source: 'env' }; // 兼容旧 DB_PATH
+  return { url: 'file:' + defaultFile, source: 'default' };
+}
+
+// 解析当前应使用的数据库连接：用户配置文件 > 环境变量 > 默认本地文件。
+function resolveDb(): ResolvedDb {
+  return resolveDbConfig(readDbConfigFile(), process.env);
+}
+
+function defaultMaxConcurrency(url: string): number {
+  return url.startsWith('file:') ? 1 : 4;
+}
+function resolveMaxConcurrency(url: string): number {
+  return Math.max(1, Math.min(24, Number(process.env.DB_MAX_CONCURRENCY ?? defaultMaxConcurrency(url)) || defaultMaxConcurrency(url)));
+}
+
+// 创建底层 libSQL client：file: 动态加载原生 sqlite3，远程走 HTTP（不加载原生二进制）。
+async function createClientFor(url: string, token?: string): Promise<Client> {
+  if (url.startsWith('file:')) {
+    const { createClient: createSqlite3Client } = await import('@libsql/client/sqlite3');
+    return createSqlite3Client({ url });
+  }
+  return createHttpClient({ url, authToken: token });
+}
+
+function ensureFileDir(url: string): void {
+  if (!url.startsWith('file:')) return;
+  const dir = path.dirname(url.replace(/^file:/, ''));
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+// 首次启动：解析 + 建目录 + 建 client（与原行为一致）。client/resolved/dbMaxConcurrency 为可重赋值的模块状态，
+// 供 reconfigureDb() 在进程内热切换。
+let resolved: ResolvedDb = resolveDb();
+ensureFileDir(resolved.url);
+let client: Client = await createClientFor(resolved.url, resolved.token);
+let dbMaxConcurrency: number = resolveMaxConcurrency(resolved.url);
 
 // ───────────────────────── 异步 shim ─────────────────────────
 // 用 libSQL client 实现，对外保留原 node:sqlite 的 db.prepare(sql).get/.all/.run + db.exec 调用形状（返回 Promise）。
@@ -75,9 +122,11 @@ interface AdapterCore {
 
 let activeDbOps = 0;
 const dbWaitQueue: Array<() => void> = [];
+// 热切换期间置 true：新 ops 入队等待，避免命中正在被替换的 client。
+let reconfiguring = false;
 
 async function withDbSlot<T>(fn: () => Promise<T>): Promise<T> {
-  if (activeDbOps >= DB_MAX_CONCURRENCY || dbWaitQueue.length > 0) {
+  if (reconfiguring || activeDbOps >= dbMaxConcurrency || dbWaitQueue.length > 0) {
     await new Promise<void>((resolve) => dbWaitQueue.push(resolve));
   }
   activeDbOps += 1;
@@ -85,7 +134,8 @@ async function withDbSlot<T>(fn: () => Promise<T>): Promise<T> {
     return await fn();
   } finally {
     activeDbOps -= 1;
-    dbWaitQueue.shift()?.();
+    // 切换期间不释放队列：被阻塞的 op 必须等切换完成（reconfigureDb 末尾统一释放首个，其余由各 op 的 finally 顺序释放）。
+    if (!reconfiguring) dbWaitQueue.shift()?.();
   }
 }
 
@@ -145,6 +195,84 @@ export const db: Db = {
     });
   },
 };
+
+// ───────────────────────── 热切换 ─────────────────────────
+// 在进程内切换数据库连接：先建候选 client 并 SELECT 1 探活，成功才落盘 + 排空在途 op + 关旧 client + 交换。
+// 失败则丢弃候选、旧状态不变、抛错给调用方（API 返回错误，DB 不变）。
+// 调用方在交换成功后需自行重跑 initDb / seedBuiltins / 清缓存 / 重置 AI 任务（见 routes/config.ts）。
+export async function reconfigureDb(cfg: DbConfig | null): Promise<ResolvedDb> {
+  // 1. 计算候选连接。clear（cfg 为 null 或既无 url 也无 dbPath）→ 删配置文件后回退到环境变量/默认。
+  const clearing = !cfg || (!cfg.url && !cfg.dbPath);
+  let candidate: ResolvedDb;
+  if (clearing) {
+    writeDbConfigFile(null);
+    candidate = resolveDb();
+  } else if (cfg!.url) {
+    const url = String(cfg!.url).trim();
+    if (!/^(libsql|https?):\/\//i.test(url)) throw new Error('远程地址需为 libsql:// 或 http(s):// 开头');
+    candidate = { url, token: cfg!.token?.trim() || undefined, source: 'user' };
+  } else {
+    const dbPath = String(cfg!.dbPath!).trim();
+    if (!dbPath) throw new Error('本地数据库文件路径不能为空');
+    candidate = { url: 'file:' + dbPath, source: 'user' };
+  }
+
+  // 2. 建候选 client + 探活（不关旧 client，失败可丢弃候选、旧状态不变）。
+  ensureFileDir(candidate.url);
+  const probe = await createClientFor(candidate.url, candidate.token);
+  try {
+    await probe.execute('SELECT 1');
+  } catch (e) {
+    try { await probe.close(); } catch { /* ignore */ }
+    throw new Error(`无法连接到目标数据库：${(e as Error).message}`);
+  }
+
+  // 3. 落盘用户配置（clear 分支已在上面删除；本地 file: 存 dbPath，远程存 url+token）。
+  if (!clearing) {
+    const isFile = candidate.url.startsWith('file:');
+    writeDbConfigFile({
+      mode: isFile ? 'local' : 'remote',
+      url: isFile ? undefined : candidate.url,
+      token: isFile ? undefined : candidate.token,
+      dbPath: isFile ? candidate.url.replace(/^file:/, '') : undefined,
+    });
+  }
+
+  // 4. 排他：置 reconfiguring，等在途 op 排空（其 finally 因 reconfiguring=true 不会释放队列）。
+  reconfiguring = true;
+  try {
+    while (activeDbOps > 0) await new Promise((r) => setTimeout(r, 5));
+    // 5. 关旧 client，交换为新。
+    const old = client;
+    client = probe;
+    resolved = candidate;
+    dbMaxConcurrency = resolveMaxConcurrency(candidate.url);
+    try { await old.close(); } catch { /* ignore */ }
+  } finally {
+    reconfiguring = false;
+  }
+  // 释放切换期间入队的首个 op（后续 op 由各自 finally 顺序释放）。
+  dbWaitQueue.shift()?.();
+  return resolved;
+}
+
+export interface DbInfo { mode: 'local' | 'remote'; label: string; source: 'user' | 'env' | 'default' }
+
+// 纯函数：由已解析连接推导可显示信息（不泄露 token）。抽出便于单测。
+export function dbInfoFor(r: ResolvedDb): DbInfo {
+  if (r.url.startsWith('file:')) {
+    const file = r.url.replace(/^file:/, '');
+    return { mode: 'local', label: path.basename(file) || file, source: r.source };
+  }
+  let label = r.url;
+  try { label = new URL(r.url).host; } catch { /* 保留原值 */ }
+  return { mode: 'remote', label, source: r.source };
+}
+
+// 当前连接的可显示信息（不泄露 token）。供 /api/config 给管理员查看。
+export function getDbInfo(): DbInfo {
+  return dbInfoFor(resolved);
+}
 
 // ───────────────────────── 建表 / 迁移 ─────────────────────────
 

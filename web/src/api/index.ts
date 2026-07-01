@@ -10,3 +10,4 @@ export * from './assets';
 export * from './ask';
 export * from './auth';
 export * from './bootstrap';
+export * from './config';

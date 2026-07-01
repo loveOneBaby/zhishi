@@ -20,18 +20,22 @@ export function normalizeApiBase(value: string): string {
 }
 
 export function getApiBase(): string {
-  if (isExtensionRuntime()) {
-    try {
-      const saved = window.localStorage.getItem(API_BASE_STORAGE_KEY);
-      const normalized = saved ? normalizeApiBase(saved) : '';
-      if (normalized) return normalized;
-    } catch { /* ignore */ }
-    return DEFAULT_EXTENSION_API_BASE;
-  }
+  // 优先用户在「设置」里保存的自定义后端地址（Web / 桌面端 / 扩展共用同一 localStorage key）。
+  try {
+    const saved = window.localStorage.getItem(API_BASE_STORAGE_KEY);
+    const normalized = saved ? normalizeApiBase(saved) : '';
+    if (normalized) return normalized;
+  } catch { /* ignore */ }
+  if (isExtensionRuntime()) return DEFAULT_EXTENSION_API_BASE;
   return '/api';
 }
 
 export const BASE = getApiBase();
+
+// 是否走自定义后端（跨域）。同源 /api 仍由服务端 httpOnly cookie 鉴权；自定义后端改用 Bearer token。
+export function usingCustomBase(): boolean {
+  return isExtensionRuntime() || BASE !== '/api';
+}
 
 const CLIENT_SLOW_API_MS = 100;
 const CLIENT_LARGE_API_BYTES = 100 * 1024;
@@ -56,7 +60,8 @@ function logApiMetric(method: string, path: string, res: Response, durationMs: n
 
 function withApiAuth(init: RequestInit = {}): RequestInit {
   const headers = new Headers(init.headers);
-  if (isExtensionRuntime() && !headers.has('Authorization')) {
+  // 自定义后端（跨域 / 扩展）无法靠同源 cookie，改用 localStorage 里的 Bearer token。
+  if (usingCustomBase() && !headers.has('Authorization')) {
     try {
       const token = window.localStorage.getItem(API_TOKEN_STORAGE_KEY)?.trim();
       if (token) headers.set('Authorization', `Bearer ${token}`);

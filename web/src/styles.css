@@ -3,6 +3,7 @@
    responsive 最后（@media 同特异性覆盖靠源序）；row-actions 内两条规则原序同文件。 */
 @import './styles/base.css';
 @import './styles/topbar.css';
+@import './styles/settings.css';
 @import './styles/modal.css';
 @import './styles/theme.css';
 @import './styles/search.css';
