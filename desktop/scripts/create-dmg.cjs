@@ -32,6 +32,7 @@ function run(command, args, options = {}) {
   });
 
   if (result.status !== 0) {
+    if (options.allowFailure) return result;
     const detail = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
     throw new Error(`${command} ${args.join(' ')} failed${detail ? `\n${detail}` : ''}`);
   }
@@ -39,10 +40,25 @@ function run(command, args, options = {}) {
   return result.stdout || '';
 }
 
+function sleep(seconds) {
+  spawnSync('sleep', [String(seconds)], { stdio: 'ignore' });
+}
+
+function detachVolume(mountPoint) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const args = attempt >= 3 ? ['detach', '-force', mountPoint] : ['detach', mountPoint];
+    const result = run('hdiutil', args, { capture: true, allowFailure: true });
+    if (result.status === 0 || !fs.existsSync(mountPoint)) return;
+    sleep(1);
+  }
+
+  run('hdiutil', ['detach', '-force', mountPoint]);
+}
+
 function detachIfMounted() {
   const mountPoint = path.join('/Volumes', volumeName);
   if (fs.existsSync(mountPoint)) {
-    run('hdiutil', ['detach', mountPoint], { capture: true });
+    detachVolume(mountPoint);
   }
 }
 
@@ -153,7 +169,7 @@ function main() {
     }
     run('osascript', ['-e', appleScriptForFinderLayout(), mountPoint, appName, mountedBackground]);
     run('sync', []);
-    run('hdiutil', ['detach', mountPoint]);
+    detachVolume(mountPoint);
 
     run('hdiutil', [
       'convert',
