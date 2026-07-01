@@ -14,6 +14,7 @@ const appPath = path.join(releaseDir, 'mac-arm64', appName);
 const outputDmg = path.join(releaseDir, `${pkg.name}-${pkg.version}.dmg`);
 const outputBlockmap = `${outputDmg}.blockmap`;
 const backgroundPath = path.join(desktopDir, 'assets', 'dmg-background.png');
+const retinaBackgroundPath = path.join(desktopDir, 'assets', 'dmg-background@2x.png');
 const iconPath = path.join(desktopDir, 'assets', 'icon.icns');
 const appBuilderBin = path.join(
   desktopDir,
@@ -105,6 +106,9 @@ function main() {
   if (!fs.existsSync(backgroundPath)) {
     throw new Error(`Missing DMG background: ${backgroundPath}`);
   }
+  if (!fs.existsSync(retinaBackgroundPath)) {
+    throw new Error(`Missing DMG retina background: ${retinaBackgroundPath}`);
+  }
   if (!fs.existsSync(appBuilderBin)) {
     throw new Error(`Missing app-builder binary: ${appBuilderBin}`);
   }
@@ -117,11 +121,19 @@ function main() {
   const stageDir = path.join(tmpRoot, 'stage');
   const backgroundDir = path.join(stageDir, '.background');
   const writableDmg = path.join(tmpRoot, 'writable.dmg');
+  const preparedBackground = path.join(tmpRoot, 'background.tiff');
 
   try {
     fs.mkdirSync(backgroundDir, { recursive: true });
+    run('tiffutil', [
+      '-cathidpicheck',
+      backgroundPath,
+      retinaBackgroundPath,
+      '-out',
+      preparedBackground,
+    ]);
     fs.cpSync(appPath, path.join(stageDir, appName), { recursive: true, verbatimSymlinks: true });
-    fs.copyFileSync(backgroundPath, path.join(backgroundDir, 'background.png'));
+    fs.copyFileSync(preparedBackground, path.join(backgroundDir, 'background.tiff'));
     if (fs.existsSync(iconPath)) {
       fs.copyFileSync(iconPath, path.join(stageDir, '.VolumeIcon.icns'));
     }
@@ -162,7 +174,7 @@ function main() {
       throw new Error(`Unable to find mounted DMG volume in hdiutil output:\n${attachOutput}`);
     }
 
-    const mountedBackground = path.join(mountPoint, '.background', 'background.png');
+    const mountedBackground = path.join(mountPoint, '.background', 'background.tiff');
     run('chflags', ['hidden', path.join(mountPoint, '.background')]);
     if (fs.existsSync('/usr/bin/SetFile') && fs.existsSync(path.join(mountPoint, '.VolumeIcon.icns'))) {
       run('/usr/bin/SetFile', ['-a', 'C', mountPoint]);

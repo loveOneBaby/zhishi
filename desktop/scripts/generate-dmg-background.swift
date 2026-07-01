@@ -76,8 +76,8 @@ func renderBackground(width: CGFloat, height: CGFloat, scale: CGFloat, outputURL
   ("双击 安装知识检索" as NSString).draw(
     in: rect(70, 50, 480, 38),
     withAttributes: [
-      .font: NSFont.systemFont(ofSize: scaled(25), weight: .medium),
-      .foregroundColor: NSColor(calibratedRed: 0.36, green: 0.43, blue: 0.66, alpha: 0.78),
+      .font: NSFont.systemFont(ofSize: scaled(25), weight: .semibold),
+      .foregroundColor: NSColor(calibratedRed: 0.34, green: 0.40, blue: 0.62, alpha: 0.88),
       .paragraphStyle: paragraph,
     ]
   )
