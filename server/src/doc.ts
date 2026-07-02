@@ -178,7 +178,7 @@ export function treeToDoc(tree: IndexTree): Block[] {
   out.push(...markdownToDocBlocks(tree.intro));
   const walk = (nodes: IndexNode[], depth: number): void => {
     for (const n of nodes) {
-      out.push({ id: blockId(), type: 'heading', props: { level: Math.min(depth, 3) }, content: toInline(n.title), children: [] });
+      out.push({ id: blockId(), type: 'heading', props: { level: Math.min(depth, 4) }, content: toInline(n.title), children: [] });
       if (Array.isArray(n.blocks) && n.blocks.length) out.push(...normalizeDocBlocks(n.blocks));
       else out.push(...markdownToDocBlocks(n.content));
       walk(n.children, depth + 1);
@@ -211,7 +211,7 @@ export function markdownToDocBlocks(md: string): Block[] {
     if (heading) {
       // 去掉标题里残留的 markdown 标记(模型偶尔把 ### 写进标题字段,导致出现 "## ### 标题")
       const headingText = heading[2].trim().replace(/^#{1,6}\s*/, '').replace(/\s*#+\s*$/, '');
-      out.push({ id: blockId(), type: 'heading', props: { level: Math.min(heading[1].length, 3) }, content: parseInline(headingText), children: [] });
+      out.push({ id: blockId(), type: 'heading', props: { level: Math.min(heading[1].length, 4) }, content: parseInline(headingText), children: [] });
       i += 1;
       continue;
     }

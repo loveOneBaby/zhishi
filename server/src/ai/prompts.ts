@@ -2,6 +2,7 @@ import { blocksToMarkdown } from '../blocks.js';
 import { markdownToDocBlocks } from '../doc.js';
 import type { AiMessage } from '../ai-client.js';
 import type { Entry } from '../types.js';
+import { getAiGenerationStylePrompt } from '../ai-style-config.js';
 import type {
   GenerateEntryOptions,
   GenerateFolderTreeOptions,
@@ -18,6 +19,16 @@ function isBroadReviewTopic(topic: string): boolean {
   return /(常见面试题|高频面试|有哪些|总结|梳理|知识体系|复习清单|复习路线|核心考点|考点清单|综合复习|目录级|一键目录|大全|完整指南)/i.test(normalized);
 }
 
+function generationStylePromptLines(): string[] {
+  const prompt = getAiGenerationStylePrompt().trim();
+  if (!prompt) return [];
+  return [
+    'AI 生成风格配置（管理员可在设置中修改，必须优先遵守）：',
+    prompt,
+    '',
+  ];
+}
+
 export function buildGenerateMessages(options: GenerateEntryOptions): AiMessage[] {
   const { topic, kbName, folderPath, context = [] } = options;
   const broadReviewTopic = isBroadReviewTopic(topic);
@@ -27,7 +38,8 @@ export function buildGenerateMessages(options: GenerateEntryOptions): AiMessage[
     '1）先输出“生成思路”，用 3-6 条短 bullet 说明你会如何组织知识点、选择哪些面试考点、参考了哪些相似知识点。这里是可公开的生成说明，不要输出隐藏推理链路。',
     '2）然后输出一行 ---JSON---，后面只放一个 JSON 对象，不要 Markdown 代码围栏。',
     'JSON 字段必须是：',
-    '{"title":"知识点标题","summary":"一句话摘要","tags":["标签"],"sections":[{"title":"小节标题","content":"正文","bullets":["要点"]}],"interviewPoints":["面试考点"],"commonQuestions":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接用于面试回答的模板"}',
+    '{"title":"知识点标题","summary":"一句话摘要","tags":["标签"],"sections":[{"title":"小节标题","content":"正文","bullets":["要点"]}],"flowchart":"ASCII 流程图文本","interviewPoints":["面试考点"],"commonQuestions":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接用于面试回答的模板"}',
+    ...generationStylePromptLines(),
     '版式目标：面向面试前快速复习，不要写成长文章；必须“答案优先、对比清晰、追问可背”。',
     '粒度要求：优先尊重用户题意。用户问具体机制、问题或工程场景时，聚焦一个单点写深；用户问“常见面试题/有哪些/总结/梳理/知识体系/核心考点”时，生成一个综合复习型知识点，不要强行压缩成单一小点。',
     broadReviewTopic
@@ -35,11 +47,12 @@ export function buildGenerateMessages(options: GenerateEntryOptions): AiMessage[
       : '当前主题判断：具体知识点。请聚焦当前主题，sections 生成 4-7 个，先把基本要点讲清楚，再补充机制细节、对比、工程场景和易错点。',
     '标题可以使用“XX 常见面试题”“XX 核心考点”这类复习型标题，但不要写成空泛的“知识大全”；标题要能在列表中准确说明内容范围。',
     'summary 必须是一句话结论，30-60 字，直接回答题目。',
-    'answerTemplate 必须是可直接复述的面试回答：先结论、再 2-3 个关键原因、最后一句工程边界；具体主题不超过 180 字，宽主题不超过 260 字。',
-    'sections 必须使用领域内自然模块名，例如“线程基础”“线程安全”“synchronized”“volatile”“线程池”，不要机械套用“核心流程/展开理解”这类泛标题。',
-    '每个 section.content 控制在 0-2 句；section.bullets 用“术语/问题：解释”的形式写 3-8 条，优先覆盖定义、原理、触发条件、优缺点、适用场景、排查方法和面试表达。',
+    'answerTemplate 必须写成“简要回答”的口语化第一人称回答：自然、能直接念、不要 Markdown 加粗；具体主题不超过 220 字，宽主题不超过 320 字。',
+    'flowchart 必须是纯 ASCII 流程图文本，不要 Markdown 代码围栏；用箭头、分支、条件节点表达回答思路或处理链路，控制在 6-14 行。',
+    'sections 会渲染到“详解”下的 ### 子标题：必须使用领域内自然模块名，例如“线程基础”“线程安全”“synchronized”“volatile”“线程池”，不要机械套用“核心流程/展开理解”这类泛标题。',
+    '每个 section.content 控制在 1-3 句，书面语展开；section.bullets 用“术语/问题：解释”的形式写 2-6 条，优先覆盖定义、原理、触发条件、优缺点、适用场景、排查方法和面试表达。',
     '如果主题包含流程、阶段、对比或选型，必须在对应 section 里给出清晰对比；适合表格的内容可以把 Markdown 表格放进 section.content。',
-    'commonQuestions 必须是“问题？答题抓手：一句话提示”的格式，至少 4 条。',
+    'commonQuestions 必须直接写成“Q: 一行问题\\nA: 一段回答”的纯文本格式，每条至少包含 Q 和 A；至少 4 条。',
     '要求：中文，结构化，偏工程面试，内容准确克制；interviewPoints 至少 6 条；不要只写摘要，不要空泛铺垫，不要把基本概念漏掉。',
     `知识库：${kbName}`,
     `当前文件夹：${folderPath || '根层级'}`,
@@ -64,11 +77,12 @@ export function buildGenerateKnowledgeBaseMessages(options: GenerateKnowledgeBas
     '1）先输出“建库思路”，用 4-8 条短 bullet 说明一级目录、二级目录、每类知识点覆盖哪些高频面试场景。这里是可公开说明，不要输出隐藏推理链路。',
     '2）然后输出一行 ---JSON---，后面只放一个 JSON 对象，不要 Markdown 代码围栏。',
     'JSON 字段必须是：',
-    '{"kbName":"知识库名称","description":"一句话说明","containers":[{"sourceId":"folder_unique_id","kind":"folder","parentSourceId":null,"name":"一级目录","sort":1},{"sourceId":"folder_child_id","kind":"folder","parentSourceId":"folder_unique_id","name":"二级目录","sort":1}],"entries":[{"sourceId":"entry_unique_id","containerSourceId":"folder_child_id","title":"知识点标题","question":"面试题","summary":"一句话摘要","tags":["标签"],"shortAnswer":"30-80字直接回答","answer":"展开回答","keyPoints":["关键点"],"followUps":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接复述的回答模板"}]}',
+    '{"kbName":"知识库名称","description":"一句话说明","containers":[{"sourceId":"folder_unique_id","kind":"folder","parentSourceId":null,"name":"一级目录","sort":1},{"sourceId":"folder_child_id","kind":"folder","parentSourceId":"folder_unique_id","name":"二级目录","sort":1}],"entries":[{"sourceId":"entry_unique_id","containerSourceId":"folder_child_id","title":"知识点标题","question":"面试题","summary":"一句话摘要","tags":["标签"],"shortAnswer":"30-80字直接回答","answer":"展开回答","flowchart":"ASCII 流程图文本","keyPoints":["关键点"],"followUps":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接复述的回答模板"}]}',
+    ...generationStylePromptLines(),
     `结构要求：中文；entries 生成 ${questionCount} 条高频知识点；containers 生成 4-7 个一级目录，必要时才加二级目录，最多二级；核心一级目录至少挂 2 条 entries；所有 entries.containerSourceId 必须指向已有 container.sourceId；sourceId 用英文小写、数字、下划线，稳定可读。`,
     '目录组织建议：目录是分类桶，不是知识点标题；按知识体系拆，不按“定义/原理/场景/追问”这种通用模板拆。优先使用领域内自然模块名，例如多线程里的“线程基础 / 锁机制 / JUC 工具 / 线程池 / 并发容器 / 问题排查”。',
     '知识点粒度：每个 entry 可以覆盖一个高频模块或一个具体机制；如果主题是宽领域，宁可用“线程池核心参数与执行流程”“ThreadLocal 原理、泄漏与使用场景”这种完整复习标题，不要拆成很多只有一句定义的小点。',
-    '内容要求：每个知识点必须是可面试复述的 Q&A；shortAnswer 是一句话结论；answerTemplate 是 30 秒面试回答；followUps 必须写成“问题？答题抓手：一句话提示”；覆盖基本概念、原理机制、对比辨析、工程场景、性能/排障和易错点；避免空话和营销话术；标题适合作为知识点列表展示，不要全部以“什么是”开头。',
+    '内容要求：每个知识点必须是可面试复述的 Q&A；shortAnswer 是一句话结论；answerTemplate 是口语化第一人称简要回答；flowchart 是纯 ASCII 流程图文本；followUps 必须写成“Q: 问题\\nA: 回答”；覆盖基本概念、原理机制、对比辨析、工程场景、性能/排障和易错点；避免空话和营销话术；标题适合作为知识点列表展示，不要全部以“什么是”开头。',
     '质量要求：同一目录下知识点围绕同一主题递进；不要把大量知识点都挂到根目录或同一个目录；不要生成空目录，除非它是父目录。',
   ].join('\n');
 
@@ -147,18 +161,20 @@ export function buildRewriteMessages(options: RewriteEntryOptions): AiMessage[] 
     '1）先输出“改写思路”，用 3-6 条短 bullet 说明你会补强哪些知识、删减哪些冗余、如何组织面试考点。这里是可公开说明，不要输出隐藏推理链路。',
     '2）然后输出一行 ---JSON---，后面只放一个 JSON 对象，不要 Markdown 代码围栏。',
     'JSON 字段必须是：',
-    '{"title":"知识点标题","summary":"一句话摘要","tags":["标签"],"sections":[{"title":"小节标题","content":"正文","bullets":["要点"]}],"interviewPoints":["面试考点"],"commonQuestions":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接用于面试回答的模板"}',
+    '{"title":"知识点标题","summary":"一句话摘要","tags":["标签"],"sections":[{"title":"小节标题","content":"正文","bullets":["要点"]}],"flowchart":"ASCII 流程图文本","interviewPoints":["面试考点"],"commonQuestions":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接用于面试回答的模板"}',
+    ...generationStylePromptLines(),
     '版式目标：面向面试前快速复习，不要写成长文章；必须“答案优先、对比清晰、追问可背”。',
     '粒度要求：保留原知识点的主题范围。原主题是具体机制/问题时写深一个点；原主题本身是“常见面试题/核心考点/知识体系/有哪些”这类宽主题时，改写成综合复习型知识点，不要强行缩成单一小点。',
     broadReviewTopic
       ? '当前主题判断：宽主题/综合复习页。sections 生成 8-14 个，使用领域内自然模块名，按基础概念、核心机制、对比辨析、工程实践、排查优化、追问易错组织。'
       : '当前主题判断：具体知识点。sections 生成 4-7 个，先讲基本要点，再补机制细节、对比、工程场景和易错点。',
     'summary 必须是一句话结论，30-60 字，直接回答题目。',
-    'answerTemplate 必须是可直接复述的面试回答：先结论、再 2-3 个关键原因、最后一句工程边界；具体主题不超过 180 字，宽主题不超过 260 字。',
-    'sections 必须使用领域内自然模块名，不要机械套用“核心流程/展开理解”这类泛标题；每个 section.content 控制在 0-2 句。',
-    'section.bullets 用“术语/问题：解释”的形式写 3-8 条，优先覆盖定义、原理、触发条件、优缺点、适用场景、排查方法和面试表达。',
+    'answerTemplate 必须写成“简要回答”的口语化第一人称回答：自然、能直接念、不要 Markdown 加粗；具体主题不超过 220 字，宽主题不超过 320 字。',
+    'flowchart 必须是纯 ASCII 流程图文本，不要 Markdown 代码围栏；用箭头、分支、条件节点表达回答思路或处理链路，控制在 6-14 行。',
+    'sections 会渲染到“详解”下的 ### 子标题：必须使用领域内自然模块名，不要机械套用“核心流程/展开理解”这类泛标题；每个 section.content 控制在 1-3 句。',
+    'section.bullets 用“术语/问题：解释”的形式写 2-6 条，优先覆盖定义、原理、触发条件、优缺点、适用场景、排查方法和面试表达。',
     '如果主题包含流程、阶段、对比或选型，必须给出清晰对比；适合表格的内容可以把 Markdown 表格放进 section.content。',
-    'commonQuestions 必须是“问题？答题抓手：一句话提示”的格式，至少 4 条。',
+    'commonQuestions 必须直接写成“Q: 一行问题\\nA: 一段回答”的纯文本格式，每条至少包含 Q 和 A；至少 4 条。',
     '要求：中文，结构化，偏工程面试，内容准确克制；保留原知识点主题，不要凭空扩展到无关领域；interviewPoints 至少 6 条；不要只写摘要，不要空泛铺垫，不要把基本概念漏掉。',
     `原标题：${entry.title}`,
     `原摘要：${entry.summary || '（无）'}`,

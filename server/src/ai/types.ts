@@ -12,6 +12,7 @@ export interface GeneratedDraft {
   summary: string;
   tags: string[];
   sections: GeneratedSection[];
+  flowchart: string;
   interviewPoints: string[];
   commonQuestions: string[];
   pitfalls: string[];
@@ -39,6 +40,7 @@ export interface GeneratedKbQuestion {
   tags: string[];
   shortAnswer: string;
   answer: string;
+  flowchart?: string;
   keyPoints: string[];
   followUps: string[];
   pitfalls: string[];

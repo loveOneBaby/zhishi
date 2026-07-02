@@ -11,6 +11,14 @@ export interface DbInfo {
 export interface ServerConfig {
   auth: AuthStatus;
   db: DbInfo;
+  aiStyle: AiGenerationStyleConfig;
+}
+
+export interface AiGenerationStyleConfig {
+  prompt: string;
+  defaultPrompt: string;
+  source: 'default' | 'env' | 'user';
+  updatedAt?: number;
 }
 
 export interface DbConfigBody {
@@ -26,10 +34,19 @@ export interface DbConfigResult {
   db: DbInfo;
 }
 
+export interface AiGenerationStyleResult {
+  ok: boolean;
+  aiStyle: AiGenerationStyleConfig;
+}
+
 export function getServerConfig(): Promise<ServerConfig> {
   return apiGetJson<ServerConfig>('/config');
 }
 
 export function setDbConfig(body: DbConfigBody): Promise<DbConfigResult> {
   return apiPostJson<DbConfigResult>('/config/db', body);
+}
+
+export function setAiGenerationStyleConfig(body: { prompt?: string; clear?: boolean }): Promise<AiGenerationStyleResult> {
+  return apiPostJson<AiGenerationStyleResult>('/config/ai-style', body);
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Settings, Server, Database, Plug, LoaderCircle, RotateCcw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Settings, Server, Database, Plug, LoaderCircle, RotateCcw, AlertCircle, CheckCircle2, Sparkles } from 'lucide-react';
 import {
   API_BASE_STORAGE_KEY,
   API_TOKEN_STORAGE_KEY,
@@ -7,7 +7,7 @@ import {
   normalizeApiBase,
   usingCustomBase,
 } from '../api/client';
-import { getServerConfig, setDbConfig, type DbInfo } from '../api/config';
+import { getServerConfig, setAiGenerationStyleConfig, setDbConfig, type AiGenerationStyleConfig, type DbInfo } from '../api/config';
 import type { AuthStatus } from '../api/auth';
 
 interface Props {
@@ -57,9 +57,12 @@ export default function SettingsMenu({ auth, onDbSwitched }: Props) {
         <Settings size={15} strokeWidth={2.1} />
       </button>
       {open && (
-        <div className="ik-settings-menu" role="dialog" aria-label="连接设置">
+        <div className="ik-settings-menu" role="dialog" aria-label="设置">
           {canManageDb ? (
-            <ServerDbSection onSwitched={onDbSwitched} />
+            <>
+              <ServerDbSection onSwitched={onDbSwitched} />
+              <AiGenerationStyleSection />
+            </>
           ) : (
             <p className="ik-settings-hint">数据库配置需管理员登录后操作。</p>
           )}
@@ -67,6 +70,99 @@ export default function SettingsMenu({ auth, onDbSwitched }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+// ───────────── Section AI：知识点生成风格（管理员） ─────────────
+function AiGenerationStyleSection(): ReactNode {
+  const [config, setConfig] = useState<AiGenerationStyleConfig | null>(null);
+  const [prompt, setPrompt] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    getServerConfig()
+      .then((cfg) => {
+        if (cancelled) return;
+        setConfig(cfg.aiStyle);
+        setPrompt(cfg.aiStyle.prompt);
+      })
+      .catch(() => { /* 设置面板不可用时不阻塞其它配置 */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function save(): Promise<void> {
+    setError(''); setStatus(''); setBusy(true);
+    try {
+      const result = await setAiGenerationStyleConfig({ prompt });
+      setConfig(result.aiStyle);
+      setPrompt(result.aiStyle.prompt);
+      setStatus('已保存，后续 AI 生成将使用新风格');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reset(): Promise<void> {
+    setError(''); setStatus(''); setBusy(true);
+    try {
+      const result = await setAiGenerationStyleConfig({ clear: true });
+      setConfig(result.aiStyle);
+      setPrompt(result.aiStyle.prompt);
+      setStatus('已恢复默认风格');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function useDefaultPrompt(): void {
+    if (config?.defaultPrompt) setPrompt(config.defaultPrompt);
+  }
+
+  const source = config?.source === 'env'
+    ? '环境变量'
+    : config?.source === 'user'
+      ? '用户配置'
+      : '默认';
+
+  return (
+    <section className="ik-settings-section">
+      <div className="ik-settings-head">
+        <span><Sparkles size={14} strokeWidth={2.2} />AI 生成风格</span>
+        <b className={config?.source === 'user' ? 'is-custom' : undefined}>{source}</b>
+      </div>
+      <label className="ik-settings-field">
+        <span>提示词模板</span>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="配置 AI 生成知识点时要遵守的风格和结构"
+          spellCheck={false}
+          rows={12}
+        />
+      </label>
+      <div className="ik-settings-actions">
+        <button type="button" className="ik-btn ik-btn-default ik-btn-size-sm" onClick={save} disabled={busy || config?.source === 'env'}>
+          {busy ? <LoaderCircle size={13} className="ik-update-spin" /> : <Sparkles size={13} />}保存风格
+        </button>
+        <button type="button" className="ik-btn ik-btn-ghost ik-btn-size-sm" onClick={useDefaultPrompt} disabled={busy || !config?.defaultPrompt}>
+          使用默认模板
+        </button>
+        <button type="button" className="ik-btn ik-btn-ghost ik-btn-size-sm" onClick={reset} disabled={busy || config?.source === 'env'}>
+          <RotateCcw size={13} />恢复默认
+        </button>
+      </div>
+      {config?.source === 'env' && (
+        <p className="ik-settings-note">当前由服务器环境变量 <code>AI_GENERATION_STYLE_PROMPT</code> 控制，页面内不能覆盖。</p>
+      )}
+      <StatusLine error={error} status={status} />
+    </section>
   );
 }
 

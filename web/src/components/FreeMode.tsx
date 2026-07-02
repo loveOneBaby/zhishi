@@ -390,6 +390,9 @@ export default function FreeMode(props: Props): ReactNode {
       return;
     }
     guardPanel(() => {
+      setSelectedEntryId(null);
+      setFullEntry(null);
+      setLoadingEntryId(null);
       setFreeFolder(folderId);
       setPanelMode('create');
       dirtyRef.current = false;
@@ -422,7 +425,7 @@ export default function FreeMode(props: Props): ReactNode {
   }
   const runningLive = liveTasks.find((t) => t.status === 'running') ?? null;
 
-  // 直接生成一个知识点(不弹窗):输入题目后流式生成并写入当前位置
+  // 生成知识点入口：自由描述需求，交给 AI 规划判断生成一条或多条。
   function isAbortError(err: unknown): boolean {
     return err instanceof DOMException && err.name === 'AbortError';
   }
@@ -434,37 +437,18 @@ export default function FreeMode(props: Props): ReactNode {
     return controller;
   }
 
-  async function runGenerateEntryDirect(topic: string, folderId: string | null): Promise<void> {
-    if (!freeKb) { toast('请先进入一个知识库，再生成知识点', 'info'); return; }
-    const t = topic.trim();
-    if (!t) { toast('请输入要生成的题目', 'info'); return; }
-    if (liveBusy()) { toast('已有 AI 任务进行中，请稍候', 'info'); return; }
+  function startGenerateEntryByIntent(instruction: string): void {
+    if (!currentKb) { toast('请先进入一个知识库，再生成知识点', 'info'); return; }
+    const text = instruction.trim();
+    if (!text) { toast('请输入生成需求', 'info'); return; }
     onAiTaskPanelOpenChange(true);
-    const id = `live_${Date.now().toString(36)}`;
-    const controller = beginLiveTask({ id, entryId: '__generate__', title: t, label: 'AI 生成知识点', mode: 'generate', stage: '准备生成…' });
-    try {
-      const draft = await generateEntryDraftWithAIStream(
-        { topic: t, kbId: freeKb, folderId },
-        {
-          onStage: (message) => patchLive(id, { stage: message }),
-          onDelta: (content) => setLiveTasks((prev) => prev.map((x) => (x.id === id ? { ...x, raw: x.raw + content } : x))),
-        },
-        controller.signal,
-      );
-      if (controller.signal.aborted) throw new DOMException('aborted', 'AbortError');
-      const entry = await onCreate({ ...draft, kbId: freeKb, folderId });
-      onGeneratedEntry(entry);
-      setFreeFolder(entry.folderId ?? null);
-      setPanelMode('detail');
-      setSelectedEntryId(entry.id);
-      patchLive(id, { status: 'succeeded', stage: '已生成知识点' });
-      toast('已生成知识点', 'success');
-    } catch (err) {
-      if (controller.signal.aborted || isAbortError(err)) { patchLive(id, { status: 'cancelled', stage: '已取消' }); toast('已取消生成', 'info'); }
-      else { patchLive(id, { status: 'failed', stage: '生成失败' }); toast('生成失败：' + (err instanceof Error ? err.message : String(err)), 'error'); }
-    } finally {
-      liveAbortRef.current.delete(id);
-    }
+    void onStartAgentEditJob({
+      kbId: currentKb.id,
+      instruction: text,
+      folderId: aiTargetFolderId,
+    }).catch((err) => {
+      toast('AI 生成计划失败：' + (err instanceof Error ? err.message : String(err)), 'error');
+    });
   }
 
   // 直接初始化目录(不弹窗):可选聚焦主题,默认知识库名,作为后台任务执行
@@ -951,15 +935,15 @@ export default function FreeMode(props: Props): ReactNode {
     {
       id: 'generate-entry',
       title: '生成知识点',
-      description: selectedEntry ? '写入当前知识点所在文件夹' : '写入当前浏览位置',
+      description: selectedEntry ? '按当前知识点所在文件夹生成' : '按当前浏览位置生成',
       icon: <FileText size={16} strokeWidth={2.15} />,
       onClick: () => {},
       prompt: {
-        placeholder: '输入要生成的题目，回车生成',
-        submitLabel: '生成',
-        onSubmit: (value) => { void runGenerateEntryDirect(value, aiTargetFolderId); },
+        placeholder: '自由输入生成需求，AI 判断生成一条或多条',
+        submitLabel: '生成计划',
+        onSubmit: startGenerateEntryByIntent,
       },
-      meta: '实时生成',
+      meta: 'AI 判断',
     },
     {
       id: 'init-folders',
@@ -1119,7 +1103,9 @@ export default function FreeMode(props: Props): ReactNode {
     );
   }
 
-  const editorKey = `${panelMode}:${selectedEntry?.id ?? 'new'}:${selectedFullEntry?.updatedAt ?? ''}:${freeKb}:${freeFolder ?? 'root'}`;
+  const editorKey = panelMode === 'create'
+    ? `${panelMode}:new:${freeKb}:${freeFolder ?? 'root'}`
+    : `${panelMode}:${selectedEntry?.id ?? 'new'}:${selectedFullEntry?.updatedAt ?? ''}:${freeKb}:${freeFolder ?? 'root'}`;
   const activeTagStat = activeTag ? kbTagStats.find((item) => item.tag === activeTag) ?? null : null;
 
   return (

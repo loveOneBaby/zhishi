@@ -13,6 +13,7 @@ import {
   warmEntriesCache,
 } from '../db.js';
 import { teardownAiJobs, initAiJobs } from '../services/ai-jobs.js';
+import { getAiGenerationStyleConfig, setAiGenerationStyleConfig } from '../ai-style-config.js';
 
 // 数据库连接配置：管理员在 UI 里切换本服务实际使用的数据库（本地文件 / 远程 libSQL）。
 // GET /config 只回 mode/label/source（不泄露 token）；POST /config/db 热切换并重跑初始化序列。
@@ -20,7 +21,19 @@ import { teardownAiJobs, initAiJobs } from '../services/ai-jobs.js';
 
 export function registerConfigRoutes(api: Router): void {
   api.get('/config', (req, res) => {
-    res.json({ auth: authStatus(req), db: getDbInfo() });
+    res.json({ auth: authStatus(req), db: getDbInfo(), aiStyle: getAiGenerationStyleConfig() });
+  });
+
+  api.post('/config/ai-style', (req, res) => {
+    try {
+      const aiStyle = setAiGenerationStyleConfig({
+        prompt: req.body?.prompt,
+        clear: Boolean(req.body?.clear),
+      });
+      res.json({ ok: true, aiStyle });
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   api.post('/config/db', asyncHandler(async (req, res) => {

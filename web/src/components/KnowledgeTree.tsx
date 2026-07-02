@@ -120,6 +120,11 @@ function menuPortalTarget(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[class^="ik-theme-"], [class*=" ik-theme-"]') ?? document.body;
 }
 
+// Radix 菜单关闭后 react-arborist 会恢复树焦点；延后一拍避免覆盖创建面板。
+function afterContextMenuClose(action: () => void): void {
+  window.setTimeout(action, 0);
+}
+
 function itemClass(active: boolean, selected: boolean, type: TreeItem['type'], dragging: boolean, dropTarget: boolean): string {
   return [
     'ik-kt-node',
@@ -490,7 +495,10 @@ function KnowledgeTree(props: Props): ReactNode {
         {target.kind !== 'entry' && (
           <ContextMenu.Group className="ik-kt-menu-group">
             <ContextMenu.Label className="ik-kt-menu-label">新建</ContextMenu.Label>
-            <ContextMenu.Item className="ik-kt-menu-item" onSelect={() => onCreateEntry(target.kind === 'folder' ? target.folder.id : null)}>
+            <ContextMenu.Item
+              className="ik-kt-menu-item"
+              onSelect={() => afterContextMenuClose(() => onCreateEntry(target.kind === 'folder' ? target.folder.id : null))}
+            >
               <Plus size={14} strokeWidth={2.1} />新建知识点
             </ContextMenu.Item>
             <ContextMenu.Item className="ik-kt-menu-item" onSelect={() => onCreateFolder(target.kind === 'folder' ? target.folder.id : null)}>
@@ -532,7 +540,10 @@ function KnowledgeTree(props: Props): ReactNode {
         {target.kind === 'entry' && (
           <ContextMenu.Group className="ik-kt-menu-group">
             <ContextMenu.Label className="ik-kt-menu-label">管理</ContextMenu.Label>
-            <ContextMenu.Item className="ik-kt-menu-item" onSelect={() => onEditEntry(target.entry)}>
+            <ContextMenu.Item
+              className="ik-kt-menu-item"
+              onSelect={() => afterContextMenuClose(() => onEditEntry(target.entry))}
+            >
               <BookOpen size={14} strokeWidth={2.1} />编辑知识点
             </ContextMenu.Item>
             <ContextMenu.Separator className="ik-kt-menu-sep" />

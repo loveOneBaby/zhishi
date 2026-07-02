@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import SearchBox from '../components/SearchBox';
 import { apiGetKey } from '../api/client';
 import { fetchBootstrap } from '../api/bootstrap';
@@ -43,22 +44,16 @@ function DetailPane({ entry, query, loading }: { entry: Entry | null; query: str
     );
   }
 
+  const hasIntro = Boolean(entry.intro?.trim());
+  const hasNodes = Boolean(entry.nodes?.length);
+
   return (
-    <aside className="ik-surface ik-dqs-detail">
-      <div className="ik-dqs-detail-head">
-        <h2>{highlightText(entry.title, query)}</h2>
-        <div className="ik-dqs-tags">
-          {[entry.cat, ...entry.tags].filter(Boolean).slice(0, 8).map((tag) => (
-            <span key={tag}>{highlightText(tag, query)}</span>
-          ))}
-        </div>
-        {entry.summary ? <p>{highlightText(entry.summary, query)}</p> : null}
-      </div>
+    <aside className="ik-surface ik-dqs-detail" aria-label={entry.title}>
       <div className="ik-dqs-detail-body">
-        {entry.intro?.trim() ? <div className="ik-dqs-intro">{renderMd(entry.intro, query)}</div> : null}
-        {entry.nodes?.length ? entry.nodes.map((node) => renderNode(node, query)) : (
-          <div className="ik-dqs-empty">这个知识点暂无结构化详情。</div>
-        )}
+        {hasIntro ? <div className="ik-dqs-intro">{renderMd(entry.intro, query)}</div> : null}
+        {hasNodes ? entry.nodes.map((node) => renderNode(node, query)) : null}
+        {!hasIntro && !hasNodes && entry.summary?.trim() ? <p className="ik-dqs-summary-only">{highlightText(entry.summary, query)}</p> : null}
+        {!hasIntro && !hasNodes && !entry.summary?.trim() ? <div className="ik-dqs-empty">这个知识点暂无结构化详情。</div> : null}
       </div>
     </aside>
   );
@@ -283,7 +278,9 @@ export default function DesktopQuickSearchApp() {
             showScopeButton
             keyPointShortcutLabel="Alt+J"
           />
-          <button type="button" className="ik-dqs-close" onClick={() => window.close()} aria-label="关闭">关闭</button>
+          <button type="button" className="ik-dqs-close" onClick={() => window.close()} aria-label="关闭" title="关闭">
+            <X size={16} strokeWidth={2.3} />
+          </button>
         </div>
 
         <FavoriteKbBar
@@ -460,20 +457,29 @@ const desktopQuickSearchCss = `
     font-size: 11.5px;
   }
   .ik-dqs-close {
-    height: 36px;
-    padding: 0 11px;
-    border: 1px solid var(--bd);
-    border-radius: 10px;
-    background: rgba(255,255,255,.78);
-    color: var(--mut);
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    justify-self: end;
+    border: 1px solid rgba(24,24,27,.10);
+    border-radius: 999px;
+    background: rgba(255,255,255,.52);
+    color: rgba(39,39,42,.62);
     cursor: pointer;
     font: inherit;
-    font-size: 12px;
-    font-weight: 650;
+    transition: background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
   }
   .ik-dqs-close:hover {
     color: var(--fg);
-    background: var(--sel);
+    border-color: rgba(24,24,27,.16);
+    background: rgba(255,255,255,.84);
+    box-shadow: 0 1px 4px rgba(24,24,27,.08);
+  }
+  .ik-dqs-close:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 42%, transparent);
+    outline-offset: 2px;
   }
   .ik-searchbox-kbd,
   .ik-searchbox-divider,
@@ -539,7 +545,7 @@ const desktopQuickSearchCss = `
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(320px, .9fr) minmax(0, 1.1fr);
+    grid-template-columns: minmax(240px, .74fr) minmax(0, 1.26fr);
     gap: 9px;
   }
   .ik-results-panel,
@@ -567,7 +573,7 @@ const desktopQuickSearchCss = `
     height: 100%;
     overflow: auto;
   }
-  .ik-result-row {
+  .ik-dqs-root .ik-result-row {
     width: 100%;
     display: grid;
     align-items: center;
@@ -575,19 +581,19 @@ const desktopQuickSearchCss = `
     border-bottom: 1px solid color-mix(in srgb, var(--bd) 60%, transparent);
     text-align: left;
     font: inherit;
-    min-height: 46px;
+    min-height: 38px;
     height: auto;
-    padding: 8px 12px;
+    padding: 6px 10px;
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
   }
-  .ik-result-title {
+  .ik-dqs-root .ik-result-title {
     display: -webkit-box;
     overflow: hidden;
     color: var(--fg);
-    font-size: 13px;
-    line-height: 1.35;
-    font-weight: 760;
+    font-size: 11.5px;
+    line-height: 1.32;
+    font-weight: 720;
     text-overflow: ellipsis;
     white-space: normal;
     -webkit-line-clamp: 2;
@@ -597,39 +603,6 @@ const desktopQuickSearchCss = `
     display: flex;
     flex-direction: column;
   }
-  .ik-dqs-detail-head {
-    flex-shrink: 0;
-    padding: 12px 14px 9px;
-    border-bottom: 1px solid color-mix(in srgb, var(--bd) 70%, transparent);
-  }
-  .ik-dqs-detail-head h2 {
-    margin: 0;
-    color: var(--fg);
-    font-size: 17px;
-    line-height: 1.25;
-    font-weight: 780;
-  }
-  .ik-dqs-detail-head p {
-    margin: 7px 0 0;
-    color: var(--mut);
-    font-size: 11.5px;
-    line-height: 1.6;
-  }
-  .ik-dqs-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    margin-top: 7px;
-  }
-  .ik-dqs-tags span {
-    padding: 2px 7px;
-    border: 1px solid var(--bd);
-    border-radius: 999px;
-    color: var(--mut);
-    background: var(--sel);
-    font-size: 10.5px;
-    line-height: 1.2;
-  }
   .ik-dqs-detail-body {
     flex: 1;
     min-height: 0;
@@ -637,10 +610,13 @@ const desktopQuickSearchCss = `
     padding: 12px 14px 22px;
   }
   .ik-dqs-intro,
-  .ik-dqs-md {
+  .ik-dqs-md,
+  .ik-dqs-summary-only {
+    margin: 0;
     color: var(--fg);
     font-size: 11.5px;
     line-height: 1.68;
+    white-space: pre-wrap;
   }
   .ik-dqs-detail-body p,
   .ik-dqs-detail-body ul {
@@ -654,6 +630,11 @@ const desktopQuickSearchCss = `
     margin-top: 12px;
     padding-top: 10px;
     border-top: 1px solid color-mix(in srgb, var(--bd) 70%, transparent);
+  }
+  .ik-dqs-detail-body > .ik-dqs-node:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
   }
   .ik-dqs-node.is-child {
     margin-left: 10px;

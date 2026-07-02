@@ -46,8 +46,8 @@ export {
 } from './ai/parse.js';
 export { draftToMarkdown, kbQuestionToMarkdown, kbQuestionToEntryInput } from './ai/render.js';
 
-const ENTRY_JSON_SCHEMA = '{"title":"知识点标题","summary":"一句话摘要","tags":["标签"],"sections":[{"title":"小节标题","content":"正文","bullets":["要点"]}],"interviewPoints":["面试考点"],"commonQuestions":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接用于面试回答的模板"}';
-const KB_JSON_SCHEMA = '{"kbName":"知识库名称","description":"一句话说明","containers":[{"sourceId":"folder_unique_id","kind":"folder","parentSourceId":null,"name":"目录名","sort":1}],"entries":[{"sourceId":"entry_unique_id","containerSourceId":"folder_unique_id","title":"知识点标题","question":"面试题","summary":"一句话摘要","tags":["标签"],"shortAnswer":"30-80字直接回答","answer":"展开回答","keyPoints":["关键点"],"followUps":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接复述的回答模板"}]}';
+const ENTRY_JSON_SCHEMA = '{"title":"知识点标题","summary":"一句话摘要","tags":["标签"],"sections":[{"title":"小节标题","content":"正文","bullets":["要点"]}],"flowchart":"ASCII 流程图文本","interviewPoints":["面试考点"],"commonQuestions":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接用于面试回答的模板"}';
+const KB_JSON_SCHEMA = '{"kbName":"知识库名称","description":"一句话说明","containers":[{"sourceId":"folder_unique_id","kind":"folder","parentSourceId":null,"name":"目录名","sort":1}],"entries":[{"sourceId":"entry_unique_id","containerSourceId":"folder_unique_id","title":"知识点标题","question":"面试题","summary":"一句话摘要","tags":["标签"],"shortAnswer":"30-80字直接回答","answer":"展开回答","flowchart":"ASCII 流程图文本","keyPoints":["关键点"],"followUps":["常见追问"],"pitfalls":["易错点"],"answerTemplate":"可直接复述的回答模板"}]}';
 const FOLDER_JSON_SCHEMA = '{"title":"目录方案名称","description":"一句话说明","folders":[{"path":["一级目录","二级目录"]}]}';
 const JSON_REPAIR_ATTEMPTS = 2;
 const JSON_GENERATE_ATTEMPTS = 2;

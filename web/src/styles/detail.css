@@ -24,6 +24,140 @@
   padding: 14px 18px 34px;
   background: transparent;
 }
+.ik-detail-body.has-outline {
+  padding: 12px 16px 34px;
+}
+.ik-detail-reading {
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+.ik-detail-body.has-outline .ik-detail-reading {
+  grid-template-columns: minmax(148px, 178px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.ik-detail-doc {
+  min-width: 0;
+}
+.ik-detail-outline {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  min-width: 0;
+  height: var(--ik-detail-outline-height, auto);
+  min-height: 0;
+  max-height: var(--ik-detail-outline-height, calc(100dvh - 160px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 6px 0 12px;
+  color: var(--mut);
+}
+.ik-detail-outline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 0 2px 0 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 760;
+}
+.ik-detail-outline-head b {
+  min-width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--bd) 56%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  color: color-mix(in srgb, var(--fg) 78%, var(--mut));
+  font-size: 10px;
+  line-height: 1;
+}
+.ik-detail-outline-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-left: 8px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.ik-detail-outline-item {
+  --outline-indent: 0px;
+  position: relative;
+  width: 100%;
+  min-height: 27px;
+  display: flex;
+  align-items: center;
+  padding: 4px 8px 4px calc(13px + var(--outline-indent));
+  border: 0;
+  border-radius: 0 6px 6px 0;
+  background: transparent;
+  color: var(--mut);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+.ik-detail-outline-item::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+}
+.ik-detail-outline-item::after {
+  content: none;
+}
+.ik-detail-outline-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ik-detail-outline-item[data-depth="2"] {
+  --outline-indent: 14px;
+  font-size: 11.8px;
+}
+.ik-detail-outline-item[data-depth="3"] {
+  --outline-indent: 28px;
+  font-size: 11.5px;
+}
+.ik-detail-outline-item[data-depth="4"] {
+  --outline-indent: 42px;
+  font-size: 11px;
+}
+.ik-detail-outline-item:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--sel) 44%, transparent);
+}
+.ik-detail-outline-item:focus {
+  outline: none;
+}
+.ik-detail-outline-item:focus-visible {
+  background: color-mix(in srgb, var(--sel) 52%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.ik-detail-outline-item.is-active {
+  color: var(--fg);
+  background: transparent;
+  font-weight: 780;
+}
+.ik-detail-outline-item.is-active::before {
+  background: color-mix(in srgb, var(--accent) 78%, var(--fg));
+}
 .ik-detail-loading {
   min-height: 180px;
   display: flex;
@@ -52,6 +186,9 @@
 }
 .ik-theme-glass .ik-detail-body {
   background: linear-gradient(to bottom, rgba(255,255,255,.56), rgba(255,255,255,.28));
+}
+.ik-theme-glass .ik-detail-outline-item.is-active {
+  background: transparent;
 }
 /* 统一的顶部操作栏:编辑态与查看态共用,左侧信息 + 右侧按钮组 */
 .ik-action-bar {
@@ -163,4 +300,30 @@
   font-size: 11px;
   line-height: 1;
   white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .ik-detail-reading {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .ik-detail-body.has-outline .ik-detail-reading {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ik-detail-outline {
+    position: relative;
+    top: auto;
+    height: auto;
+    min-height: 0;
+    max-height: 180px;
+    padding: 0 0 8px;
+    border-bottom: 1px solid color-mix(in srgb, var(--bd) 64%, transparent);
+  }
+  .ik-detail-outline-head {
+    margin-bottom: 6px;
+  }
+  .ik-detail-outline-list {
+    max-height: 136px;
+    padding-right: 4px;
+  }
 }

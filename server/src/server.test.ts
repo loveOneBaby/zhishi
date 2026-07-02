@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { parseBodyToIndex, normalizeIndex, indexText } from './index-tree.js';
 import { blocksToMarkdown, convertEntry } from './blocks-import.js';
 import { knowledgeTreeToImportPayload } from './knowledge-tree-import.js';
@@ -11,7 +14,9 @@ import { extractText, blocksToMarkdown as blockNoteToMarkdown } from './blocks.j
 import { normalizeDocBlocks, splitDocToIndex, markdownToDocBlocks, safeImageUrl, safeLinkHref } from './doc.js';
 import { assertAuthConfiguredForProduction } from './auth.js';
 import { coerceGeneratedDraft, coerceGeneratedFolderTreeDraft, coerceGeneratedKbDraft, draftToMarkdown, extractJsonObject, kbQuestionToEntryInput, kbQuestionToMarkdown } from './ai-generate.js';
+import { buildGenerateMessages } from './ai/prompts.js';
 import { ensureTags } from './ai/render.js';
+import { DEFAULT_AI_GENERATION_STYLE_PROMPT, getAiGenerationStyleConfig, setAiGenerationStyleConfig } from './ai-style-config.js';
 import { coerceAgentEditPlan } from './ai-agent-edit.js';
 import { normalizeFolderDraftPathForTarget } from './services/kb-draft-writer.js';
 import { resolveDbConfig, dbInfoFor, type DbConfig } from './db/client.js';
@@ -215,27 +220,33 @@ test('doc.splitDocToIndex: 标题块切分为多级索引(顶层标题=二级索
 });
 
 test('doc.markdownToDocBlocks: markdown → 块(种子/旧数据)', () => {
-  const blocks = markdownToDocBlocks('# 标题\n段落\n- 列表项\n![图](https://cdn/a.png)\n```py\nprint(1)\n```');
+  const blocks = markdownToDocBlocks('# 标题\n#### 四级标题\n段落\n- 列表项\n![图](https://cdn/a.png)\n```py\nprint(1)\n```');
   const types = blocks.map((b) => b.type);
   assert.ok(types.includes('heading'));
   assert.ok(types.includes('paragraph'));
   assert.ok(types.includes('bulletListItem'));
   assert.ok(types.includes('image'));
   assert.ok(types.includes('codeBlock'));
+  const h4 = blocks.find((b) => b.type === 'heading' && extractText([b]) === '四级标题')!;
+  assert.equal((h4.props as any).level, 4);
   const img = blocks.find((b) => b.type === 'image')!;
   assert.equal((img.props as any).url, 'https://cdn/a.png');
 });
 
 test('ai-generate: 抽取模型 JSON 并转成知识点 markdown', () => {
-  const json = extractJsonObject('```json\n{"title":"RAG","summary":"检索增强生成","tags":["RAG"],"sections":[{"title":"定义","content":"先检索再生成","bullets":["降低幻觉"]}],"interviewPoints":["召回","重排"],"commonQuestions":["为什么需要 RAG？"],"pitfalls":["上下文不是越多越好"],"answerTemplate":"RAG 是..."}\n```');
+  const json = extractJsonObject('```json\n{"title":"RAG","summary":"检索增强生成","tags":["RAG"],"sections":[{"title":"定义","content":"先检索再生成","bullets":["降低幻觉"]}],"flowchart":"[问题]\\n  |\\n  v\\n[检索]\\n  |\\n  v\\n[生成]","interviewPoints":["召回","重排"],"commonQuestions":["Q: 为什么需要 RAG？\\nA: 它能把外部知识检索进上下文，降低纯模型记忆带来的幻觉。"],"pitfalls":["上下文不是越多越好"],"answerTemplate":"我一般先说，RAG 是先检索再生成。"}\n```');
   assert.ok(json);
   const draft = coerceGeneratedDraft(JSON.parse(json!), 'RAG');
   assert.equal(draft.title, 'RAG');
   assert.deepEqual(draft.interviewPoints, ['召回', '重排']);
   const md = draftToMarkdown(draft);
-  assert.ok(md.includes('## 面试考点'));
-  assert.ok(md.includes('- 召回'));
-  assert.ok(md.includes('## 高频追问'));
+  assert.ok(md.includes('## 简要回答'));
+  assert.ok(md.includes('## 回答思路步骤图'));
+  assert.ok(md.includes('```text'));
+  assert.ok(md.includes('## 详解'));
+  assert.ok(md.includes('### 定义'));
+  assert.ok(md.includes('## 可能追问'));
+  assert.ok(md.includes('Q: 为什么需要 RAG？'));
 });
 
 test('ai-generate: 标签规范化并保留 AI生成', () => {
@@ -264,9 +275,30 @@ test('ai-generate: 知识库 JSON 转目录与 Q&A markdown', () => {
   assert.equal(draft.kbName, 'Redis 面试知识库');
   assert.deepEqual(draft.folders.map((folder) => folder.path), [['数据结构'], ['数据结构', 'String']]);
   const md = kbQuestionToMarkdown(draft.questions[0]);
-  assert.ok(md.includes('## 一句话结论'));
-  assert.ok(md.includes('## 面试题'));
-  assert.ok(md.includes('## 高频追问'));
+  assert.ok(md.includes('## 简要回答'));
+  assert.ok(md.includes('## 回答思路步骤图'));
+  assert.ok(md.includes('### 面试题'));
+  assert.ok(md.includes('## 可能追问'));
+});
+
+test('ai-style-config: 默认模板可恢复，自定义提示词会进入生成 prompt', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ik-ai-style-'));
+  const file = path.join(dir, 'style.json');
+  try {
+    withEnv({ IK_AI_STYLE_CONFIG_PATH: file, AI_GENERATION_STYLE_PROMPT: undefined }, () => {
+      assert.equal(getAiGenerationStyleConfig().source, 'default');
+      assert.ok(getAiGenerationStyleConfig().prompt.includes('简要回答'));
+      const custom = `${DEFAULT_AI_GENERATION_STYLE_PROMPT}\n\n额外要求：回答里加入工程边界。`;
+      const saved = setAiGenerationStyleConfig({ prompt: custom });
+      assert.equal(saved.source, 'user');
+      const messages = buildGenerateMessages({ topic: 'RAG', kbName: 'RAG 知识库' });
+      assert.ok(String(messages[1].content).includes('额外要求：回答里加入工程边界。'));
+      const reset = setAiGenerationStyleConfig({ clear: true });
+      assert.equal(reset.source, 'default');
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('ai-generate: kb-package-2 风格 containers/entries 可还原目录挂载', () => {
