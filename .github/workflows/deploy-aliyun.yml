@@ -84,6 +84,14 @@ jobs:
           npm --prefix server ci --omit=dev --ignore-scripts
           sudo -n systemctl restart zhishi
           systemctl is-active --quiet zhishi
-          curl --fail --silent --show-error --retry 10 --retry-delay 1 --retry-all-errors http://127.0.0.1:8788/api/health
+          healthy=false
+          for attempt in $(seq 1 10); do
+            if curl --fail --silent --show-error http://127.0.0.1:8788/api/health; then
+              healthy=true
+              break
+            fi
+            sleep 1
+          done
+          test "$healthy" = true
           rm -rf .deploy-incoming
           REMOTE
