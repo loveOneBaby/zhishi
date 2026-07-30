@@ -64,10 +64,10 @@ jobs:
         run: |
           SSH_OPTS="-i ~/.ssh/zhishi_deploy -p ${ALIYUN_PORT:-22} -o BatchMode=yes"
           tar -C .deploy -czf - . | ssh $SSH_OPTS "$ALIYUN_USER@$ALIYUN_HOST" \
-            'mkdir -p /home/work/zhishi/.deploy-incoming && tar -xzf - -C /home/work/zhishi/.deploy-incoming'
+            'mkdir -p /home/work/apps/zhishi/.deploy-incoming && tar -xzf - -C /home/work/apps/zhishi/.deploy-incoming'
           ssh $SSH_OPTS "$ALIYUN_USER@$ALIYUN_HOST" <<'REMOTE'
           set -eu
-          cd /home/work/zhishi
+          cd /home/work/apps/zhishi
           mkdir -p .deploy-backups
           backup=".deploy-backups/$(date +%Y%m%d-%H%M%S)"
           mkdir -p "$backup"
