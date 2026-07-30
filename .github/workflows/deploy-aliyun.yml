@@ -1,0 +1,90 @@
+name: Deploy to Aliyun ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-aliyun-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            server/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm --prefix web ci
+          npm --prefix server ci
+
+      - name: Build production artifacts
+        run: npm run build
+
+      - name: Assemble deployment bundle
+        run: |
+          rm -rf .deploy
+          mkdir -p .deploy/web .deploy/server
+          cp -a web/dist .deploy/web/dist
+          cp -a web/package.json web/package-lock.json .deploy/web/
+          cp -a server/dist .deploy/server/dist
+          cp -a server/package.json server/package-lock.json .deploy/server/
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ALIYUN_SSH_PRIVATE_KEY }}
+          ALIYUN_HOST: ${{ secrets.ALIYUN_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/zhishi_deploy
+          chmod 600 ~/.ssh/zhishi_deploy
+          ssh-keyscan -H "$ALIYUN_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload and restart service
+        env:
+          ALIYUN_HOST: ${{ secrets.ALIYUN_HOST }}
+          ALIYUN_USER: ${{ secrets.ALIYUN_USER }}
+          ALIYUN_PORT: ${{ secrets.ALIYUN_PORT }}
+        run: |
+          SSH_OPTS="-i ~/.ssh/zhishi_deploy -p ${ALIYUN_PORT:-22} -o BatchMode=yes"
+          tar -C .deploy -czf - . | ssh $SSH_OPTS "$ALIYUN_USER@$ALIYUN_HOST" \
+            'mkdir -p /home/work/zhishi/.deploy-incoming && tar -xzf - -C /home/work/zhishi/.deploy-incoming'
+          ssh $SSH_OPTS "$ALIYUN_USER@$ALIYUN_HOST" <<'REMOTE'
+          set -eu
+          cd /home/work/zhishi
+          mkdir -p .deploy-backups
+          backup=".deploy-backups/$(date +%Y%m%d-%H%M%S)"
+          mkdir -p "$backup"
+          cp -a server/data "$backup/data" 2>/dev/null || true
+          cp -a server/.env "$backup/.env" 2>/dev/null || true
+          cp -a .deploy-incoming/web/dist web/dist.new
+          cp -a .deploy-incoming/server/dist server/dist.new
+          cp -a .deploy-incoming/web/package*.json web/
+          cp -a .deploy-incoming/server/package*.json server/
+          rm -rf web/dist server/dist
+          mv web/dist.new web/dist
+          mv server/dist.new server/dist
+          npm --prefix web ci --omit=dev --ignore-scripts
+          npm --prefix server ci --omit=dev --ignore-scripts
+          sudo -n systemctl restart zhishi
+          sleep 3
+          systemctl is-active --quiet zhishi
+          curl --fail --silent http://127.0.0.1:8788/api/health
+          rm -rf .deploy-incoming
+          REMOTE
