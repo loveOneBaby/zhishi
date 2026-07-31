@@ -5,6 +5,7 @@ import { buildNeedles, matchesQuery, toSearchText } from './pinyin-search';
 import { filterEntries } from './search';
 import { buildModel, collectVisible, buildTreeLayout } from './components/canvas/model';
 import type { Entry, KnowledgeBase, Folder } from './types';
+import { defaultHashForDevice, detectMobileDevice, isRootHash } from './device-route';
 
 function entry(over: Partial<Entry>): Entry {
   return { id: 'e', cat: 'AI', kbId: 'kb1', folderId: null, title: '示例', py: '', tags: [], summary: '', intro: '', nodes: [], ...over };
@@ -12,6 +13,17 @@ function entry(over: Partial<Entry>): Entry {
 
 const noFolders: Folder[] = [];
 const kbAi: KnowledgeBase[] = [{ id: 'kb1', name: 'AI', sort: 0 }];
+
+test('device route: 根路径按设备分流，明确深链接保持不变', () => {
+  assert.equal(isRootHash(''), true);
+  assert.equal(isRootHash('#/'), true);
+  assert.equal(isRootHash('#/kb/kb1'), false);
+  assert.equal(defaultHashForDevice(true), '#/mobile/home');
+  assert.equal(defaultHashForDevice(false), '#/library');
+  assert.equal(detectMobileDevice(390, false, 'Mozilla/5.0'), true);
+  assert.equal(detectMobileDevice(1440, false, 'Mozilla/5.0'), false);
+  assert.equal(detectMobileDevice(1024, true, 'Mozilla/5.0 (iPad)'), true);
+});
 
 test('outline: 增/改/移/删 树操作', () => {
   let nodes = [newNode('A'), newNode('B')];

@@ -1112,7 +1112,7 @@ export default function FreeMode(props: Props): ReactNode {
     <div className="ik-free-workspace">
       {aiCenter}
       {/* 右下角悬浮操作：默认只露一个按钮，点开才展开动作 */}
-      <div className="ik-free-layout">
+      <div className={`ik-free-layout ${selectedEntryId || panelMode !== 'detail' ? 'is-detail-open' : ''}`}>
         <aside className="ik-surface ik-tree-panel" style={treePanelStyle}>
           <div className="ik-tree-panel-head">
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>

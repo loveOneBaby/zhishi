@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { Check, ChevronRight, Download, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Search, Star, Tags, Trash2, Upload, X } from 'lucide-react';
+import { Check, ChevronRight, Download, Ellipsis, Folder, FolderPlus, LibraryBig, PencilLine, Plus, Search, Star, Tags, Trash2, Upload, X } from 'lucide-react';
 import type { Entry, Folder as KbFolder, KnowledgeBase, KbCategory } from '../../types';
 import ImportPreviewModal from '../ImportPreviewModal';
 import CommandDialog from '../CommandDialog';
@@ -76,6 +76,8 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
   const [categoryCommand, setCategoryCommand] = useState<CategoryCommand | null>(null);
   const [categoryQuery, setCategoryQuery] = useState('');
   const [kbQuery, setKbQuery] = useState('');
+  const [mobileCategoryOpen, setMobileCategoryOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const categoryNeedle = normalizeGallerySearch(categoryQuery);
   const kbNeedle = normalizeGallerySearch(kbQuery);
 
@@ -277,6 +279,11 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
     });
   };
 
+  const selectMobileCategory = (category: ActiveCategory): void => {
+    onActiveCategoryChange(category);
+    setMobileCategoryOpen(false);
+  };
+
   const runCategoryCommand = async (value: string): Promise<void> => {
     if (!categoryCommand) return;
     try {
@@ -328,7 +335,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
   ) : null;
 
   return (
-    <div className="ik-kb-gallery">
+    <div className={`ik-kb-gallery ${mobileCategoryOpen ? 'is-mobile-category-open' : ''}`}>
       <div className="ik-kb-gallery-head">
         <div className="ik-kb-hero-copy">
           <div className="ik-kb-eyebrow">Knowledge Bases</div>
@@ -370,6 +377,18 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
           <button type="button" className="ik-btn ik-btn-default ik-btn-size-sm" onClick={createKbInActiveCategory}>
             <span className="ik-btn-leading-icon"><Plus size={15} strokeWidth={2.4} /></span>新建知识库
           </button>
+          <div className="ik-kb-mobile-more">
+            <button type="button" className="ik-btn ik-btn-secondary ik-btn-size-sm" aria-expanded={mobileMoreOpen} onClick={() => setMobileMoreOpen((open) => !open)}>
+              <Ellipsis size={16} strokeWidth={2.3} />更多
+            </button>
+            {mobileMoreOpen && (
+              <div className="ik-kb-mobile-more-menu">
+                <button type="button" onClick={() => { setMobileMoreOpen(false); onImportKnowledgeBases(); }}><Upload size={14} />导入知识库</button>
+                <button type="button" onClick={() => { setMobileMoreOpen(false); void onExportAll(); }}><Download size={14} />导出全部</button>
+                <button type="button" onClick={() => { setMobileMoreOpen(false); setCategoryCommand({ kind: 'create', parentId: null }); }}><FolderPlus size={14} />新建分类</button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -399,7 +418,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
               <button
                 type="button"
                 className={`ik-kb-category-row is-root ${activeCategory === ALL_CATEGORIES ? 'is-active' : ''}`}
-                onClick={() => onActiveCategoryChange(ALL_CATEGORIES)}
+                onClick={() => selectMobileCategory(ALL_CATEGORIES)}
               >
                 <span className="ik-kb-category-icon"><LibraryBig size={15} strokeWidth={2.05} /></span>
                 <span className="ik-kb-category-name">全部知识库</span>
@@ -410,7 +429,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
               <button
                 type="button"
                 className={`ik-kb-category-row is-root ${activeCategory === FAVORITES ? 'is-active' : ''}`}
-                onClick={() => onActiveCategoryChange(FAVORITES)}
+                onClick={() => selectMobileCategory(FAVORITES)}
               >
                 <span className="ik-kb-category-icon"><Star size={15} strokeWidth={2.05} /></span>
                 <span className="ik-kb-category-name">收藏</span>
@@ -439,7 +458,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
                   <button
                     type="button"
                     className="ik-kb-category-main"
-                    onClick={() => onActiveCategoryChange(category.id)}
+                    onClick={() => selectMobileCategory(category.id)}
                     title={category.name}
                   >
                     <span className="ik-kb-category-icon"><Folder size={15} strokeWidth={2.05} /></span>
@@ -478,7 +497,7 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
               <button
                 type="button"
                 className={`ik-kb-category-row ${activeCategory === UNCATEGORIZED ? 'is-active' : ''}`}
-                onClick={() => onActiveCategoryChange(UNCATEGORIZED)}
+              onClick={() => selectMobileCategory(UNCATEGORIZED)}
               >
                 <span className="ik-kb-category-icon"><Folder size={15} strokeWidth={2.05} /></span>
                 <span className="ik-kb-category-name">未分类</span>
@@ -493,6 +512,9 @@ export function KbGallery(props: KbGalleryProps): ReactNode {
 
         <section className="ik-kb-library-main">
           <div className="ik-kb-library-controls">
+            <button type="button" className="ik-kb-mobile-filter" aria-expanded={mobileCategoryOpen} onClick={() => setMobileCategoryOpen((open) => !open)}>
+              <Tags size={14} />{activeCategoryName}<ChevronRight size={14} />
+            </button>
             <label className="ik-kb-search ik-kb-library-search">
               <Search size={15} strokeWidth={2.15} aria-hidden="true" />
               <input

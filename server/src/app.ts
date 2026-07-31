@@ -12,6 +12,7 @@ import { registerEntryRoutes } from './routes/entry.js';
 import { registerImportRoutes } from './routes/import.js';
 import { registerAssetRoutes } from './routes/asset.js';
 import { registerConfigRoutes } from './routes/config.js';
+import { registerMobileRoutes } from './routes/mobile.js';
 import { requireAuth } from './auth.js';
 import { rateLimit } from './rateLimit.js';
 
@@ -135,6 +136,7 @@ export function createApp() {
   registerImportRoutes(api);
   registerAssetRoutes(api);
   registerConfigRoutes(api);
+  registerMobileRoutes(api);
 
   app.use('/api', api);
 

@@ -26,6 +26,7 @@ interface Props {
   onClear: () => void;
   onSuggest: (suggestion: SearchSuggestion) => void;
   onOpen: (id: string, index?: number) => void;
+  onCloseDetail: () => void;
   onOpenAI: () => void;
   kbs: KnowledgeBase[];
   folders: Folder[];
@@ -37,7 +38,7 @@ const RESULT_ROW_HEIGHT = 74;
 const RESULT_OVERSCAN = 8;
 
 export default function SearchMode(
-  { query, results, suggestions, sel, viewType, theme, selectedEntry, selectedId, selectedLoading = false, onOpen, onOpenAI, onSuggest, kbs, folders, searchKb }: Props
+  { query, results, suggestions, sel, viewType, theme, selectedEntry, selectedId, selectedLoading = false, onOpen, onCloseDetail, onOpenAI, onSuggest, kbs, folders, searchKb }: Props
 ) {
   const isList = viewType === 'list';
   const isCanvas = viewType === 'canvas';
@@ -81,7 +82,7 @@ export default function SearchMode(
   return (
     <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
       {isList && (
-        <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(540px, 1.35fr)', gap: 22, alignItems: 'stretch', paddingBottom: 18 }}>
+        <div className={`ik-search-layout ${selectedId ? 'is-detail-open' : ''}`} style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(540px, 1.35fr)', gap: 22, alignItems: 'stretch', paddingBottom: 18 }}>
           <div className="ik-results-panel">
             <div className="ik-search-result-head">
               <span>{hasQuery ? `找到 ${results.length} 条` : `共 ${results.length} 条`}{scopedKbName ? ` · ${scopedKbName}` : ''}</span>
@@ -143,7 +144,10 @@ export default function SearchMode(
             )}
             </div>
           </div>
-          <DetailSidePanel entry={selectedEntry} query={query} loading={selectedLoading} />
+          <div className="ik-mobile-detail-wrap">
+            <button type="button" className="ik-mobile-back" onClick={onCloseDetail}>‹ 返回结果</button>
+            <DetailSidePanel entry={selectedEntry} query={query} loading={selectedLoading} />
+          </div>
         </div>
       )}
 

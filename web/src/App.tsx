@@ -1113,6 +1113,7 @@ export default function App() {
                 setTimeout(() => inputRef.current?.focus(), 20);
               }}
               onOpen={(id, index) => { if (typeof index === 'number') setSel(index); setOpenId(id); }}
+              onCloseDetail={() => setOpenId(null)}
               onOpenAI={() => setAiOpen(true)}
               kbs={kbs}
               folders={folders}
