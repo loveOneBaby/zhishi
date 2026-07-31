@@ -10,6 +10,7 @@ import { KB_PACKAGE_2_VERSION, kbPackage2ToImportPayload } from './kb-package-2.
 import { score, searchEntries } from './search.js';
 import { toSearchText } from './pinyin-search.js';
 import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc } from './assets.js';
+import { assetChunkRanges } from './db/asset.js';
 import { extractText, blocksToMarkdown as blockNoteToMarkdown } from './blocks.js';
 import { normalizeDocBlocks, splitDocToIndex, markdownToDocBlocks, safeImageUrl, safeLinkHref } from './doc.js';
 import { assertAuthConfiguredForProduction } from './auth.js';
@@ -123,6 +124,15 @@ test('assets: parseDataUrl / sha256 / sniffImageSize / classifyImageSrc', () => 
   assert.equal(classifyImageSrc(PNG_1x1)!.kind, 'data');
   assert.equal(classifyImageSrc('C:\\local\\a.png'), null);
   assert.equal(parseDataUrl('not-a-data-url'), null);
+});
+
+test('assets: 大图片按 SQLite 一基偏移连续分块', () => {
+  assert.deepEqual(assetChunkRanges(10, 4), [
+    { offset: 1, length: 4 },
+    { offset: 5, length: 4 },
+    { offset: 9, length: 2 },
+  ]);
+  assert.deepEqual(assetChunkRanges(0, 4), []);
 });
 
 test('blocks.extractText: BlockNote 形态抽纯文本(含 caption/表格/子块/未知块)', () => {

@@ -1,6 +1,8 @@
 import { db } from './client.js';
 import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc, isAllowedImageMime } from '../assets.js';
 
+const ASSET_CHUNK_BYTES = 256 * 1024;
+
 export interface AssetMeta {
   id: string;
   kind: 'data' | 'external';
@@ -81,7 +83,32 @@ export async function getAsset(id: string): Promise<AssetMeta | null> {
 }
 
 export async function getAssetBytes(id: string): Promise<{ mime: string; bytes: Buffer } | null> {
-  const row = await db.prepare('SELECT mime, data FROM assets WHERE id = ? AND kind = \'data\'').get(id) as { mime: string; data: ArrayBuffer | Buffer | null } | undefined;
-  if (!row || !row.data) return null;
-  return { mime: row.mime, bytes: Buffer.from(row.data as ArrayBuffer) };
+  const meta = await db.prepare(`
+    SELECT mime, length(data) AS size
+    FROM assets
+    WHERE id = ? AND kind = 'data'
+  `).get(id) as { mime: string; size: number } | undefined;
+  if (!meta || !Number(meta.size)) return null;
+
+  // libSQL HTTP 对单个大 BLOB 响应非常慢；分块读取可避免远程响应超时。
+  const chunks = await Promise.all(assetChunkRanges(Number(meta.size)).map(async ({ offset, length }) => {
+    const row = await db.prepare(`
+      SELECT substr(data, ?, ?) AS data
+      FROM assets
+      WHERE id = ? AND kind = 'data'
+    `).get(offset, length, id) as { data: ArrayBuffer | Buffer | null } | undefined;
+    return row?.data ? Buffer.from(row.data as ArrayBuffer) : Buffer.alloc(0);
+  }));
+  const bytes = Buffer.concat(chunks);
+  if (bytes.length !== Number(meta.size)) throw new Error(`资源读取不完整: ${bytes.length}/${meta.size}`);
+  return { mime: meta.mime, bytes };
+}
+
+export function assetChunkRanges(size: number, chunkSize = ASSET_CHUNK_BYTES): Array<{ offset: number; length: number }> {
+  if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(chunkSize) || chunkSize <= 0) return [];
+  const ranges: Array<{ offset: number; length: number }> = [];
+  for (let offset = 1; offset <= size; offset += chunkSize) {
+    ranges.push({ offset, length: Math.min(chunkSize, size - offset + 1) });
+  }
+  return ranges;
 }
