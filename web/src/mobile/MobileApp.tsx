@@ -7,6 +7,7 @@ import { fetchMobileBootstrap, fetchMobileEntries, searchMobileEntries } from '.
 import { themeVars, THEMES } from '../themes';
 import { highlightText } from '../highlight';
 import readingBookPlant from '../assets/mobile/reading-book-plant.png';
+import { renderMd } from '../markdown';
 
 type ModuleName = 'home' | 'library' | 'search' | 'favorites';
 type MobileRoute =
@@ -449,9 +450,9 @@ function MobileEntry({ entry, onBack, saved, onToggleSaved }: { entry: Entry; on
       </div>
       {tocOpen && <nav className="im-reader-toc">{(entry.nodes ?? []).map((node) => <a key={node.id} href={`#reader-${node.id}`}>{node.title}</a>)}</nav>}
       <article className="im-reader-card" style={{ fontSize }}>
-        {entry.intro ? <p>{entry.intro}</p> : null}
+        {entry.intro ? renderMd(entry.intro) : null}
         {(entry.nodes ?? []).length > 0 ? (entry.nodes ?? []).map((node) => (
-          <section key={node.id} id={`reader-${node.id}`}><span className="im-reader-dot" aria-hidden="true" /><h2>{node.title}</h2>{node.content ? <p>{node.content}</p> : null}</section>
+          <section key={node.id} id={`reader-${node.id}`}><span className="im-reader-dot" aria-hidden="true" /><h2>{node.title}</h2>{node.content ? renderMd(node.content) : null}</section>
         )) : <p>{entry.summary || '这个知识点暂无更多内容。'}</p>}
       </article>
       <footer className="im-reader-pagination">

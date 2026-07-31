@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { newNode, addChild, moveNode, removeNode, patchNode } from './outline';
 import { buildNeedles, matchesQuery, toSearchText } from './pinyin-search';
 import { filterEntries } from './search';
 import { buildModel, collectVisible, buildTreeLayout } from './components/canvas/model';
 import type { Entry, KnowledgeBase, Folder } from './types';
 import { defaultHashForDevice, detectMobileDevice, isRootHash } from './device-route';
+import { renderMd } from './markdown';
 
 function entry(over: Partial<Entry>): Entry {
   return { id: 'e', cat: 'AI', kbId: 'kb1', folderId: null, title: '示例', py: '', tags: [], summary: '', intro: '', nodes: [], ...over };
@@ -13,6 +15,12 @@ function entry(over: Partial<Entry>): Entry {
 
 const noFolders: Folder[] = [];
 const kbAi: KnowledgeBase[] = [{ id: 'kb1', name: 'AI', sort: 0 }];
+
+test('markdown: 站内资源图片渲染为可加载的 img', () => {
+  const html = renderToStaticMarkup(renderMd('![流程图](/api/assets/as_demo/raw)'));
+  assert.match(html, /<img[^>]+src="\/api\/assets\/as_demo\/raw"/);
+  assert.match(html, /alt="流程图"/);
+});
 
 test('device route: 根路径按设备分流，明确深链接保持不变', () => {
   assert.equal(isRootHash(''), true);
