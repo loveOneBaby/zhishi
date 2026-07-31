@@ -2,6 +2,10 @@ import { db } from './client.js';
 import { parseDataUrl, sha256, sniffImageSize, classifyImageSrc, isAllowedImageMime } from '../assets.js';
 
 const ASSET_CHUNK_BYTES = 256 * 1024;
+const ASSET_BYTES_CACHE_LIMIT = 64 * 1024 * 1024;
+const assetBytesCache = new Map<string, { mime: string; bytes: Buffer }>();
+const assetReads = new Map<string, Promise<{ mime: string; bytes: Buffer } | null>>();
+let assetBytesCacheSize = 0;
 
 export interface AssetMeta {
   id: string;
@@ -83,6 +87,23 @@ export async function getAsset(id: string): Promise<AssetMeta | null> {
 }
 
 export async function getAssetBytes(id: string): Promise<{ mime: string; bytes: Buffer } | null> {
+  const cached = assetBytesCache.get(id);
+  if (cached) {
+    assetBytesCache.delete(id);
+    assetBytesCache.set(id, cached);
+    return cached;
+  }
+  const active = assetReads.get(id);
+  if (active) return active;
+  const read = loadAssetBytes(id).then((asset) => {
+    if (asset) rememberAssetBytes(id, asset);
+    return asset;
+  }).finally(() => assetReads.delete(id));
+  assetReads.set(id, read);
+  return read;
+}
+
+async function loadAssetBytes(id: string): Promise<{ mime: string; bytes: Buffer } | null> {
   const meta = await db.prepare(`
     SELECT mime, length(data) AS size
     FROM assets
@@ -102,6 +123,21 @@ export async function getAssetBytes(id: string): Promise<{ mime: string; bytes: 
   const bytes = Buffer.concat(chunks);
   if (bytes.length !== Number(meta.size)) throw new Error(`资源读取不完整: ${bytes.length}/${meta.size}`);
   return { mime: meta.mime, bytes };
+}
+
+function rememberAssetBytes(id: string, asset: { mime: string; bytes: Buffer }): void {
+  if (asset.bytes.length > ASSET_BYTES_CACHE_LIMIT) return;
+  const previous = assetBytesCache.get(id);
+  if (previous) assetBytesCacheSize -= previous.bytes.length;
+  assetBytesCache.delete(id);
+  assetBytesCache.set(id, asset);
+  assetBytesCacheSize += asset.bytes.length;
+  while (assetBytesCacheSize > ASSET_BYTES_CACHE_LIMIT) {
+    const oldest = assetBytesCache.entries().next().value as [string, { mime: string; bytes: Buffer }] | undefined;
+    if (!oldest) break;
+    assetBytesCache.delete(oldest[0]);
+    assetBytesCacheSize -= oldest[1].bytes.length;
+  }
 }
 
 export function assetChunkRanges(size: number, chunkSize = ASSET_CHUNK_BYTES): Array<{ offset: number; length: number }> {
