@@ -17,11 +17,22 @@ self.addEventListener('fetch', (event) => {
   const cacheableEntry = url.pathname.startsWith('/api/entries/');
   const cacheableAsset = /^\/api\/assets\/[^/]+\/raw$/.test(url.pathname);
   if (!cacheableEntry && !cacheableAsset && url.origin !== self.location.origin) return;
-  event.respondWith(fetch(event.request).then((response) => {
-    if (response.ok && (cacheableEntry || cacheableAsset || !url.pathname.startsWith('/api/'))) {
-      const cachedResponse = response.clone();
-      event.waitUntil(caches.open(CACHE).then((cache) => cache.put(event.request, cachedResponse)));
+  const shouldCache = cacheableEntry || cacheableAsset || !url.pathname.startsWith('/api/');
+  event.respondWith((async () => {
+    try {
+      const response = await fetch(event.request);
+      if (response.ok && shouldCache && response.body && !response.bodyUsed) {
+        try {
+          const cachedResponse = response.clone();
+          event.waitUntil(caches.open(CACHE).then((cache) => cache.put(event.request, cachedResponse)));
+        } catch {
+          // 某些响应流可能不允许 clone，失败则仅走网络不缓存。
+        }
+      }
+      return response;
+    } catch {
+      const response = await caches.match(event.request);
+      return response ?? caches.match('/');
     }
-    return response;
-  }).catch(() => caches.match(event.request).then((response) => response ?? caches.match('/'))));
+  })());
 });

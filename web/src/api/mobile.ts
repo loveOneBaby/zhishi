@@ -16,6 +16,18 @@ export interface MobileEntriesPayload {
   limit: number;
 }
 
+export interface MobileEntryRef {
+  id: string;
+  title: string;
+  cat: string;
+  kbId: string;
+}
+
+export interface MobileEntryNavigationPayload {
+  previous: MobileEntryRef | null;
+  next: MobileEntryRef | null;
+}
+
 export function fetchMobileBootstrap(): Promise<MobileBootstrapPayload> {
   return apiGetJson('/mobile/bootstrap');
 }
@@ -31,4 +43,8 @@ export function fetchMobileEntries(options: { kbId?: string; kbIds?: string[]; o
 
 export function searchMobileEntries(query: string, limit = 50): Promise<MobileEntriesPayload> {
   return apiGetJson(`/mobile/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+}
+
+export function fetchMobileEntryNavigation(entryId: string): Promise<MobileEntryNavigationPayload> {
+  return apiGetJson(`/mobile/entry/${encodeURIComponent(entryId)}/navigation`);
 }

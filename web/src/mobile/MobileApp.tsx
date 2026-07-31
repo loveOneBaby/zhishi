@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Bookmark, BookOpen, Check, ChevronRight, Clock3, Database, Filter, Layers3, LibraryBig, List, Minus, Plus, RefreshCw, Search, Sparkles, Star, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Bookmark, BookOpen, Check, ChevronRight, Clock3, Database, Layers3, LibraryBig, List, Minus, Plus, RefreshCw, Search, Star, X } from 'lucide-react';
 import { PiBookmarkSimpleFill, PiBookmarkSimpleLight, PiBookLight, PiBookOpenLight, PiBooksLight, PiClockLight, PiCompassFill, PiDatabaseLight, PiMagnifyingGlassLight, PiNotebookLight, PiPencilSimpleLineLight, PiSquaresFourLight, PiStackLight, PiStarFill, PiStarLight, PiXLight } from 'react-icons/pi';
 import type { Entry, KbCategory, KnowledgeBase } from '../types';
 import { fetchEntry } from '../api';
-import { fetchMobileBootstrap, fetchMobileEntries, searchMobileEntries } from '../api/mobile';
+import { fetchMobileBootstrap, fetchMobileEntries, fetchMobileEntryNavigation, searchMobileEntries } from '../api/mobile';
 import { themeVars, THEMES } from '../themes';
 import { highlightText } from '../highlight';
 import readingBookPlant from '../assets/mobile/reading-book-plant.png';
@@ -13,7 +13,18 @@ type ModuleName = 'home' | 'library' | 'search' | 'favorites';
 type MobileRoute =
   | { kind: 'module'; module: ModuleName }
   | { kind: 'kb'; kbId: string }
-  | { kind: 'entry'; entryId: string };
+  | { kind: 'entry'; entryId: string }
+  | { kind: 'recent-libraries' };
+
+type RecentKbVisit = {
+  kbId: string;
+  visitedAt: number;
+};
+
+type ReaderNavigation = {
+  previous: ReaderNavigationTarget | null;
+  next: ReaderNavigationTarget | null;
+};
 
 type DataProps = {
   entries: Entry[];
@@ -25,11 +36,41 @@ type DataProps = {
   totalEntries: number;
   savedEntries: Entry[];
   recentEntries: Entry[];
+  recentKbs: RecentKbVisit[];
+  recentSearches: string[];
+  readerProgress: ReaderProgressMap;
+  onTouchRecentSearch?: (query: string) => void;
+  onDeleteRecentSearch?: (query: string) => void;
+  onClearRecentSearches?: () => void;
+  onShuffleRecommendations?: () => void;
 };
 
 const SAVED_KEY = 'ik_mobile_saved_entries_v1';
 const RECENT_KEY = 'ik_mobile_recent_entries_v1';
+const RECENT_KBS_KEY = 'ik_mobile_recent_kbs_v1';
 const READER_SIZE_KEY = 'ik_mobile_reader_size_v1';
+const READER_PROGRESS_KEY = 'ik_mobile_reader_progress_v1';
+const RECENT_SEARCHES_KEY = 'ik_mobile_recent_searches_v1';
+const RECENT_SEARCHES_LIMIT = 6;
+const RECENT_KBS_LIMIT = 12;
+const RECENT_PROGRESS_LIMIT = 20;
+
+const MODULE_PATHS: Record<string, string> = {
+  home: '#/mobile/home',
+  library: '#/mobile/library',
+  search: '#/mobile/search',
+  favorites: '#/mobile/favorites',
+  recentLibraries: '#/mobile/recent-libraries',
+};
+
+type ReaderNavigationTarget = {
+  id: string;
+  title: string;
+  cat: string;
+  kbId: string;
+};
+
+type ReaderProgressMap = Record<string, { progress: number; updatedAt: number }>;
 
 function storedEntries(key: string): Entry[] {
   try {
@@ -38,22 +79,131 @@ function storedEntries(key: string): Entry[] {
   } catch { return []; }
 }
 
+function storedStringList(key: string): string[] {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(key) ?? '[]');
+    return Array.isArray(value)
+      ? [...new Set(value.map((entry) => String(entry).trim()).filter(Boolean))]
+      : [];
+  } catch { return []; }
+}
+
 function storeEntries(key: string, entries: Entry[]): void {
   try { window.localStorage.setItem(key, JSON.stringify(entries.slice(0, 30))); } catch { /* storage unavailable */ }
 }
 
-const MODULE_PATHS: Record<ModuleName, string> = {
-  home: '#/mobile/home',
-  library: '#/mobile/library',
-  search: '#/mobile/search',
-  favorites: '#/mobile/favorites',
-};
+function storeRecentVisits(key: string, visits: RecentKbVisit[]): void {
+  try { window.localStorage.setItem(key, JSON.stringify(visits.slice(0, RECENT_KBS_LIMIT))); } catch { /* storage unavailable */ }
+}
+
+function storedReaderProgress(): ReaderProgressMap {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(READER_PROGRESS_KEY) ?? '{}');
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const out: ReaderProgressMap = {};
+    for (const [entryId, value] of Object.entries(raw)) {
+      if (typeof value !== 'object' || value === null) continue;
+      const progress = Number((value as { progress?: unknown }).progress);
+      const updatedAt = Number((value as { updatedAt?: unknown }).updatedAt);
+      if (!Number.isFinite(progress) || !Number.isFinite(updatedAt) || entryId.length < 1) continue;
+      out[entryId] = { progress: Math.max(0, Math.min(100, Math.round(progress))), updatedAt };
+    }
+    return out;
+  } catch { return {}; }
+}
+
+function storedRecentKbs(): RecentKbVisit[] {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(RECENT_KBS_KEY) ?? '[]');
+    if (!Array.isArray(raw)) return [];
+    const valid = raw
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const kbId = String((item as { kbId?: unknown }).kbId ?? '').trim();
+        const visitedAt = Number((item as { visitedAt?: unknown }).visitedAt);
+        if (!kbId || !Number.isFinite(visitedAt)) return null;
+        return { kbId, visitedAt };
+      })
+      .filter((item): item is RecentKbVisit => item !== null);
+    return valid
+      .sort((a, b) => b.visitedAt - a.visitedAt)
+      .filter((item, index, arr) => arr.findIndex((candidate) => candidate.kbId === item.kbId) === index)
+      .slice(0, RECENT_KBS_LIMIT);
+  } catch { return []; }
+}
+
+function pushRecentKb(visits: RecentKbVisit[], kbId: string): RecentKbVisit[] {
+  const now = Date.now();
+  const normalizedId = kbId.trim();
+  if (!normalizedId) return visits;
+  const existing = visits.filter((visit) => visit.kbId !== normalizedId);
+  return [{ kbId: normalizedId, visitedAt: now }, ...existing].slice(0, RECENT_KBS_LIMIT);
+}
+
+function saveRecentSearches(value: string[]): void {
+  try { window.localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(value)); } catch { /* storage unavailable */ }
+}
+
+function saveReaderProgress(value: ReaderProgressMap): void {
+  try { window.localStorage.setItem(READER_PROGRESS_KEY, JSON.stringify(value)); } catch { /* storage unavailable */ }
+}
+
+function pushRecentItem(items: string[], value: string, limit: number): string[] {
+  const normalized = value.trim();
+  if (!normalized) return items;
+  return [normalized, ...items.filter((item) => item !== normalized)].slice(0, limit);
+}
+
+function clampProgress(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function extractReadingText(entry: Entry): string {
+  const walkNodes = (nodes: Entry['nodes']): string[] => nodes.flatMap((node) => [
+    node.title,
+    node.content,
+    ...walkNodes(node.children ?? []),
+  ]);
+  return [entry.title, entry.summary, entry.intro, ...walkNodes(entry.nodes ?? [])].join(' ');
+}
+
+function estimateReadingMinutes(entry: Entry): number {
+  const text = extractReadingText(entry).replace(/[\u4e00-\u9fff]/g, ' $&');
+  const chinese = text.match(/[\u4e00-\u9fff]/g)?.length ?? 0;
+  const words = text
+    .replace(/[\u4e00-\u9fff]/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .length;
+  const score = chinese + Math.round(words / 1.2);
+  return Math.max(1, Math.round(score / 280));
+}
+
+function formatRelativeTime(ts: number): string {
+  const delta = Date.now() - ts;
+  if (!Number.isFinite(ts) || delta <= 0) return '刚刚';
+  if (delta < 90_000) return '刚刚';
+  if (delta < 3_600_000) return `${Math.max(1, Math.floor(delta / 60_000))} 分钟前`;
+  if (delta < 28_800_000) return `${Math.floor(delta / 3_600_000)} 小时前`;
+  return `${Math.floor(delta / 86_400_000)} 天前`;
+}
+
+function flattenReaderNodes(nodes: Entry['nodes'], depth = 0): Array<Entry['nodes'][number] & { depth: number }> {
+  const out: Array<Entry['nodes'][number] & { depth: number }> = [];
+  for (const node of nodes) {
+    out.push({ ...node, depth });
+    if ((node.children ?? []).length > 0) out.push(...flattenReaderNodes(node.children ?? [], depth + 1));
+  }
+  return out;
+}
 
 function routeFromHash(): MobileRoute {
-  const parts = window.location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  const parts = window.location.hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
   if (parts[0] !== 'mobile') return { kind: 'module', module: 'home' };
   if (parts[1] === 'entry' && parts[2]) return { kind: 'entry', entryId: parts[2] };
   if (parts[1] === 'kb' && parts[2]) return { kind: 'kb', kbId: parts[2] };
+  if (parts[1] === 'recent-libraries') return { kind: 'recent-libraries' };
   if (parts[1] === 'library' || parts[1] === 'search' || parts[1] === 'favorites' || parts[1] === 'home') {
     return { kind: 'module', module: parts[1] };
   }
@@ -72,7 +222,7 @@ function PageTitle({ kicker, title, description }: { kicker: string; title: stri
   return <section className="im-page-title"><span className="im-section-kicker">{kicker}</span><h1>{title}</h1><p>{description}</p></section>;
 }
 
-function SectionHead({ kicker, title, count, action }: { kicker: string; title: string; count?: string; action?: JSX.Element }): JSX.Element {
+function SectionHead({ kicker, title, count, action }: { kicker: string; title: string; count?: string; action?: JSX.Element | null }): JSX.Element {
   return <section className="im-section-head"><div><span className="im-section-kicker">{kicker}</span><h2>{title}</h2></div>{action ?? (count ? <span>{count}</span> : null)}</section>;
 }
 
@@ -171,9 +321,22 @@ function EntryList({ entries, kbs, query = '', emptyText = '没有匹配的知�
   );
 }
 
-function HomeModule({ entries, kbs, counts, totalEntries, recentEntries, loading, error }: DataProps): JSX.Element {
+function HomeModule({
+  entries,
+  kbs,
+  counts,
+  totalEntries,
+  recentEntries,
+  recentKbs,
+  readerProgress,
+  onShuffleRecommendations,
+  loading,
+  error,
+}: DataProps): JSX.Element {
   const recommendations = entries.slice(0, 3);
   const featured = recentEntries[0] ?? entries[0];
+  const featuredProgress = featured ? readerProgress[featured.id] : null;
+  const featureKb = featured ? kbs.find((kb) => kb.id === featured.kbId)?.name : '';
   const week = [
     { day: '一', done: true },
     { day: '二', done: true },
@@ -184,6 +347,7 @@ function HomeModule({ entries, kbs, counts, totalEntries, recentEntries, loading
     { day: '日' },
   ];
   const libraryIcons = [<PiBookLight size={30} />, <PiStackLight size={30} />, <PiDatabaseLight size={30} />, <PiSquaresFourLight size={29} />];
+  const totalRecentKbs = recentKbs.length;
   return (
     <main className="im-home im-notebook-home">
       <section className="im-notebook-intro">
@@ -210,20 +374,20 @@ function HomeModule({ entries, kbs, counts, totalEntries, recentEntries, loading
         <button type="button" className="im-notebook-reading-card" onClick={() => navigate(`#/mobile/entry/${featured.id}`)}>
           <i className="im-notebook-bluebar" />
           <strong>{featured.title}</strong>
-          <small>上次阅读到：{featured.cat || 'BASE 理论核心思想'}</small>
-          <span className="im-notebook-progress"><i /><em>58%</em></span>
-          <span className="im-notebook-time"><Bookmark size={13} />上次：今天 09:30</span>
+          <small>上次阅读到：{featureKb || featured.cat}</small>
+          <span className="im-notebook-progress"><i /><em>{featuredProgress?.progress ?? 0}%</em></span>
+          <span className="im-notebook-time"><Bookmark size={13} />上次：{featuredProgress ? formatRelativeTime(featuredProgress.updatedAt) : '开始阅读'}</span>
           <img src={readingBookPlant} alt="" />
         </button>
       </section>}
 
       <section className="im-today-picks">
-        <SectionHead kicker="" title="今日精选" action={<button type="button" className="im-text-action">换一换 <RefreshCw size={14} /></button>} />
+        <SectionHead kicker="" title="今日精选" action={<button type="button" className="im-text-action" onClick={() => onShuffleRecommendations?.()}><RefreshCw size={14} /> 换一换</button>} />
         <div className="im-today-list">
           {recommendations.map((entry, index) => <button type="button" key={entry.id} onClick={() => navigate(`#/mobile/entry/${entry.id}`)}>
             <i />
             <span><strong>{entry.title}</strong><small>{entry.cat} · {(entry.tags ?? []).slice(0, 2).join(' · ') || '知识整理'}</small></span>
-            <em>阅读 {index === 0 ? 8 : index === 1 ? 12 : 10} 分钟</em>
+            <em>阅读 {estimateReadingMinutes(entry)} 分钟</em>
           </button>)}
         </div>
       </section>
@@ -238,13 +402,33 @@ function HomeModule({ entries, kbs, counts, totalEntries, recentEntries, loading
           </button>)}
         </div>
       </section>
+      {totalRecentKbs > 0 ? (
+        <section className="im-your-libraries">
+          <SectionHead kicker="" title="最近访问知识库" action={<button type="button" className="im-text-action" onClick={() => navigate(MODULE_PATHS.recentLibraries)}>查看全部 <ChevronRight size={15} /></button>} />
+          <div className="im-recent-libraries">
+            <div>
+              {recentKbs.slice(0, 2).map((visit, index) => {
+                const kb = kbs.find((item) => item.id === visit.kbId);
+                if (!kb) return null;
+                return <button type="button" key={kb.id} onClick={() => navigate(`#/mobile/kb/${kb.id}`)}>
+                  <i>{libraryIcons[index % libraryIcons.length]}</i>
+                  <span>
+                    <strong>{kb.name}</strong>
+                    <small>{counts[kb.id] ?? 0} 篇 · {formatRelativeTime(visit.visitedAt)}</small>
+                  </span>
+                </button>;
+              })}
+            </div>
+          </div>
+        </section>
+      ) : null}
       {error && <div className="im-empty is-error">数据加载失败：{error}</div>}
       {loading && <span className="im-sr-only">{totalEntries ? `${totalEntries} 条内容` : '加载中'}</span>}
     </main>
   );
 }
 
-function LibraryModule({ kbs, categories, counts, error }: DataProps): JSX.Element {
+function LibraryModule({ kbs, categories, counts, recentKbs, error }: DataProps): JSX.Element {
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const visible = useMemo(() => kbs.filter((kb) => {
@@ -253,6 +437,10 @@ function LibraryModule({ kbs, categories, counts, error }: DataProps): JSX.Eleme
     return matchesCategory && matchesQuery;
   }), [categoryId, kbs, query]);
   const libraryIcons = [<PiBookOpenLight size={27} />, <PiStackLight size={27} />, <PiDatabaseLight size={27} />, <PiBookLight size={27} />];
+  const recentList = useMemo(() => recentKbs
+    .map((visit) => kbs.find((kb) => kb.id === visit.kbId))
+    .filter((kb): kb is KnowledgeBase => Boolean(kb)),
+  [recentKbs, kbs]);
   return (
     <main className="im-home im-notebook-module im-library-notebook">
       <NotebookModuleHeader title="知识库" subtitle="把知识整理成自己的秩序" icon={<PiBooksLight size={26} />} />
@@ -263,18 +451,18 @@ function LibraryModule({ kbs, categories, counts, error }: DataProps): JSX.Eleme
       </label>
 
       {!query && <section className="im-recent-libraries">
-        <SectionHead kicker="" title="最近访问" action={<button type="button" className="im-text-action">查看全部 <ChevronRight size={14} /></button>} />
+        <SectionHead kicker="" title="最近访问" action={<button type="button" className="im-text-action" onClick={() => navigate(MODULE_PATHS.recentLibraries)}>查看全部 <ChevronRight size={14} /></button>} />
         <div>
-          {kbs.slice(0, 3).map((kb, index) => <button type="button" key={kb.id} onClick={() => navigate(`#/mobile/kb/${kb.id}`)}>
+          {(recentList.length ? recentList : kbs.slice(0, 3)).map((kb, index) => <button type="button" key={kb.id} onClick={() => navigate(`#/mobile/kb/${kb.id}`)}>
             <i>{libraryIcons[index]}</i>
-            <span><strong>{kb.name}</strong><small>{counts[kb.id] ?? 0} 篇 · {index === 0 ? '刚刚' : index === 1 ? '1 小时前' : '昨天'}</small></span>
+            <span><strong>{kb.name}</strong><small>{counts[kb.id] ?? 0} 篇</small></span>
           </button>)}
         </div>
       </section>}
 
       <div className="im-notebook-filters" role="tablist" aria-label="知识库分类">
         <button type="button" className={!categoryId ? 'is-active' : ''} onClick={() => setCategoryId(null)}>全部</button>
-        {categories.slice(0, 4).map((category) => <button type="button" key={category.id} className={categoryId === category.id ? 'is-active' : ''} onClick={() => setCategoryId(category.id)}>{category.name}</button>)}
+        {categories.map((category) => <button type="button" key={category.id} className={categoryId === category.id ? 'is-active' : ''} onClick={() => setCategoryId(category.id)}>{category.name}</button>)}
       </div>
 
       <SectionHead kicker="" title={query ? '搜索结果' : '全部知识库'} count={`${visible.length} 个`} />
@@ -291,22 +479,54 @@ function LibraryModule({ kbs, categories, counts, error }: DataProps): JSX.Eleme
   );
 }
 
-function SearchModule({ entries, kbs, error }: DataProps): JSX.Element {
+function RecentLibrariesModule({ recentKbs, kbs, counts, error }: { recentKbs: RecentKbVisit[]; kbs: KnowledgeBase[]; counts: Record<string, number>; error?: string }): JSX.Element {
+  const items = useMemo(() => recentKbs
+    .map((visit) => ({ visit, kb: kbs.find((kb) => kb.id === visit.kbId) }))
+    .filter((item): item is { visit: RecentKbVisit; kb: KnowledgeBase } => Boolean(item.kb)),
+  [recentKbs, kbs]);
+  const libraryIcons = [<PiBookOpenLight size={28} />, <PiStackLight size={28} />, <PiDatabaseLight size={28} />, <PiBookLight size={28} />];
+  return (
+    <main className="im-home im-notebook-module im-library-notebook">
+      <button type="button" className="im-back" onClick={() => navigate(MODULE_PATHS.library)}><ArrowLeft size={18} />知识库</button>
+      <PageTitle kicker="RECENTLY" title="最近访问" description={`共 ${items.length} 个知识库`}/>
+      <div className="im-notebook-kb-list">
+        {items.length === 0
+          ? <div className="im-empty">暂无最近访问记录。</div>
+          : items.map((item, index) => <button type="button" key={item.kb.id} onClick={() => navigate(`#/mobile/kb/${item.kb.id}`)}>
+            <i>{libraryIcons[index % libraryIcons.length]}</i>
+            <span><strong>{item.kb.name}</strong><small>{counts[item.kb.id] ?? 0} 篇</small><em>上次访问：{formatRelativeTime(item.visit.visitedAt)}</em></span>
+            <ChevronRight size={16} />
+          </button>)}
+      </div>
+      {error && <div className="im-empty is-error">数据加载失败：{error}</div>}
+    </main>
+  );
+}
+
+function SearchModule({ entries, kbs, recentSearches, onTouchRecentSearch, onDeleteRecentSearch, onClearRecentSearches, error }: DataProps): JSX.Element {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Entry[]>(entries.slice(0, 12));
   const [searching, setSearching] = useState(false);
   useEffect(() => {
     if (!query.trim()) { setResults(entries.slice(0, 12)); setSearching(false); return undefined; }
     let alive = true;
+    const normalized = query.trim();
     setSearching(true);
     const timer = window.setTimeout(() => {
-      searchMobileEntries(query).then((payload) => { if (alive) setResults(payload.entries); })
+      searchMobileEntries(normalized).then((payload) => {
+        if (!alive) return;
+        setResults(payload.entries);
+        if (payload.entries.length >= 0) {
+          onTouchRecentSearch?.(normalized);
+        }
+      })
         .catch(() => { if (alive) setResults([]); })
         .finally(() => { if (alive) setSearching(false); });
     }, 250);
     return () => { alive = false; window.clearTimeout(timer); };
-  }, [entries, query]);
+  }, [entries, query, onTouchRecentSearch]);
   const kbNames = new Map(kbs.map((kb) => [kb.id, kb.name]));
+  const recentTerms = recentSearches.slice(0, 8);
   return (
     <main className="im-home im-notebook-module im-search-notebook">
       <NotebookModuleHeader title="搜索" subtitle="今天想查什么？" icon={<PiMagnifyingGlassLight size={26} />} />
@@ -317,9 +537,16 @@ function SearchModule({ entries, kbs, error }: DataProps): JSX.Element {
       </label>
 
       <section className="im-recent-searches">
-        <SectionHead kicker="" title="最近搜索" />
+        <SectionHead kicker="" title="最近搜索" action={recentTerms.length === 0 ? null : <button type="button" className="im-text-action" onClick={() => onClearRecentSearches?.()}>清空全部</button>} />
         <div>
-          {['CAP 定理', 'RAG 检索', 'MySQL 索引'].map((term) => <button type="button" key={term} onClick={() => setQuery(term)}><PiClockLight size={16} />{term}</button>)}
+          {recentTerms.length === 0 ? <div className="im-empty">暂无搜索记录，先搜索一个吧。</div> : recentTerms.map((term) => (
+            <span className="im-chip" key={term}>
+              <button type="button" onClick={() => setQuery(term)}>
+                <PiClockLight size={16} />{term}
+              </button>
+              <button type="button" className="im-chip-close" onClick={() => onDeleteRecentSearch?.(term)} aria-label={`删除搜索词 ${term}`}><PiXLight size={14} /></button>
+            </span>
+          ))}
         </div>
       </section>
 
@@ -336,7 +563,7 @@ function SearchModule({ entries, kbs, error }: DataProps): JSX.Element {
   );
 }
 
-function FavoritesModule({ entries, kbs, counts, savedEntries, error }: DataProps): JSX.Element {
+function FavoritesModule({ entries, kbs, counts, savedEntries, readerProgress, error }: DataProps): JSX.Element {
   const favoriteKbs = useMemo(() => kbs.filter((kb) => kb.favorite), [kbs]);
   const [favoriteEntries, setFavoriteEntries] = useState<Entry[]>([]);
   const [activeTab, setActiveTab] = useState<'entries' | 'libraries'>('entries');
@@ -351,6 +578,11 @@ function FavoritesModule({ entries, kbs, counts, savedEntries, error }: DataProp
   const visibleSaved = Array.from(new Map([...savedEntries, ...favoriteEntries, ...entries].map((entry) => [entry.id, entry])).values()).slice(0, 4);
   const featured = visibleSaved[0];
   const libraryIcons = [<PiBookLight size={27} />, <PiStackLight size={27} />, <PiDatabaseLight size={27} />];
+  const getProgress = (entry: Entry): { progress: number; updatedAt: number } | null => {
+    if (!entry?.id) return null;
+    const data = readerProgress[entry.id];
+    return data ? { progress: data.progress, updatedAt: data.updatedAt } : null;
+  };
   return (
     <main className="im-home im-notebook-module im-favorites-notebook">
       <NotebookModuleHeader title="收藏" subtitle="把值得重读的留在这里" icon={<PiStarLight size={26} />} />
@@ -361,13 +593,13 @@ function FavoritesModule({ entries, kbs, counts, savedEntries, error }: DataProp
 
       {activeTab === 'entries' ? <>
         {featured && <section className="im-favorite-featured">
-          <SectionHead kicker="" title="最近收藏" action={<button type="button" className="im-text-action">查看全部 <ChevronRight size={14} /></button>} />
+          <SectionHead kicker="" title="最近收藏" />
           <button type="button" onClick={() => navigate(`#/mobile/entry/${featured.id}`)}>
             <i />
             <strong>{featured.title}</strong>
             <small>来源知识库：{kbs.find((kb) => kb.id === featured.kbId)?.name ?? featured.cat}</small>
-            <span><em /><b>58%</b></span>
-            <label><PiBookmarkSimpleLight size={14} />收藏时间：今天 09:30</label>
+            <span><em /><b>{getProgress(featured)?.progress ?? 0}%</b></span>
+            <label><PiBookmarkSimpleLight size={14} />{featured.updatedAt ? `收藏时间：${new Date(featured.updatedAt).toLocaleDateString()}` : `最近阅读：${getProgress(featured) ? formatRelativeTime(getProgress(featured)?.updatedAt ?? Date.now()) : '未阅读'}`}</label>
             <PiBookmarkSimpleFill className="im-featured-bookmark" size={23} />
             <img src={readingBookPlant} alt="" />
           </button>
@@ -376,11 +608,13 @@ function FavoritesModule({ entries, kbs, counts, savedEntries, error }: DataProp
         <section className="im-all-favorites">
           <SectionHead kicker="" title="全部收藏" action={<button type="button" className="im-text-action">编辑 <PiPencilSimpleLineLight size={15} /></button>} />
           <div>
-            {visibleSaved.length === 0 ? <div className="im-empty">打开知识点后点亮星标，即可保存到这里。</div> : visibleSaved.slice(0, 8).map((entry, index) => <button type="button" key={entry.id} onClick={() => navigate(`#/mobile/entry/${entry.id}`)}>
+            {visibleSaved.length === 0 ? <div className="im-empty">打开知识点后点亮星标，即可保存到这里。</div> : visibleSaved.slice(0, 8).map((entry) => {
+              const progress = getProgress(entry);
+              return <button type="button" key={entry.id} onClick={() => navigate(`#/mobile/entry/${entry.id}`)}>
               <i />
-              <span><strong>{entry.title}</strong><small>{kbs.find((kb) => kb.id === entry.kbId)?.name ?? entry.cat} · {(entry.tags ?? []).slice(0, 2).join(' · ') || '知识点'}</small><em><PiBookmarkSimpleLight size={13} />收藏时间：{index === 0 ? '今天 08:50' : '昨天 21:16'}</em></span>
-              {index < 2 ? <PiStarFill size={21} /> : <PiStarLight size={21} />}
-            </button>)}
+              <span><strong>{entry.title}</strong><small>{kbs.find((kb) => kb.id === entry.kbId)?.name ?? entry.cat} · {(entry.tags ?? []).slice(0, 2).join(' · ') || '知识点'}</small><em><PiBookmarkSimpleLight size={13} />{progress ? `最近阅读：${progress.progress}% · ${formatRelativeTime(progress.updatedAt)}` : '未阅读'}</em></span>
+              {progress ? <PiStarFill size={21} /> : <PiStarLight size={21} />}
+            </button>; })}
           </div>
         </section>
 
@@ -420,13 +654,80 @@ function KnowledgeBaseModule({ kbId, kbs, count }: { kbId: string; kbs: Knowledg
   );
 }
 
-function MobileEntry({ entry, onBack, saved, onToggleSaved }: { entry: Entry; onBack: () => void; saved: boolean; onToggleSaved: () => void }): JSX.Element {
+function MobileEntry({
+  entry,
+  onBack,
+  saved,
+  onToggleSaved,
+  navigation,
+  initialProgress,
+  onProgressChange,
+}: {
+  entry: Entry;
+  onBack: () => void;
+  saved: boolean;
+  onToggleSaved: () => void;
+  navigation: ReaderNavigation;
+  initialProgress: number;
+  onProgressChange: (entryId: string, progress: number) => void;
+}): JSX.Element {
   const [fontSize, setFontSize] = useState(() => Number(window.localStorage.getItem(READER_SIZE_KEY)) || 14);
   const [tocOpen, setTocOpen] = useState(false);
+  const [progress, setProgress] = useState(() => clampProgress(initialProgress));
+  const articleRef = useRef<HTMLElement>(null);
+  const rafRef = useRef<number | null>(null);
+  const progressRef = useRef(progress);
+  const tocNodes = useMemo(() => flattenReaderNodes(entry.nodes ?? []), [entry.nodes]);
+  const estimateMinutes = useMemo(() => estimateReadingMinutes(entry), [entry]);
+  const canPrevious = Boolean(navigation?.previous);
+  const canNext = Boolean(navigation?.next);
+
+  useEffect(() => { setProgress(clampProgress(initialProgress)); }, [initialProgress]);
+  useEffect(() => { progressRef.current = progress; }, [progress]);
+
+  const updateProgress = (): void => {
+    if (!articleRef.current) return;
+    const article = articleRef.current;
+    const rect = article.getBoundingClientRect();
+    const articleTop = rect.top + window.scrollY;
+    const articleHeight = Math.max(1, rect.height);
+    const viewportOffset = window.scrollY + 80; // 80 to account for page chrome
+    const raw = ((viewportOffset - articleTop) / articleHeight) * 100;
+    const next = clampProgress(raw);
+    if (next !== progressRef.current) {
+      setProgress(next);
+      onProgressChange(entry.id, next);
+    }
+  };
+
+  useEffect(() => {
+    const handleScroll = (): void => {
+      if (rafRef.current != null) return;
+      rafRef.current = window.requestAnimationFrame(() => {
+        rafRef.current = null;
+        updateProgress();
+      });
+    };
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      if (rafRef.current != null) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      window.removeEventListener('scroll', handleScroll);
+      onProgressChange(entry.id, progressRef.current);
+    };
+  }, [entry.id, onProgressChange]);
+
   const changeFontSize = (next: number): void => {
     const value = Math.min(20, Math.max(13, next));
     setFontSize(value);
     window.localStorage.setItem(READER_SIZE_KEY, String(value));
+  };
+  const goTo = (target: ReaderNavigationTarget | null): void => {
+    if (!target) { onBack(); return; }
+    navigate(`#/mobile/entry/${target.id}`);
   };
   return (
     <main className="im-reader">
@@ -436,11 +737,11 @@ function MobileEntry({ entry, onBack, saved, onToggleSaved }: { entry: Entry; on
         <button type="button" onClick={() => setTocOpen((value) => !value)}><List size={17} /><span>目录</span></button>
         <button type="button" className={saved ? 'is-active' : ''} onClick={onToggleSaved} aria-label={saved ? '取消收藏' : '收藏知识点'}><Star size={17} fill={saved ? 'currentColor' : 'none'} /></button>
       </div>
-      <div className="im-reading-progress"><span style={{ width: '58%' }} /><small>58%</small></div>
+      <div className="im-reading-progress"><span style={{ width: `${progress}%` }} /><small>{progress}%</small></div>
       <div className="im-reader-kicker">{entry.cat} · {entry.tags.slice(0, 2).join(' / ') || '知识点'}</div>
       <h1>{entry.title}</h1>
       {entry.summary ? <p className="im-lead">{entry.summary}</p> : null}
-      <div className="im-reader-meta"><span><BookOpen size={14} />知识点阅读</span><span><Clock3 size={14} />随时复习</span></div>
+      <div className="im-reader-meta"><span><BookOpen size={14} />知识点阅读</span><span><Clock3 size={14} />预计 {estimateMinutes} 分钟</span></div>
       <div className="im-reader-tools">
         <span className="im-reader-tools-label"><BookOpen size={14} />阅读设置</span>
         <span />
@@ -448,16 +749,25 @@ function MobileEntry({ entry, onBack, saved, onToggleSaved }: { entry: Entry; on
         <strong>{fontSize}px</strong>
         <button type="button" aria-label="增大字号" onClick={() => changeFontSize(fontSize + 1)}><Plus size={14} /></button>
       </div>
-      {tocOpen && <nav className="im-reader-toc">{(entry.nodes ?? []).map((node) => <a key={node.id} href={`#reader-${node.id}`}>{node.title}</a>)}</nav>}
-      <article className="im-reader-card" style={{ fontSize }}>
+      {tocOpen && <div className="im-reader-toc-backdrop" onClick={() => setTocOpen(false)}>
+        <nav className="im-reader-toc" onClick={(event) => event.stopPropagation()}>
+          <div className="im-reader-toc-title">目录</div>
+          {tocNodes.map((node) => <button type="button" key={node.id} style={{ paddingLeft: `${8 + node.depth * 12}px` }} onClick={() => {
+            const target = document.getElementById(`reader-${node.id}`);
+            target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setTocOpen(false);
+          }}>{node.title}</button>)}
+        </nav>
+      </div>}
+      <article ref={articleRef} className="im-reader-card" style={{ fontSize }}>
         {entry.intro ? renderMd(entry.intro) : null}
         {(entry.nodes ?? []).length > 0 ? (entry.nodes ?? []).map((node) => (
           <section key={node.id} id={`reader-${node.id}`}><span className="im-reader-dot" aria-hidden="true" /><h2>{node.title}</h2>{node.content ? renderMd(node.content) : null}</section>
         )) : <p>{entry.summary || '这个知识点暂无更多内容。'}</p>}
       </article>
       <footer className="im-reader-pagination">
-        <button type="button" onClick={onBack}><span>‹&nbsp; 上一篇</span><small>返回知识库目录</small></button>
-        <button type="button"><span>下一篇 &nbsp;›</span><small>继续阅读相关知识</small></button>
+        <button type="button" disabled={!canPrevious} className={canPrevious ? 'is-enabled' : 'is-disabled'} onClick={() => canPrevious ? goTo(navigation.previous) : onBack()}><span>‹&nbsp; 上一篇</span><small>{canPrevious ? navigation.previous?.title : '返回知识库目录'}</small></button>
+        <button type="button" disabled={!canNext} className={canNext ? 'is-enabled' : 'is-disabled'} onClick={() => canNext ? goTo(navigation.next) : undefined}><span>下一篇 &nbsp;›</span><small>{canNext ? navigation.next?.title : '暂无更多'}</small></button>
       </footer>
     </main>
   );
@@ -489,6 +799,65 @@ export default function MobileApp(): JSX.Element {
   const [fullEntry, setFullEntry] = useState<Entry | null>(null);
   const [savedEntries, setSavedEntries] = useState<Entry[]>(() => storedEntries(SAVED_KEY));
   const [recentEntries, setRecentEntries] = useState<Entry[]>(() => storedEntries(RECENT_KEY));
+  const [recentKbs, setRecentKbs] = useState<RecentKbVisit[]>(() => storedRecentKbs());
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => storedStringList(RECENT_SEARCHES_KEY));
+  const [readerProgress, setReaderProgress] = useState<ReaderProgressMap>(() => storedReaderProgress());
+  const [entryNavigation, setEntryNavigation] = useState<ReaderNavigation>({ previous: null, next: null });
+
+  const updateRecentKbs = (kbId: string): void => {
+    setRecentKbs((current) => {
+      const next = pushRecentKb(current, kbId);
+      storeRecentVisits(RECENT_KBS_KEY, next);
+      return next;
+    });
+  };
+
+  const addRecentSearch = (query: string): void => {
+    const normalized = query.trim();
+    if (!normalized) return;
+    setRecentSearches((current) => {
+      const next = pushRecentItem(current, normalized, RECENT_SEARCHES_LIMIT);
+      saveRecentSearches(next);
+      return next;
+    });
+  };
+
+  const deleteRecentSearch = (query: string): void => {
+    setRecentSearches((current) => {
+      const next = current.filter((item) => item !== query);
+      saveRecentSearches(next);
+      return next;
+    });
+  };
+
+  const clearRecentSearches = (): void => {
+    setRecentSearches([]);
+    try { window.localStorage.removeItem(RECENT_SEARCHES_KEY); } catch { /* no-op */ }
+  };
+
+  const refreshProgressFor = (entryId: string, percentage: number): void => {
+    const next = { ...readerProgress };
+    next[entryId] = { progress: clampProgress(percentage), updatedAt: Date.now() };
+    const ordered = Object.entries(next)
+      .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
+      .slice(0, RECENT_PROGRESS_LIMIT)
+      .map(([id, data]) => ({ id, data }));
+    const normalized: ReaderProgressMap = {};
+    for (const { id, data } of ordered) normalized[id] = data;
+    setReaderProgress(normalized);
+    saveReaderProgress(normalized);
+  };
+
+  const shuffleRecommendations = (): void => {
+    setEntries((current) => {
+      const next = [...current];
+      for (let idx = next.length - 1; idx > 0; idx -= 1) {
+        const swap = Math.floor(Math.random() * (idx + 1));
+        [next[idx], next[swap]] = [next[swap], next[idx]];
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (window.location.hash === '#/mobile' || window.location.hash === '#/mobile/') {
@@ -519,6 +888,7 @@ export default function MobileApp(): JSX.Element {
     fetchEntry(route.entryId).then((entry) => {
       if (!alive) return;
       setFullEntry(entry);
+      updateRecentKbs(entry.kbId);
       setRecentEntries((current) => {
         const next = [entry, ...current.filter((item) => item.id !== entry.id)].slice(0, 12);
         storeEntries(RECENT_KEY, next);
@@ -528,12 +898,38 @@ export default function MobileApp(): JSX.Element {
     return () => { alive = false; };
   }, [route]);
 
-  const data = { entries, kbs, categories, counts, totalEntries, savedEntries, recentEntries, loading, error };
+  useEffect(() => {
+    if (route.kind !== 'entry') {
+      setEntryNavigation({ previous: null, next: null });
+      return undefined;
+    }
+    let alive = true;
+    fetchMobileEntryNavigation(route.entryId).then((payload) => {
+      if (!alive) return;
+      setEntryNavigation(payload);
+    }).catch(() => { if (alive) setEntryNavigation({ previous: null, next: null }); });
+    return () => { alive = false; };
+  }, [route]);
+
+  useEffect(() => {
+    if (route.kind !== 'kb') return;
+    updateRecentKbs(route.kbId);
+  }, [route]);
+
+  const data = { entries, kbs, categories, counts, totalEntries, savedEntries, recentEntries, recentKbs, recentSearches, readerProgress, loading, error,
+    onTouchRecentSearch: addRecentSearch, onDeleteRecentSearch: deleteRecentSearch, onClearRecentSearches: clearRecentSearches, onShuffleRecommendations: shuffleRecommendations };
   const selectedEntry = route.kind === 'entry' ? fullEntry ?? entries.find((entry) => entry.id === route.entryId) : null;
   const activeModule: ModuleName = route.kind === 'module' ? route.module : 'library';
+  const readProgressForSelected = selectedEntry ? readerProgress[selectedEntry.id]?.progress ?? 0 : 0;
   let content: JSX.Element;
   if (route.kind === 'entry' && selectedEntry) {
-    content = <MobileEntry entry={selectedEntry} saved={savedEntries.some((entry) => entry.id === selectedEntry.id)} onToggleSaved={() => {
+    content = <MobileEntry
+      entry={selectedEntry}
+      saved={savedEntries.some((entry) => entry.id === selectedEntry.id)}
+      navigation={entryNavigation}
+      initialProgress={readProgressForSelected}
+      onProgressChange={(entryId, progress) => { refreshProgressFor(entryId, progress); }}
+      onToggleSaved={() => {
       setSavedEntries((current) => {
         const next = current.some((entry) => entry.id === selectedEntry.id) ? current.filter((entry) => entry.id !== selectedEntry.id) : [selectedEntry, ...current];
         storeEntries(SAVED_KEY, next);
@@ -544,6 +940,8 @@ export default function MobileApp(): JSX.Element {
     content = <main className="im-home"><div className="im-reader-skeleton"><span /><span /><span /><span /></div></main>;
   } else if (route.kind === 'kb') {
     content = <KnowledgeBaseModule kbId={route.kbId} kbs={kbs} count={counts[route.kbId] ?? 0} />;
+  } else if (route.kind === 'recent-libraries') {
+    content = <RecentLibrariesModule {...data} />;
   } else if (route.kind === 'module' && route.module === 'library') {
     content = <LibraryModule key="library" {...data} />;
   } else if (route.kind === 'module' && route.module === 'search') {
