@@ -5,7 +5,6 @@ import {
   listFolders,
   listKbCategories,
   listKbs,
-  warmEntriesCache,
 } from '../db.js';
 import { asyncHandler } from '../app.js';
 
@@ -16,7 +15,6 @@ export function registerBootstrapRoutes(api: Router): void {
     const kbs = await listKbs();
     const folders = await listFolders();
     const kbCategories = await listKbCategories();
-    void warmEntriesCache().catch((err) => console.warn('[api] 预热知识点详情缓存失败:', err));
 
     res.json({
       auth: authStatus(req),

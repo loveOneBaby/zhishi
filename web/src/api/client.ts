@@ -49,6 +49,7 @@ function responseBytes(res: Response): number {
 }
 
 function logApiMetric(method: string, path: string, res: Response, durationMs: number): void {
+  if (!import.meta.env.DEV) return;
   const bytes = responseBytes(res);
   const slow = durationMs >= CLIENT_SLOW_API_MS;
   const large = bytes >= CLIENT_LARGE_API_BYTES;

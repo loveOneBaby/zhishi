@@ -1,7 +1,7 @@
 import { loadEnvFile } from './env.js';
 import { createApp } from './app.js';
 import { assertAuthConfiguredForProduction } from './auth.js';
-import { initDb, listEntrySummaries, listFolders, listKbCategories, listKbs, seedBuiltins, warmEntriesCache } from './db.js';
+import { initDb, listEntrySummaries, listFolders, listKbCategories, listKbs, seedBuiltins } from './db.js';
 import { initAiJobs } from './services/ai-jobs.js';
 
 loadEnvFile();
@@ -18,7 +18,6 @@ await listEntrySummaries();
 await listFolders();
 await listKbs();
 await listKbCategories();
-void warmEntriesCache().catch((err) => console.warn('[server] 预热知识点详情缓存失败:', err));
 
 const app = createApp();
 

@@ -40,13 +40,6 @@ export async function listEntries(): Promise<Entry[]> {
   return entriesRefresh;
 }
 
-// 后台预热完整详情缓存：列表页仍返回轻量 summaries，但用户点击详情时尽量从内存命中。
-export function warmEntriesCache(): Promise<Entry[]> {
-  if (entriesCache && Date.now() - entriesCache.ts < CACHE_TTL) return Promise.resolve(entriesCache.data);
-  if (!entriesRefresh) entriesRefresh = refreshEntriesCache().finally(() => { entriesRefresh = null; });
-  return entriesRefresh;
-}
-
 function scheduleEntriesRefresh(): void {
   if (entriesRefresh) return;
   setTimeout(() => {
@@ -167,14 +160,6 @@ export async function getEntry(id: string): Promise<Entry | null> {
   if (listCached && listCache && now - listCache.ts < CACHE_TTL) {
     entryDetailCache.set(id, { data: listCached, ts: now, version: cacheVersion });
     return listCached;
-  }
-
-  if (entriesRefresh) {
-    const fresh = (await entriesRefresh).find((entry) => entry.id === id) ?? null;
-    if (fresh) {
-      entryDetailCache.set(id, { data: fresh, ts: Date.now(), version: cacheVersion });
-      return fresh;
-    }
   }
 
   const row = await db.prepare(`

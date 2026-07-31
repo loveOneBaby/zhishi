@@ -10,7 +10,6 @@ import {
   listFolders,
   listKbs,
   listKbCategories,
-  warmEntriesCache,
 } from '../db.js';
 import { teardownAiJobs, initAiJobs } from '../services/ai-jobs.js';
 import { getAiGenerationStyleConfig, setAiGenerationStyleConfig } from '../ai-style-config.js';
@@ -56,7 +55,7 @@ export function registerConfigRoutes(api: Router): void {
     }
     // 2. 清空上一份库的内存缓存（同步，紧接交换之后，避免读到残留）。
     invalidateAllCaches();
-    // 3. 中断旧库上的 AI 任务，再在新库上重建 schema / 播种 / 水合任务 / 预热缓存。
+    // 3. 中断旧库上的 AI 任务，再在新库上重建 schema / 播种 / 水合任务 / 轻量列表缓存。
     //    探活已过的新库上这些步骤罕有失败；若失败回 500（交换已发生，管理员可重试或恢复默认）。
     teardownAiJobs();
     try {
@@ -69,8 +68,6 @@ export function registerConfigRoutes(api: Router): void {
       res.status(500).json({ error: `切换后初始化失败：${e instanceof Error ? e.message : String(e)}` });
       return;
     }
-    void warmEntriesCache().catch((err) => console.warn('[api] 预热知识点详情缓存失败:', err));
-
     res.json({ ok: true, db: getDbInfo() });
   }));
 }
