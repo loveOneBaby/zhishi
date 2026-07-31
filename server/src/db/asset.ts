@@ -72,7 +72,11 @@ export async function ingestImageSrc(src: string, alt = ''): Promise<AssetMeta |
 }
 
 export async function getAsset(id: string): Promise<AssetMeta | null> {
-  const row = await db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  const row = await db.prepare(`
+    SELECT id, kind, mime, url, width, height, alt, size, createdAt
+    FROM assets
+    WHERE id = ?
+  `).get(id) as Record<string, unknown> | undefined;
   return row ? assetRowToMeta(row) : null;
 }
 

@@ -1,4 +1,4 @@
-const CACHE = 'knowledge-mobile-v1';
+const CACHE = 'knowledge-mobile-v2';
 const SHELL = ['/', '/manifest.webmanifest', '/knowledge-icon.svg'];
 
 self.addEventListener('install', (event) => {
@@ -15,10 +15,12 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
   const cacheableEntry = url.pathname.startsWith('/api/entries/');
-  if (!cacheableEntry && url.origin !== self.location.origin) return;
+  const cacheableAsset = /^\/api\/assets\/[^/]+\/raw$/.test(url.pathname);
+  if (!cacheableEntry && !cacheableAsset && url.origin !== self.location.origin) return;
   event.respondWith(fetch(event.request).then((response) => {
-    if (response.ok && (cacheableEntry || !url.pathname.startsWith('/api/'))) {
-      caches.open(CACHE).then((cache) => cache.put(event.request, response.clone()));
+    if (response.ok && (cacheableEntry || cacheableAsset || !url.pathname.startsWith('/api/'))) {
+      const cachedResponse = response.clone();
+      event.waitUntil(caches.open(CACHE).then((cache) => cache.put(event.request, cachedResponse)));
     }
     return response;
   }).catch(() => caches.match(event.request).then((response) => response ?? caches.match('/'))));

@@ -36,11 +36,6 @@ export function registerAssetRoutes(api: Router): void {
 
   // 原始二进制(站内存储的 data 资源)
   api.get('/assets/:id/raw', asyncHandler(async (req, res) => {
-    const a = await getAsset(req.params.id);
-    if (!a) return res.status(404).end();
-    if (a.kind === 'external') {
-      return res.status(404).end();
-    }
     const raw = await getAssetBytes(req.params.id);
     if (!raw) return res.status(404).end();
     // 新数据仅图片;旧库可能存有非图片,强制下载以防被当 HTML 渲染
