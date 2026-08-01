@@ -8,7 +8,7 @@ import { themeVars, THEMES } from '../themes';
 import { highlightText } from '../highlight';
 import readingBookPlant from '../assets/mobile/reading-book-plant.png';
 import { renderMd } from '../markdown';
-import { calculateReadingProgress, formatViewCount, preserveHighestReadingProgress, weeklyReading, type ReaderProgressMap } from './mobile-state';
+import { calculateReadingProgress, formatViewCount, mergeReaderProgressMaps, preserveHighestReadingProgress, weeklyReading, type ReaderProgressMap } from './mobile-state';
 
 type ModuleName = 'home' | 'library' | 'search' | 'favorites';
 type MobileRoute =
@@ -61,7 +61,6 @@ const SAVED_AT_KEY = 'ik_mobile_saved_at_v1';
 const FAVORITE_KBS_KEY = 'ik_mobile_favorite_kbs_v1';
 const RECENT_SEARCHES_LIMIT = 6;
 const RECENT_KBS_LIMIT = 12;
-const RECENT_PROGRESS_LIMIT = 20;
 
 const MODULE_PATHS: Record<string, string> = {
   home: '#/mobile/home',
@@ -352,7 +351,7 @@ function HomeModule({
           <i className="im-notebook-bluebar" />
           <strong>{featured.title}</strong>
           <small>上次阅读到：{featureKb || featured.cat}</small>
-          <span className="im-notebook-progress"><i /><em>{featuredProgress?.progress ?? 0}%</em></span>
+          <span className="im-notebook-progress"><i style={{ width: `${featuredProgress?.progress ?? 0}%` }} /><em>{featuredProgress?.progress ?? 0}%</em></span>
           <span className="im-notebook-time"><Bookmark size={13} />上次：{featuredProgress ? formatRelativeTime(featuredProgress.updatedAt) : '开始阅读'}</span>
           <img src={readingBookPlant} alt="" />
         </button>
@@ -590,7 +589,7 @@ function FavoritesModule({ kbs, categories, counts, savedEntries, savedAt, reade
             <i />
             <strong>{featured.title}</strong>
             <small>来源知识库：{kbs.find((kb) => kb.id === featured.kbId)?.name ?? featured.cat}</small>
-            <span><em /><b>{getProgress(featured)?.progress ?? 0}%</b></span>
+            <span><em style={{ width: `${getProgress(featured)?.progress ?? 0}%` }} /><b>{getProgress(featured)?.progress ?? 0}%</b></span>
             <label><PiBookmarkSimpleLight size={14} />收藏时间：{new Date(savedAt[featured.id] ?? Date.now()).toLocaleDateString()}</label>
             <PiBookmarkSimpleFill className="im-featured-bookmark" size={23} />
             <img src={readingBookPlant} alt="" />
@@ -835,16 +834,12 @@ export default function MobileApp(): JSX.Element {
 
   const refreshProgressFor = useCallback((entryId: string, percentage: number): void => {
     setReaderProgress((current) => {
-      const previous = current[entryId]?.progress ?? 0;
+      const persisted = storedReaderProgress();
+      const previous = Math.max(current[entryId]?.progress ?? 0, persisted[entryId]?.progress ?? 0);
       const progress = preserveHighestReadingProgress(previous, percentage);
-      if (current[entryId] && progress === previous) return current;
-      const next = { ...current, [entryId]: { progress, updatedAt: Date.now() } };
-      const ordered = Object.entries(next)
-        .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
-        .slice(0, RECENT_PROGRESS_LIMIT);
-      const normalized: ReaderProgressMap = Object.fromEntries(ordered);
-      saveReaderProgress(normalized);
-      return normalized;
+      const next = mergeReaderProgressMaps(persisted, current, { [entryId]: { progress, updatedAt: Date.now() } });
+      saveReaderProgress(next);
+      return next;
     });
   }, []);
 

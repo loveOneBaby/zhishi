@@ -13,6 +13,19 @@ export function preserveHighestReadingProgress(current: number, measured: number
   );
 }
 
+export function mergeReaderProgressMaps(...maps: ReaderProgressMap[]): ReaderProgressMap {
+  const merged: ReaderProgressMap = {};
+  for (const map of maps) {
+    for (const [entryId, candidate] of Object.entries(map)) {
+      const existing = merged[entryId];
+      if (!existing || candidate.progress > existing.progress || (candidate.progress === existing.progress && candidate.updatedAt > existing.updatedAt)) {
+        merged[entryId] = candidate;
+      }
+    }
+  }
+  return merged;
+}
+
 export function formatViewCount(views: number): string {
   if (views < 1000) return `${views} 次阅读`;
   const value = views < 10_000 ? (views / 1000).toFixed(1) : Math.round(views / 1000).toString();

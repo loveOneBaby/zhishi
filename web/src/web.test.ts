@@ -8,7 +8,7 @@ import { buildModel, collectVisible, buildTreeLayout } from './components/canvas
 import type { Entry, KnowledgeBase, Folder } from './types';
 import { defaultHashForDevice, detectMobileDevice, isRootHash } from './device-route';
 import { renderMd } from './markdown';
-import { calculateReadingProgress, formatViewCount, preserveHighestReadingProgress, weeklyReading } from './mobile/mobile-state';
+import { calculateReadingProgress, formatViewCount, mergeReaderProgressMaps, preserveHighestReadingProgress, weeklyReading } from './mobile/mobile-state';
 
 function entry(over: Partial<Entry>): Entry {
   return { id: 'e', cat: 'AI', kbId: 'kb1', folderId: null, title: '示例', py: '', tags: [], summary: '', intro: '', nodes: [], ...over };
@@ -143,6 +143,17 @@ test('mobile state: 已读进度只增不减，达到 100 后永久保持', () =
   assert.equal(preserveHighestReadingProgress(50, 25), 50);
   assert.equal(preserveHighestReadingProgress(75, 100), 100);
   assert.equal(preserveHighestReadingProgress(100, 0), 100);
+});
+
+test('mobile state: 多标签页记录合并时保留每篇文章的最高进度', () => {
+  assert.deepEqual(mergeReaderProgressMaps(
+    { a: { progress: 100, updatedAt: 10 }, b: { progress: 20, updatedAt: 20 } },
+    { a: { progress: 60, updatedAt: 30 }, b: { progress: 20, updatedAt: 40 }, c: { progress: 50, updatedAt: 50 } },
+  ), {
+    a: { progress: 100, updatedAt: 10 },
+    b: { progress: 20, updatedAt: 40 },
+    c: { progress: 50, updatedAt: 50 },
+  });
 });
 
 test('mobile state: 本周完成日和连续阅读由记录计算', () => {

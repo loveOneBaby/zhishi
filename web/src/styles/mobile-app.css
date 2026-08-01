@@ -1509,7 +1509,7 @@
 }
 
 .im-notebook-progress > i {
-  width: 58%;
+  width: 0;
   height: 100%;
   display: block;
   border-radius: inherit;
@@ -2318,7 +2318,7 @@
 }
 
 .im-favorite-featured > button > span > em {
-  width: 58%;
+  width: 0;
   height: 100%;
   display: block;
   border-radius: inherit;
