@@ -1,6 +1,6 @@
 import type { Router } from 'express';
 import { asyncHandler } from '../app.js';
-import { listEntrySummaries, listKbCategories, listKbs } from '../db.js';
+import { listEntrySummaries, listKbCategories, listKbs, listKbViewCounts, recordEntryView } from '../db.js';
 import { buildNeedles, matchesQuery, toSearchText } from '../pinyin-search.js';
 
 const DEFAULT_LIMIT = 24;
@@ -47,12 +47,12 @@ export function mobilePageParams(query: Record<string, unknown>): { limit: numbe
 
 export function registerMobileRoutes(api: Router): void {
   api.get('/mobile/bootstrap', asyncHandler(async (_req, res) => {
-    const [entries, kbs, kbCategories] = await Promise.all([listEntrySummaries(), listKbs(), listKbCategories()]);
+    const [entries, kbs, kbCategories, viewCounts] = await Promise.all([listEntrySummaries(), listKbs(), listKbCategories(), listKbViewCounts()]);
     const counts = entries.reduce<Record<string, number>>((result, entry) => {
       result[entry.kbId] = (result[entry.kbId] ?? 0) + 1;
       return result;
     }, {});
-    res.json({ kbs, kbCategories, counts, recommendations: entries.slice(0, 12), totalEntries: entries.length });
+    res.json({ kbs, kbCategories, counts, viewCounts, recommendations: entries.slice(0, 60), totalEntries: entries.length });
   }));
 
   api.get('/mobile/entries', asyncHandler(async (req, res) => {
@@ -97,5 +97,11 @@ export function registerMobileRoutes(api: Router): void {
     const all = await listEntrySummaries();
     const navigation = buildEntryNavigation(all, entryId);
     res.json({ previous: navigation.previous, next: navigation.next });
+  }));
+
+  api.post('/mobile/entry/:id/view', asyncHandler(async (req, res) => {
+    const views = await recordEntryView(String(req.params.id ?? '').trim());
+    if (views == null) return res.status(404).json({ error: '知识点不存在' });
+    res.json({ views });
   }));
 }

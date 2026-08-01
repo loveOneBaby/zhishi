@@ -8,6 +8,7 @@ import { buildModel, collectVisible, buildTreeLayout } from './components/canvas
 import type { Entry, KnowledgeBase, Folder } from './types';
 import { defaultHashForDevice, detectMobileDevice, isRootHash } from './device-route';
 import { renderMd } from './markdown';
+import { formatViewCount, weeklyReading } from './mobile/mobile-state';
 
 function entry(over: Partial<Entry>): Entry {
   return { id: 'e', cat: 'AI', kbId: 'kb1', folderId: null, title: '示例', py: '', tags: [], summary: '', intro: '', nodes: [], ...over };
@@ -121,4 +122,22 @@ test('canvas model: 第三级文件夹可显式展开', () => {
 
   const full = collectVisible(map, kbId, '', false, collapsed, new Set(), true);
   assert.ok(full.has('ent::deep'));
+});
+
+test('mobile state: 阅读量只展示真实计数', () => {
+  assert.equal(formatViewCount(0), '0 次阅读');
+  assert.equal(formatViewCount(999), '999 次阅读');
+  assert.equal(formatViewCount(1_250), '1.3k 阅读');
+});
+
+test('mobile state: 本周完成日和连续阅读由记录计算', () => {
+  const now = new Date(2026, 7, 5, 12); // 周三
+  const result = weeklyReading({
+    today: { progress: 30, updatedAt: new Date(2026, 7, 5, 9).getTime() },
+    yesterday: { progress: 80, updatedAt: new Date(2026, 7, 4, 20).getTime() },
+    monday: { progress: 100, updatedAt: new Date(2026, 7, 3, 8).getTime() },
+  }, now);
+  assert.deepEqual(result.days.map((day) => day.done), [true, true, true, false, false, false, false]);
+  assert.equal(result.days[2].active, true);
+  assert.equal(result.streak, 3);
 });

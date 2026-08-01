@@ -1765,7 +1765,7 @@
   background: var(--im-accent);
 }
 
-.im-module-header > button {
+.im-module-header-icon {
   position: absolute;
   top: 5px;
   right: 2px;
@@ -1960,7 +1960,8 @@
   background: rgba(255,255,255,.3);
 }
 
-.im-notebook-kb-list > button {
+.im-notebook-kb-list > button,
+.im-notebook-kb-row {
   width: 100%;
   min-height: 89px;
   display: flex;
@@ -1974,11 +1975,13 @@
   text-align: left;
 }
 
-.im-notebook-kb-list > button:last-child {
+.im-notebook-kb-list > button:last-child,
+.im-notebook-kb-row:last-child {
   border-bottom: 0;
 }
 
-.im-notebook-kb-list > button > i {
+.im-notebook-kb-list > button > i,
+.im-kb-row-main > i {
   width: 38px;
   flex: none;
   display: flex;
@@ -1986,11 +1989,15 @@
   color: #4b77e7;
 }
 
-.im-notebook-kb-list > button:nth-child(2) > i { color: #5f947b; }
-.im-notebook-kb-list > button:nth-child(3) > i { color: #8060c9; }
-.im-notebook-kb-list > button:nth-child(4) > i { color: #c57d37; }
+.im-notebook-kb-list > button:nth-child(2) > i,
+.im-notebook-kb-row:nth-child(2) .im-kb-row-main > i { color: #5f947b; }
+.im-notebook-kb-list > button:nth-child(3) > i,
+.im-notebook-kb-row:nth-child(3) .im-kb-row-main > i { color: #8060c9; }
+.im-notebook-kb-list > button:nth-child(4) > i,
+.im-notebook-kb-row:nth-child(4) .im-kb-row-main > i { color: #c57d37; }
 
-.im-notebook-kb-list > button > span {
+.im-notebook-kb-list > button > span,
+.im-kb-row-main > span {
   min-width: 0;
   flex: 1;
 }
@@ -2021,11 +2028,42 @@
 }
 
 .im-notebook-kb-list .im-row-star {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #89919c;
 }
 
+.im-notebook-kb-list .im-row-star.is-favorite {
+  color: #e3a027;
+}
+
 .im-notebook-kb-list > button > svg:last-child {
+  flex: none;
+  color: #7e8792;
+}
+
+.im-kb-row-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.im-kb-row-main > svg:last-child {
+  order: 3;
   flex: none;
   color: #7e8792;
 }

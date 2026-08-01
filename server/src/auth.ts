@@ -123,6 +123,7 @@ function isPublicRoute(req: Request): boolean {
     if (/^\/assets\/[^/]+(\/raw)?$/.test(path)) return true; // 资源元信息与原图
   }
   if (method === 'POST' && path === '/ask') return publicAskEnabled(); // AI 问答默认不公开,避免被刷额度
+  if (method === 'POST' && /^\/mobile\/entry\/[^/]+\/view$/.test(path)) return true;
   return false;
 }
 

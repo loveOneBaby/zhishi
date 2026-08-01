@@ -12,6 +12,7 @@ export * from './db/entry-version.js';
 export * from './db/import.js';
 export * from './db/ai.js';
 export * from './db/seed.js';
+export * from './db/mobile.js';
 import { initSchema } from './db/client.js';
 import { ensureEntryVersionTable } from './db/entry-version.js';
 import { ensureAiJobsTable } from './db/ai.js';

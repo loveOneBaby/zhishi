@@ -351,6 +351,11 @@ export async function initSchema(): Promise<void> {
       createdAt INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_assets_hash ON assets(hash);
+    CREATE TABLE IF NOT EXISTS entry_view_stats (
+      entryId   TEXT PRIMARY KEY,
+      views     INTEGER NOT NULL DEFAULT 0,
+      updatedAt INTEGER NOT NULL
+    );
   `);
 
   // WAL 仅本地 file: 有意义；远程 libsql 不支持 PRAGMA，忽略错误

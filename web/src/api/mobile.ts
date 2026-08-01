@@ -1,10 +1,11 @@
 import type { Entry, KbCategory, KnowledgeBase } from '../types';
-import { apiGetJson } from './client';
+import { apiGetJson, apiPostJson } from './client';
 
 export interface MobileBootstrapPayload {
   kbs: KnowledgeBase[];
   kbCategories: KbCategory[];
   counts: Record<string, number>;
+  viewCounts: Record<string, number>;
   recommendations: Entry[];
   totalEntries: number;
 }
@@ -47,4 +48,8 @@ export function searchMobileEntries(query: string, limit = 50): Promise<MobileEn
 
 export function fetchMobileEntryNavigation(entryId: string): Promise<MobileEntryNavigationPayload> {
   return apiGetJson(`/mobile/entry/${encodeURIComponent(entryId)}/navigation`);
+}
+
+export function recordMobileEntryView(entryId: string): Promise<{ views: number }> {
+  return apiPostJson(`/mobile/entry/${encodeURIComponent(entryId)}/view`, {});
 }
