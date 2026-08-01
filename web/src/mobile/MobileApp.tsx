@@ -8,7 +8,7 @@ import { themeVars, THEMES } from '../themes';
 import { highlightText } from '../highlight';
 import readingBookPlant from '../assets/mobile/reading-book-plant.png';
 import { renderMd } from '../markdown';
-import { formatViewCount, weeklyReading, type ReaderProgressMap } from './mobile-state';
+import { calculateReadingProgress, formatViewCount, weeklyReading, type ReaderProgressMap } from './mobile-state';
 
 type ModuleName = 'home' | 'library' | 'search' | 'favorites';
 type MobileRoute =
@@ -682,13 +682,7 @@ function MobileEntry({
     const article = articleRef.current;
     const scrollRoot = article.closest<HTMLElement>('.im-root');
     if (!scrollRoot) return;
-    const articleRect = article.getBoundingClientRect();
-    const rootRect = scrollRoot.getBoundingClientRect();
-    const articleTop = articleRect.top - rootRect.top + scrollRoot.scrollTop;
-    const articleHeight = Math.max(1, articleRect.height);
-    const viewportOffset = scrollRoot.scrollTop + 80; // account for the sticky reader chrome
-    const raw = ((viewportOffset - articleTop) / articleHeight) * 100;
-    const next = clampProgress(raw);
+    const next = calculateReadingProgress(scrollRoot.scrollTop, scrollRoot.scrollHeight, scrollRoot.clientHeight);
     if (next !== progressRef.current) {
       setProgress(next);
       onProgressChange(entry.id, next);

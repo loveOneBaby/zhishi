@@ -1,5 +1,11 @@
 export type ReaderProgressMap = Record<string, { progress: number; updatedAt: number }>;
 
+export function calculateReadingProgress(scrollTop: number, scrollHeight: number, clientHeight: number): number {
+  const maxScroll = Math.max(0, scrollHeight - clientHeight);
+  if (maxScroll === 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((scrollTop / maxScroll) * 100)));
+}
+
 export function formatViewCount(views: number): string {
   if (views < 1000) return `${views} 次阅读`;
   const value = views < 10_000 ? (views / 1000).toFixed(1) : Math.round(views / 1000).toString();
