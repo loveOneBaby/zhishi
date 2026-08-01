@@ -6,6 +6,13 @@ export function calculateReadingProgress(scrollTop: number, scrollHeight: number
   return Math.max(0, Math.min(100, Math.round((scrollTop / maxScroll) * 100)));
 }
 
+export function preserveHighestReadingProgress(current: number, measured: number): number {
+  return Math.max(
+    Math.max(0, Math.min(100, Math.round(current))),
+    Math.max(0, Math.min(100, Math.round(measured))),
+  );
+}
+
 export function formatViewCount(views: number): string {
   if (views < 1000) return `${views} 次阅读`;
   const value = views < 10_000 ? (views / 1000).toFixed(1) : Math.round(views / 1000).toString();

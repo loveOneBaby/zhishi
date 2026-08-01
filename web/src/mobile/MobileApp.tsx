@@ -8,7 +8,7 @@ import { themeVars, THEMES } from '../themes';
 import { highlightText } from '../highlight';
 import readingBookPlant from '../assets/mobile/reading-book-plant.png';
 import { renderMd } from '../markdown';
-import { calculateReadingProgress, formatViewCount, weeklyReading, type ReaderProgressMap } from './mobile-state';
+import { calculateReadingProgress, formatViewCount, preserveHighestReadingProgress, weeklyReading, type ReaderProgressMap } from './mobile-state';
 
 type ModuleName = 'home' | 'library' | 'search' | 'favorites';
 type MobileRoute =
@@ -674,7 +674,11 @@ function MobileEntry({
   const canPrevious = Boolean(navigation?.previous);
   const canNext = Boolean(navigation?.next);
 
-  useEffect(() => { setProgress(clampProgress(initialProgress)); }, [initialProgress]);
+  useEffect(() => {
+    const restored = clampProgress(initialProgress);
+    progressRef.current = restored;
+    setProgress(restored);
+  }, [entry.id]);
   useEffect(() => { progressRef.current = progress; }, [progress]);
 
   const updateProgress = (): void => {
@@ -682,7 +686,8 @@ function MobileEntry({
     const article = articleRef.current;
     const scrollRoot = article.closest<HTMLElement>('.im-root');
     if (!scrollRoot) return;
-    const next = calculateReadingProgress(scrollRoot.scrollTop, scrollRoot.scrollHeight, scrollRoot.clientHeight);
+    const measured = calculateReadingProgress(scrollRoot.scrollTop, scrollRoot.scrollHeight, scrollRoot.clientHeight);
+    const next = preserveHighestReadingProgress(progressRef.current, measured);
     if (next !== progressRef.current) {
       setProgress(next);
       onProgressChange(entry.id, next);
@@ -830,7 +835,10 @@ export default function MobileApp(): JSX.Element {
 
   const refreshProgressFor = useCallback((entryId: string, percentage: number): void => {
     setReaderProgress((current) => {
-      const next = { ...current, [entryId]: { progress: clampProgress(percentage), updatedAt: Date.now() } };
+      const previous = current[entryId]?.progress ?? 0;
+      const progress = preserveHighestReadingProgress(previous, percentage);
+      if (current[entryId] && progress === previous) return current;
+      const next = { ...current, [entryId]: { progress, updatedAt: Date.now() } };
       const ordered = Object.entries(next)
         .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
         .slice(0, RECENT_PROGRESS_LIMIT);

@@ -8,7 +8,7 @@ import { buildModel, collectVisible, buildTreeLayout } from './components/canvas
 import type { Entry, KnowledgeBase, Folder } from './types';
 import { defaultHashForDevice, detectMobileDevice, isRootHash } from './device-route';
 import { renderMd } from './markdown';
-import { calculateReadingProgress, formatViewCount, weeklyReading } from './mobile/mobile-state';
+import { calculateReadingProgress, formatViewCount, preserveHighestReadingProgress, weeklyReading } from './mobile/mobile-state';
 
 function entry(over: Partial<Entry>): Entry {
   return { id: 'e', cat: 'AI', kbId: 'kb1', folderId: null, title: '示例', py: '', tags: [], summary: '', intro: '', nodes: [], ...over };
@@ -130,12 +130,19 @@ test('mobile state: 阅读量只展示真实计数', () => {
   assert.equal(formatViewCount(1_250), '1.3k 阅读');
 });
 
-test('mobile state: 阅读进度顶部为 0、底部为 100，向上滚动按比例回退', () => {
+test('mobile state: 当前滚动位置可换算为页面进度', () => {
   assert.equal(calculateReadingProgress(0, 3000, 800), 0);
   assert.equal(calculateReadingProgress(1100, 3000, 800), 50);
   assert.equal(calculateReadingProgress(2200, 3000, 800), 100);
   assert.equal(calculateReadingProgress(1650, 3000, 800), 75);
   assert.equal(calculateReadingProgress(0, 600, 800), 0);
+});
+
+test('mobile state: 已读进度只增不减，达到 100 后永久保持', () => {
+  assert.equal(preserveHighestReadingProgress(0, 50), 50);
+  assert.equal(preserveHighestReadingProgress(50, 25), 50);
+  assert.equal(preserveHighestReadingProgress(75, 100), 100);
+  assert.equal(preserveHighestReadingProgress(100, 0), 100);
 });
 
 test('mobile state: 本周完成日和连续阅读由记录计算', () => {
