@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Bookmark, BookOpen, Check, ChevronRight, Clock3, List, Minus, Plus, RefreshCw, Search, Star, X } from 'lucide-react';
 import { PiBookmarkSimpleFill, PiBookmarkSimpleLight, PiBookLight, PiBookOpenLight, PiBooksLight, PiClockLight, PiCompassFill, PiDatabaseLight, PiMagnifyingGlassLight, PiNotebookLight, PiPencilSimpleLineLight, PiSquaresFourLight, PiStackLight, PiStarFill, PiStarLight, PiXLight } from 'react-icons/pi';
 import type { Entry, KbCategory, KnowledgeBase } from '../types';
@@ -680,10 +680,13 @@ function MobileEntry({
   const updateProgress = (): void => {
     if (!articleRef.current) return;
     const article = articleRef.current;
-    const rect = article.getBoundingClientRect();
-    const articleTop = rect.top + window.scrollY;
-    const articleHeight = Math.max(1, rect.height);
-    const viewportOffset = window.scrollY + 80; // 80 to account for page chrome
+    const scrollRoot = article.closest<HTMLElement>('.im-root');
+    if (!scrollRoot) return;
+    const articleRect = article.getBoundingClientRect();
+    const rootRect = scrollRoot.getBoundingClientRect();
+    const articleTop = articleRect.top - rootRect.top + scrollRoot.scrollTop;
+    const articleHeight = Math.max(1, articleRect.height);
+    const viewportOffset = scrollRoot.scrollTop + 80; // account for the sticky reader chrome
     const raw = ((viewportOffset - articleTop) / articleHeight) * 100;
     const next = clampProgress(raw);
     if (next !== progressRef.current) {
@@ -693,6 +696,8 @@ function MobileEntry({
   };
 
   useEffect(() => {
+    const scrollRoot = articleRef.current?.closest<HTMLElement>('.im-root');
+    if (!scrollRoot) return undefined;
     const handleScroll = (): void => {
       if (rafRef.current != null) return;
       rafRef.current = window.requestAnimationFrame(() => {
@@ -701,13 +706,13 @@ function MobileEntry({
       });
     };
     handleScroll();
-    window.addEventListener('scroll', handleScroll, { passive: true });
+    scrollRoot.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
       if (rafRef.current != null) {
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
-      window.removeEventListener('scroll', handleScroll);
+      scrollRoot.removeEventListener('scroll', handleScroll);
       onProgressChange(entry.id, progressRef.current);
     };
   }, [entry.id, onProgressChange]);
@@ -829,18 +834,17 @@ export default function MobileApp(): JSX.Element {
     try { window.localStorage.removeItem(RECENT_SEARCHES_KEY); } catch { /* no-op */ }
   };
 
-  const refreshProgressFor = (entryId: string, percentage: number): void => {
-    const next = { ...readerProgress };
-    next[entryId] = { progress: clampProgress(percentage), updatedAt: Date.now() };
-    const ordered = Object.entries(next)
-      .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
-      .slice(0, RECENT_PROGRESS_LIMIT)
-      .map(([id, data]) => ({ id, data }));
-    const normalized: ReaderProgressMap = {};
-    for (const { id, data } of ordered) normalized[id] = data;
-    setReaderProgress(normalized);
-    saveReaderProgress(normalized);
-  };
+  const refreshProgressFor = useCallback((entryId: string, percentage: number): void => {
+    setReaderProgress((current) => {
+      const next = { ...current, [entryId]: { progress: clampProgress(percentage), updatedAt: Date.now() } };
+      const ordered = Object.entries(next)
+        .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
+        .slice(0, RECENT_PROGRESS_LIMIT);
+      const normalized: ReaderProgressMap = Object.fromEntries(ordered);
+      saveReaderProgress(normalized);
+      return normalized;
+    });
+  }, []);
 
   const shuffleRecommendations = (): void => {
     setEntries((current) => {
@@ -958,7 +962,7 @@ export default function MobileApp(): JSX.Element {
       saved={savedEntries.some((entry) => entry.id === selectedEntry.id)}
       navigation={entryNavigation}
       initialProgress={readProgressForSelected}
-      onProgressChange={(entryId, progress) => { refreshProgressFor(entryId, progress); }}
+      onProgressChange={refreshProgressFor}
       onToggleSaved={() => {
       setSavedEntries((current) => {
         const removing = current.some((entry) => entry.id === selectedEntry.id);
