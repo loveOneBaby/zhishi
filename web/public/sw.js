@@ -1,4 +1,4 @@
-const CACHE = 'knowledge-mobile-v2';
+const CACHE = 'knowledge-mobile-v3';
 const SHELL = ['/', '/manifest.webmanifest', '/knowledge-icon.svg'];
 
 self.addEventListener('install', (event) => {

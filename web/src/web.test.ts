@@ -6,7 +6,7 @@ import { buildNeedles, matchesQuery, toSearchText } from './pinyin-search';
 import { filterEntries } from './search';
 import { buildModel, collectVisible, buildTreeLayout } from './components/canvas/model';
 import type { Entry, KnowledgeBase, Folder } from './types';
-import { defaultHashForDevice, detectMobileDevice, isRootHash } from './device-route';
+import { defaultHashForDevice, detectIPadDevice, detectMobileDevice, isMobileHash, isRootHash } from './device-route';
 import { renderMd } from './markdown';
 import { calculateReadingProgress, formatViewCount, mergeReaderProgressMaps, preserveHighestReadingProgress, weeklyReading } from './mobile/mobile-state';
 
@@ -27,6 +27,8 @@ test('device route: 根路径按设备分流，明确深链接保持不变', () 
   assert.equal(isRootHash(''), true);
   assert.equal(isRootHash('#/'), true);
   assert.equal(isRootHash('#/kb/kb1'), false);
+  assert.equal(isMobileHash('#/mobile/home'), true);
+  assert.equal(isMobileHash('#/library'), false);
   assert.equal(defaultHashForDevice(true), '#/mobile/home');
   assert.equal(defaultHashForDevice(false), '#/library');
   assert.equal(detectMobileDevice(390, false, 'Mozilla/5.0'), true);
@@ -34,6 +36,8 @@ test('device route: 根路径按设备分流，明确深链接保持不变', () 
   assert.equal(detectMobileDevice(1024, true, 'Mozilla/5.0 (iPad)'), false);
   assert.equal(detectMobileDevice(768, true, 'Mozilla/5.0 (iPad)'), false);
   assert.equal(detectMobileDevice(1024, true, 'Mozilla/5.0 (Macintosh)', 'MacIntel', 5), false);
+  assert.equal(detectIPadDevice('Mozilla/5.0 (Macintosh)', 'iPad', 5), true);
+  assert.equal(detectIPadDevice('Mozilla/5.0', 'MacIntel', 5), true);
   assert.equal(detectMobileDevice(390, true, 'Mozilla/5.0 (iPhone)', 'iPhone', 5), true);
 });
 

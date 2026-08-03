@@ -9,6 +9,16 @@ export function defaultHashForDevice(isMobile: boolean): string {
   return isMobile ? MOBILE_HOME_HASH : DESKTOP_HOME_HASH;
 }
 
+export function isMobileHash(hash: string): boolean {
+  return hash.replace(/^#\/?/, '').startsWith('mobile');
+}
+
+export function detectIPadDevice(userAgent: string, platform = '', maxTouchPoints = 0): boolean {
+  return /iPad/i.test(userAgent)
+    || (/Macintosh/i.test(userAgent) && maxTouchPoints > 1)
+    || (platform === 'MacIntel' && maxTouchPoints > 1);
+}
+
 export function detectMobileDevice(
   viewportWidth: number,
   coarsePointer: boolean,
@@ -16,9 +26,7 @@ export function detectMobileDevice(
   platform = '',
   maxTouchPoints = 0,
 ): boolean {
-  const isIPad = /iPad/i.test(userAgent)
-    || (/Macintosh/i.test(userAgent) && platform === 'MacIntel' && maxTouchPoints > 1);
-  if (isIPad) return false;
+  if (detectIPadDevice(userAgent, platform, maxTouchPoints)) return false;
   const mobileUserAgent = /Android|iPhone|iPod|Mobile|Windows Phone/i.test(userAgent);
   return viewportWidth <= 768 || mobileUserAgent || (coarsePointer && viewportWidth <= 1024);
 }

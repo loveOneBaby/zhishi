@@ -3,16 +3,23 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import DesktopQuickSearchApp from './desktop/DesktopQuickSearchApp';
 import MobileApp from './mobile/MobileApp';
-import { defaultHashForDevice, detectMobileDevice, isRootHash } from './device-route';
+import { defaultHashForDevice, detectIPadDevice, detectMobileDevice, isMobileHash, isRootHash } from './device-route';
 import './styles.css';
 
-if (isRootHash(window.location.hash)) {
+const deviceArgs = [
+  window.navigator.userAgent,
+  window.navigator.platform,
+  window.navigator.maxTouchPoints,
+] as const;
+const isIPadDevice = detectIPadDevice(...deviceArgs);
+
+if (isIPadDevice && isMobileHash(window.location.hash)) {
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${defaultHashForDevice(false)}`);
+} else if (isRootHash(window.location.hash)) {
   const isMobileDevice = detectMobileDevice(
     window.innerWidth,
     window.matchMedia('(pointer: coarse)').matches,
-    window.navigator.userAgent,
-    window.navigator.platform,
-    window.navigator.maxTouchPoints,
+    ...deviceArgs,
   );
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${defaultHashForDevice(isMobileDevice)}`);
 }

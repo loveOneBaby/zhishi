@@ -2,7 +2,7 @@
   "name": "知识检索",
   "short_name": "知识检索",
   "description": "随身知识库与知识点阅读器",
-  "start_url": "/#/mobile/home",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#f5f7fb",
   "theme_color": "#172033",
