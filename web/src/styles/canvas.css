@@ -43,6 +43,106 @@
   height: auto;
   min-height: 0;
 }
+.ik-free-layout.is-immersive {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.ik-free-layout.is-immersive > .ik-tree-panel {
+  display: none;
+}
+body.ik-immersive-reading .ik-topbar > div:first-child,
+body.ik-immersive-reading .ik-topbar > div:nth-child(2) {
+  display: none !important;
+}
+body.ik-immersive-reading .ik-topbar {
+  min-height: 48px !important;
+}
+.ik-free-workspace.is-immersive .ik-action-bar {
+  display: none;
+}
+.ik-immersive-dock {
+  flex: 0 0 auto;
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto minmax(180px, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: 0 12px 32px rgba(0,0,0,.07);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.ik-immersive-dock button {
+  min-width: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+}
+.ik-immersive-dock button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.ik-immersive-dock button:disabled {
+  cursor: default;
+  opacity: .38;
+}
+.ik-immersive-dock button > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ik-immersive-dock small {
+  color: var(--mut);
+  font-size: 10px;
+}
+.ik-immersive-dock b {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ik-immersive-next {
+  justify-content: flex-end;
+  text-align: right !important;
+}
+.ik-immersive-position {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--mut);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.ik-immersive-position i { opacity: .45; font-style: normal; }
+.ik-immersive-exit {
+  width: auto !important;
+  padding: 0 16px !important;
+  border: 1px solid color-mix(in srgb, var(--bd) 80%, transparent) !important;
+  background: color-mix(in srgb, var(--fg) 5%, var(--panel)) !important;
+  font-size: 12px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .ik-immersive-dock { grid-template-columns: 1fr auto 1fr; }
+  .ik-immersive-position { display: none; }
+  .ik-immersive-dock b { display: none; }
+  .ik-immersive-exit span { display: none; }
+  .ik-immersive-exit { width: 48px !important; padding: 0 !important; justify-content: center; }
+}
 .ik-tree-panel {
   border: 1px solid var(--bd);
   border-radius: 12px;

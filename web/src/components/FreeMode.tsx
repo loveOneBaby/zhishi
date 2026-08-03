@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ChevronDown, FileText, FolderPlus, FolderTree, History, ImagePlus, LibraryBig, Pencil, Search, Sparkles, Tags, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, FolderTree, History, ImagePlus, LibraryBig, Maximize2, Minimize2, Pencil, Search, Sparkles, Tags, Trash2, X } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase, KbCategory } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import { matchesQuery, toSearchText } from '../pinyin-search';
@@ -111,6 +111,7 @@ export default function FreeMode(props: Props): ReactNode {
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [tagDeleteTarget, setTagDeleteTarget] = useState<KbTagStat | null>(null);
   const [deletingTag, setDeletingTag] = useState<string | null>(null);
+  const [immersive, setImmersive] = useState(false);
   const dirtyRef = useRef(false);
   const pendingGuardRef = useRef<(() => void) | null>(null);
 
@@ -193,6 +194,9 @@ export default function FreeMode(props: Props): ReactNode {
     () => selectedFullEntry ?? kbEntries.find((entry) => entry.id === selectedEntryId) ?? null,
     [kbEntries, selectedEntryId, selectedFullEntry],
   );
+  const selectedEntryIndex = selectedEntryId ? kbEntries.findIndex((entry) => entry.id === selectedEntryId) : -1;
+  const previousEntry = selectedEntryIndex > 0 ? kbEntries[selectedEntryIndex - 1] : null;
+  const nextEntry = selectedEntryIndex >= 0 && selectedEntryIndex < kbEntries.length - 1 ? kbEntries[selectedEntryIndex + 1] : null;
   const currentFolderId = selectedEntry?.folderId ?? freeFolder;
   const aiTargetFolderId = currentFolderId ?? null;
   const currentFolderChain = useMemo(() => folderChain(folders, currentFolderId), [currentFolderId, folders]);
@@ -248,6 +252,23 @@ export default function FreeMode(props: Props): ReactNode {
     setActiveTag(null);
     setTagDeleteTarget(null);
   }, [freeKb]);
+
+  useEffect(() => {
+    if (!immersive) return undefined;
+    document.body.classList.add('ik-immersive-reading');
+    const exitOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setImmersive(false);
+    };
+    document.addEventListener('keydown', exitOnEscape);
+    return () => {
+      document.body.classList.remove('ik-immersive-reading');
+      document.removeEventListener('keydown', exitOnEscape);
+    };
+  }, [immersive]);
+
+  useEffect(() => {
+    if (!selectedEntry || panelMode !== 'detail') setImmersive(false);
+  }, [panelMode, selectedEntry]);
 
   useEffect(() => {
     if (activeTag && !kbTagStats.some((item) => item.tag === activeTag)) setActiveTag(null);
@@ -792,6 +813,13 @@ export default function FreeMode(props: Props): ReactNode {
     });
   }
 
+  function selectImmersiveEntry(entry: Entry | null): void {
+    if (!entry) return;
+    setSelectedEntryId(entry.id);
+    setFreeFolder(entry.folderId ?? null);
+    setPanelMode('detail');
+  }
+
   function jumpToAiFolder(folderId: string | null): void {
     guardPanel(() => {
       setFreeFolder(folderId);
@@ -1109,10 +1137,10 @@ export default function FreeMode(props: Props): ReactNode {
   const activeTagStat = activeTag ? kbTagStats.find((item) => item.tag === activeTag) ?? null : null;
 
   return (
-    <div className="ik-free-workspace">
+    <div className={`ik-free-workspace ${immersive ? 'is-immersive' : ''}`}>
       {aiCenter}
       {/* 右下角悬浮操作：默认只露一个按钮，点开才展开动作 */}
-      <div className={`ik-free-layout ${selectedEntryId || panelMode !== 'detail' ? 'is-detail-open' : ''}`}>
+      <div className={`ik-free-layout ${selectedEntryId || panelMode !== 'detail' ? 'is-detail-open' : ''} ${immersive ? 'is-immersive' : ''}`}>
         <aside className="ik-surface ik-tree-panel" style={treePanelStyle}>
           <div className="ik-tree-panel-head">
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
@@ -1321,6 +1349,9 @@ export default function FreeMode(props: Props): ReactNode {
                   loading={Boolean(selectedEntryId && loadingEntryId === selectedEntryId)}
                   actions={selectedEntry ? (
                     <>
+                      <button type="button" className="ik-segbtn ik-immersive-enter" onClick={() => setImmersive(true)}>
+                        <Maximize2 size={14} strokeWidth={2.15} />沉浸阅读
+                      </button>
                       <button type="button" className="ik-segbtn" onClick={restoreEntryVersionAction}>
                         <History size={14} strokeWidth={2.15} />版本
                       </button>
@@ -1336,6 +1367,20 @@ export default function FreeMode(props: Props): ReactNode {
               </div>
             )}
           </div>
+          {immersive && selectedEntry && (
+            <nav className="ik-immersive-dock" aria-label="沉浸阅读导航">
+              <button type="button" onClick={() => selectImmersiveEntry(previousEntry)} disabled={!previousEntry} title={previousEntry?.title ?? '已经是第一篇'}>
+                <ChevronLeft size={17} /><span><small>上一篇</small><b>{previousEntry?.title ?? '没有上一篇'}</b></span>
+              </button>
+              <div className="ik-immersive-position"><span>{selectedEntryIndex + 1}</span><i>/</i><span>{kbEntries.length}</span></div>
+              <button type="button" className="ik-immersive-exit" onClick={() => setImmersive(false)}>
+                <Minimize2 size={16} /><span>退出沉浸模式</span>
+              </button>
+              <button type="button" className="ik-immersive-next" onClick={() => selectImmersiveEntry(nextEntry)} disabled={!nextEntry} title={nextEntry?.title ?? '已经是最后一篇'}>
+                <span><small>下一篇</small><b>{nextEntry?.title ?? '没有下一篇'}</b></span><ChevronRight size={17} />
+              </button>
+            </nav>
+          )}
         </div>
       </div>
       {importLogic.importPreview && (
