@@ -1414,8 +1414,8 @@ export default function FreeMode(props: Props): ReactNode {
                   <ChevronLeft size={17} /><span><small>上一篇</small><b>{previousEntry?.title ?? '没有上一篇'}</b></span>
                 </button>
                 <div className="ik-immersive-position"><span>{selectedEntryIndex + 1}</span><i>/</i><span>{kbEntries.length}</span></div>
-                <button type="button" className="ik-immersive-exit" onClick={() => setImmersive(false)}>
-                  <Minimize2 size={16} /><span>退出沉浸模式</span>
+                <button type="button" className="ik-immersive-exit" aria-label="退出沉浸模式" title="退出沉浸模式（Esc）" onClick={() => setImmersive(false)}>
+                  <Minimize2 size={15} /><span>退出</span>
                 </button>
                 <button type="button" className="ik-immersive-next" onClick={() => selectImmersiveEntry(nextEntry)} disabled={!nextEntry} title={nextEntry?.title ?? '已经是最后一篇'}>
                   <span><small>下一篇</small><b>{nextEntry?.title ?? '没有下一篇'}</b></span><ChevronRight size={17} />
