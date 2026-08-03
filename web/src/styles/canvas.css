@@ -131,7 +131,7 @@ body.ik-immersive-reading .ik-ai-task-panel {
 .ik-immersive-drawer-trigger {
   position: fixed;
   top: 50%;
-  right: 0;
+  right: 12px;
   z-index: 35;
   width: 42px;
   height: 58px;
@@ -140,8 +140,7 @@ body.ik-immersive-reading .ik-ai-task-panel {
   justify-content: center;
   padding: 0;
   border: 1px solid var(--bd);
-  border-right: 0;
-  border-radius: 13px 0 0 13px;
+  border-radius: 13px;
   background: color-mix(in srgb, var(--panel) 94%, transparent);
   color: var(--mut);
   box-shadow: -8px 12px 28px rgba(0,0,0,.1);
