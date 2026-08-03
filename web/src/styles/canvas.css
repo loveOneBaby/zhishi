@@ -61,10 +61,11 @@ body.ik-immersive-reading .ik-ai-task-panel {
   display: none;
 }
 .ik-immersive-dock {
+  position: relative;
   flex: 0 0 auto;
   min-height: 68px;
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto auto minmax(180px, 1fr);
+  grid-template-columns: minmax(160px, 1fr) minmax(340px, 1.4fr) auto minmax(160px, 1fr);
   align-items: center;
   gap: 10px;
   margin-top: 10px;
@@ -127,6 +128,71 @@ body.ik-immersive-reading .ik-ai-task-panel {
   font-variant-numeric: tabular-nums;
 }
 .ik-immersive-position i { opacity: .45; font-style: normal; }
+.ik-immersive-switchers {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(140px, .8fr) minmax(190px, 1.2fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+.ik-immersive-switcher {
+  position: relative;
+  min-width: 0;
+}
+.ik-immersive-switch {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--bd) 72%, transparent) !important;
+  background: color-mix(in srgb, var(--fg) 3%, transparent) !important;
+}
+.ik-immersive-switch > span { flex: 1; }
+.ik-immersive-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  z-index: 40;
+  width: min(330px, 70vw);
+  max-height: min(360px, 56vh);
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 18px 48px rgba(0,0,0,.18);
+}
+.ik-immersive-menu.is-entry-menu {
+  width: min(400px, 76vw);
+}
+.ik-immersive-menu > button {
+  width: 100%;
+  height: auto;
+  min-height: 46px;
+  justify-content: flex-start;
+  padding: 7px 10px;
+}
+.ik-immersive-menu > button.is-active {
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  color: var(--accent);
+}
+.ik-immersive-menu > button > span { flex: 1; }
+.ik-immersive-menu > button > i {
+  color: var(--accent);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 720;
+}
+.ik-immersive-menu > button > em {
+  width: 23px;
+  height: 23px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--mut);
+  font-size: 10px;
+  font-style: normal;
+}
 .ik-immersive-exit {
   width: auto !important;
   padding: 0 16px !important;
@@ -138,6 +204,7 @@ body.ik-immersive-reading .ik-ai-task-panel {
 }
 @media (max-width: 760px) {
   .ik-immersive-dock { grid-template-columns: 1fr auto 1fr; }
+  .ik-immersive-switchers { position: absolute; left: 50%; bottom: 76px; width: min(94vw, 520px); transform: translateX(-50%); }
   .ik-immersive-position { display: none; }
   .ik-immersive-dock b { display: none; }
   .ik-immersive-exit span { display: none; }
