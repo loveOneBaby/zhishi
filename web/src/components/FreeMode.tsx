@@ -1389,7 +1389,7 @@ export default function FreeMode(props: Props): ReactNode {
           {immersive && selectedEntry && (
             <>
               <button type="button" className="ik-immersive-drawer-trigger" aria-label="打开沉浸选择侧栏" aria-expanded={immersiveDrawerOpen} onPointerDown={() => setImmersiveDrawerOpen(true)} onClick={() => setImmersiveDrawerOpen(true)}>
-                <PanelRightOpen size={20} />
+                <PanelRightOpen size={17} /><span>切换</span>
               </button>
               {immersiveDrawerOpen && (
                 <div className="ik-immersive-drawer-layer">

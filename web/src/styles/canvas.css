@@ -130,26 +130,28 @@ body.ik-immersive-reading .ik-ai-task-panel {
 .ik-immersive-position i { opacity: .45; font-style: normal; }
 .ik-immersive-drawer-trigger {
   position: fixed;
-  top: 50%;
-  right: 12px;
-  z-index: 35;
-  width: 42px;
-  height: 58px;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(18px, env(safe-area-inset-right));
+  z-index: 70;
+  width: auto;
+  min-width: 72px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
-  border: 1px solid var(--bd);
-  border-radius: 13px;
-  background: color-mix(in srgb, var(--panel) 94%, transparent);
-  color: var(--mut);
-  box-shadow: -8px 12px 28px rgba(0,0,0,.1);
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, var(--fg) 80%, transparent);
+  border-radius: 11px;
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: 0 10px 28px rgba(0,0,0,.2);
   cursor: pointer;
-  transform: translateY(-50%);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
-.ik-immersive-drawer-trigger:hover { color: var(--accent); }
+.ik-immersive-drawer-trigger span { font-size: 12px; font-weight: 760; }
+.ik-immersive-drawer-trigger:hover { background: color-mix(in srgb, var(--fg) 88%, var(--accent)); }
 .ik-immersive-drawer-layer { position: fixed; inset: 0; z-index: 60; }
 .ik-immersive-drawer-backdrop {
   position: absolute;
