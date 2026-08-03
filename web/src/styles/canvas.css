@@ -48,7 +48,7 @@
   gap: 0;
 }
 .ik-free-layout.is-immersive > .ik-tree-panel {
-  display: none;
+  display: none !important;
 }
 body.ik-immersive-reading .ik-topbar > div:first-child,
 body.ik-immersive-reading .ik-topbar > div:nth-child(2) {
