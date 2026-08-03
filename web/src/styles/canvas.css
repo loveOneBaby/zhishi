@@ -57,6 +57,10 @@ body.ik-immersive-reading .ik-topbar > div:nth-child(2) {
 body.ik-immersive-reading .ik-topbar {
   min-height: 48px !important;
 }
+body.ik-immersive-reading .ik-ai-task-dock,
+body.ik-immersive-reading .ik-ai-task-panel {
+  display: none !important;
+}
 .ik-free-workspace.is-immersive .ik-action-bar {
   display: none;
 }
