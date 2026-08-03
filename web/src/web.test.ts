@@ -31,7 +31,10 @@ test('device route: 根路径按设备分流，明确深链接保持不变', () 
   assert.equal(defaultHashForDevice(false), '#/library');
   assert.equal(detectMobileDevice(390, false, 'Mozilla/5.0'), true);
   assert.equal(detectMobileDevice(1440, false, 'Mozilla/5.0'), false);
-  assert.equal(detectMobileDevice(1024, true, 'Mozilla/5.0 (iPad)'), true);
+  assert.equal(detectMobileDevice(1024, true, 'Mozilla/5.0 (iPad)'), false);
+  assert.equal(detectMobileDevice(768, true, 'Mozilla/5.0 (iPad)'), false);
+  assert.equal(detectMobileDevice(1024, true, 'Mozilla/5.0 (Macintosh)', 'MacIntel', 5), false);
+  assert.equal(detectMobileDevice(390, true, 'Mozilla/5.0 (iPhone)', 'iPhone', 5), true);
 });
 
 test('outline: 增/改/移/删 树操作', () => {

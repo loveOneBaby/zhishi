@@ -11,6 +11,8 @@ if (isRootHash(window.location.hash)) {
     window.innerWidth,
     window.matchMedia('(pointer: coarse)').matches,
     window.navigator.userAgent,
+    window.navigator.platform,
+    window.navigator.maxTouchPoints,
   );
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${defaultHashForDevice(isMobileDevice)}`);
 }
