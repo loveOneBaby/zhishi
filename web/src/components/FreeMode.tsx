@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, FileText, FolderPlus, FolderTree, History, ImagePlus, LibraryBig, Maximize2, Minimize2, Pencil, Search, Sparkles, Tags, Trash2, X } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, FolderTree, History, ImagePlus, LibraryBig, Maximize2, Minimize2, PanelRightOpen, Pencil, Search, Sparkles, Tags, Trash2, X } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase, KbCategory } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import { matchesQuery, toSearchText } from '../pinyin-search';
@@ -112,8 +112,8 @@ export default function FreeMode(props: Props): ReactNode {
   const [tagDeleteTarget, setTagDeleteTarget] = useState<KbTagStat | null>(null);
   const [deletingTag, setDeletingTag] = useState<string | null>(null);
   const [immersive, setImmersive] = useState(false);
-  const [immersiveKbPickerOpen, setImmersiveKbPickerOpen] = useState(false);
-  const [immersiveEntryPickerOpen, setImmersiveEntryPickerOpen] = useState(false);
+  const [immersiveDrawerOpen, setImmersiveDrawerOpen] = useState(false);
+  const [immersiveDrawerTab, setImmersiveDrawerTab] = useState<'libraries' | 'entries'>('entries');
   const dirtyRef = useRef(false);
   const pendingGuardRef = useRef<(() => void) | null>(null);
 
@@ -270,8 +270,7 @@ export default function FreeMode(props: Props): ReactNode {
 
   useEffect(() => {
     if (immersive) return;
-    setImmersiveKbPickerOpen(false);
-    setImmersiveEntryPickerOpen(false);
+    setImmersiveDrawerOpen(false);
   }, [immersive]);
 
   useEffect(() => {
@@ -826,7 +825,7 @@ export default function FreeMode(props: Props): ReactNode {
     setSelectedEntryId(entry.id);
     setFreeFolder(entry.folderId ?? null);
     setPanelMode('detail');
-    setImmersiveEntryPickerOpen(false);
+    setImmersiveDrawerOpen(false);
   }
 
   function selectImmersiveKb(kb: KnowledgeBase): void {
@@ -837,8 +836,7 @@ export default function FreeMode(props: Props): ReactNode {
     setSelectedEntryId(first.id);
     setFreeFolder(first.folderId ?? null);
     setPanelMode('detail');
-    setImmersiveKbPickerOpen(false);
-    setImmersiveEntryPickerOpen(false);
+    setImmersiveDrawerOpen(false);
   }
 
   function jumpToAiFolder(folderId: string | null): void {
@@ -1389,43 +1387,41 @@ export default function FreeMode(props: Props): ReactNode {
             )}
           </div>
           {immersive && selectedEntry && (
-            <nav className="ik-immersive-dock" aria-label="沉浸阅读导航">
-              <button type="button" onClick={() => selectImmersiveEntry(previousEntry)} disabled={!previousEntry} title={previousEntry?.title ?? '已经是第一篇'}>
-                <ChevronLeft size={17} /><span><small>上一篇</small><b>{previousEntry?.title ?? '没有上一篇'}</b></span>
+            <>
+              <button type="button" className="ik-immersive-drawer-trigger" aria-label="打开沉浸选择侧栏" aria-expanded={immersiveDrawerOpen} onClick={() => setImmersiveDrawerOpen(true)}>
+                <PanelRightOpen size={20} />
               </button>
-              <div className="ik-immersive-switchers">
-                <div className="ik-immersive-switcher">
-                  <button type="button" className="ik-immersive-switch" aria-expanded={immersiveKbPickerOpen} onClick={() => { setImmersiveKbPickerOpen((open) => !open); setImmersiveEntryPickerOpen(false); }}>
-                    <LibraryBig size={15} /><span><small>知识库</small><b>{currentKb?.name ?? '选择知识库'}</b></span><ChevronsUpDown size={14} />
-                  </button>
-                  {immersiveKbPickerOpen && (
-                    <div className="ik-immersive-menu" role="menu" aria-label="切换知识库">
-                      {kbs.map((kb) => {
+              {immersiveDrawerOpen && (
+                <div className="ik-immersive-drawer-layer">
+                  <button type="button" className="ik-immersive-drawer-backdrop" aria-label="关闭沉浸选择侧栏" onClick={() => setImmersiveDrawerOpen(false)} />
+                  <aside className="ik-immersive-drawer" aria-label="沉浸阅读快速切换">
+                    <header><div><strong>快速切换</strong><small>{currentKb?.name}</small></div><button type="button" aria-label="关闭沉浸选择侧栏" onClick={() => setImmersiveDrawerOpen(false)}><X size={18} /></button></header>
+                    <div className="ik-immersive-drawer-tabs" role="tablist" aria-label="切换内容类型">
+                      <button type="button" role="tab" aria-selected={immersiveDrawerTab === 'libraries'} className={immersiveDrawerTab === 'libraries' ? 'is-active' : ''} onClick={() => setImmersiveDrawerTab('libraries')}><LibraryBig size={15} />知识库</button>
+                      <button type="button" role="tab" aria-selected={immersiveDrawerTab === 'entries'} className={immersiveDrawerTab === 'entries' ? 'is-active' : ''} onClick={() => setImmersiveDrawerTab('entries')}><BookOpen size={15} />知识点</button>
+                    </div>
+                    <div className="ik-immersive-drawer-list">
+                      {immersiveDrawerTab === 'libraries' ? kbs.map((kb) => {
                         const count = entriesOfKb(kb.id).length;
-                        return <button type="button" role="menuitem" className={kb.id === freeKb ? 'is-active' : ''} disabled={count === 0} onClick={() => selectImmersiveKb(kb)} key={kb.id}><span><b>{kb.name}</b><small>{count} 个知识点</small></span>{kb.id === freeKb && <i>当前</i>}</button>;
-                      })}
+                        return <button type="button" className={kb.id === freeKb ? 'is-active' : ''} disabled={count === 0} onClick={() => selectImmersiveKb(kb)} key={kb.id}><LibraryBig size={17} /><span><b>{kb.name}</b><small>{count} 个知识点</small></span>{kb.id === freeKb && <i>当前</i>}<ChevronRight size={15} /></button>;
+                      }) : kbEntries.map((entry, index) => <button type="button" className={entry.id === selectedEntry.id ? 'is-active' : ''} onClick={() => selectImmersiveEntry(entry)} key={entry.id}><em>{index + 1}</em><span><b>{entry.title}</b><small>{entry.tags.slice(0, 2).join(' · ') || '知识点'}</small></span>{entry.id === selectedEntry.id && <i>当前</i>}<ChevronRight size={15} /></button>)}
                     </div>
-                  )}
+                  </aside>
                 </div>
-                <div className="ik-immersive-switcher">
-                  <button type="button" className="ik-immersive-switch" aria-expanded={immersiveEntryPickerOpen} onClick={() => { setImmersiveEntryPickerOpen((open) => !open); setImmersiveKbPickerOpen(false); }}>
-                    <BookOpen size={15} /><span><small>知识点</small><b>{selectedEntry.title}</b></span><ChevronsUpDown size={14} />
-                  </button>
-                  {immersiveEntryPickerOpen && (
-                    <div className="ik-immersive-menu is-entry-menu" role="menu" aria-label="切换知识点">
-                      {kbEntries.map((entry, index) => <button type="button" role="menuitem" className={entry.id === selectedEntry.id ? 'is-active' : ''} onClick={() => selectImmersiveEntry(entry)} key={entry.id}><em>{index + 1}</em><span><b>{entry.title}</b><small>{entry.tags.slice(0, 2).join(' · ') || '知识点'}</small></span></button>)}
-                    </div>
-                  )}
-                </div>
+              )}
+              <nav className="ik-immersive-dock" aria-label="沉浸阅读导航">
+                <button type="button" onClick={() => selectImmersiveEntry(previousEntry)} disabled={!previousEntry} title={previousEntry?.title ?? '已经是第一篇'}>
+                  <ChevronLeft size={17} /><span><small>上一篇</small><b>{previousEntry?.title ?? '没有上一篇'}</b></span>
+                </button>
                 <div className="ik-immersive-position"><span>{selectedEntryIndex + 1}</span><i>/</i><span>{kbEntries.length}</span></div>
-              </div>
-              <button type="button" className="ik-immersive-exit" onClick={() => setImmersive(false)}>
-                <Minimize2 size={16} /><span>退出沉浸模式</span>
-              </button>
-              <button type="button" className="ik-immersive-next" onClick={() => selectImmersiveEntry(nextEntry)} disabled={!nextEntry} title={nextEntry?.title ?? '已经是最后一篇'}>
-                <span><small>下一篇</small><b>{nextEntry?.title ?? '没有下一篇'}</b></span><ChevronRight size={17} />
-              </button>
-            </nav>
+                <button type="button" className="ik-immersive-exit" onClick={() => setImmersive(false)}>
+                  <Minimize2 size={16} /><span>退出沉浸模式</span>
+                </button>
+                <button type="button" className="ik-immersive-next" onClick={() => selectImmersiveEntry(nextEntry)} disabled={!nextEntry} title={nextEntry?.title ?? '已经是最后一篇'}>
+                  <span><small>下一篇</small><b>{nextEntry?.title ?? '没有下一篇'}</b></span><ChevronRight size={17} />
+                </button>
+              </nav>
+            </>
           )}
         </div>
       </div>
