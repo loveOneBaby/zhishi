@@ -150,6 +150,8 @@
   .ik-search-layout:not(.is-detail-open) > .ik-mobile-detail-wrap { display: none; }
   .ik-mobile-detail-wrap { display: flex; flex-direction: column; gap: 8px; }
   .ik-mobile-back {
+    display: inline-flex;
+    align-items: center;
     align-self: flex-start;
     min-height: 40px;
     padding: 0 4px;
