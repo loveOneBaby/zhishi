@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, FolderTree, History, ImagePlus, LibraryBig, Maximize2, Minimize2, PanelRightOpen, Pencil, Search, Sparkles, Tags, Trash2, X } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, FolderTree, History, ImagePlus, LibraryBig, Maximize2, Minimize2, PanelRight, Pencil, Search, Sparkles, Tags, Trash2, X } from 'lucide-react';
 import type { Entry, EntryInput, Folder, KnowledgeBase, KbCategory } from '../types';
 import { folderChain, folderPathName, folderSubtreeIds } from '../tree';
 import { matchesQuery, toSearchText } from '../pinyin-search';
@@ -1389,13 +1389,13 @@ export default function FreeMode(props: Props): ReactNode {
           {immersive && selectedEntry && (
             <>
               <button type="button" className={`ik-immersive-drawer-trigger ${immersiveDrawerOpen ? 'is-open' : ''}`} aria-label={immersiveDrawerOpen ? '收起沉浸选择侧栏' : '打开沉浸选择侧栏'} aria-expanded={immersiveDrawerOpen} onClick={() => setImmersiveDrawerOpen((open) => !open)}>
-                <PanelRightOpen size={17} /><span>切换</span>
+                <PanelRight size={18} strokeWidth={1.8} />
               </button>
               {immersiveDrawerOpen && (
                 <div className="ik-immersive-drawer-layer">
                   <button type="button" className="ik-immersive-drawer-backdrop" aria-label="关闭沉浸选择侧栏" onClick={() => setImmersiveDrawerOpen(false)} />
                   <aside className="ik-immersive-drawer" aria-label="沉浸阅读快速切换">
-                    <header><div><strong>快速切换</strong><small>{currentKb?.name}</small></div><button type="button" aria-label="关闭沉浸选择侧栏" onClick={() => setImmersiveDrawerOpen(false)}><X size={18} /></button></header>
+                    <header><button type="button" aria-label="收起沉浸选择侧栏" title="收起侧栏" onClick={() => setImmersiveDrawerOpen(false)}><PanelRight size={18} strokeWidth={1.8} /></button><div><strong>快速切换</strong><small>{currentKb?.name}</small></div></header>
                     <div className="ik-immersive-drawer-tabs" role="tablist" aria-label="切换内容类型">
                       <button type="button" role="tab" aria-selected={immersiveDrawerTab === 'libraries'} className={immersiveDrawerTab === 'libraries' ? 'is-active' : ''} onClick={() => setImmersiveDrawerTab('libraries')}><LibraryBig size={15} />知识库</button>
                       <button type="button" role="tab" aria-selected={immersiveDrawerTab === 'entries'} className={immersiveDrawerTab === 'entries' ? 'is-active' : ''} onClick={() => setImmersiveDrawerTab('entries')}><BookOpen size={15} />知识点</button>
@@ -1415,7 +1415,7 @@ export default function FreeMode(props: Props): ReactNode {
                 </button>
                 <div className="ik-immersive-position"><span>{selectedEntryIndex + 1}</span><i>/</i><span>{kbEntries.length}</span></div>
                 <button type="button" className="ik-immersive-exit" aria-label="退出沉浸模式" title="退出沉浸模式（Esc）" onClick={() => setImmersive(false)}>
-                  <Minimize2 size={15} /><span>退出</span>
+                  <Minimize2 size={16} />
                 </button>
                 <button type="button" className="ik-immersive-next" onClick={() => selectImmersiveEntry(nextEntry)} disabled={!nextEntry} title={nextEntry?.title ?? '已经是最后一篇'}>
                   <span><small>下一篇</small><b>{nextEntry?.title ?? '没有下一篇'}</b></span><ChevronRight size={17} />
